@@ -1,0 +1,22 @@
+# Build output
+/build/dist/
+/build/*.exe
+/build/*.zip
+
+# Go
+*.test
+*.out
+/vendor/
+
+# Local IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and local state
+*.log
+state.json
+session.json

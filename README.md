@@ -1,0 +1,102 @@
+# TaskOverlay
+
+Portable Windows 10/11 desktop overlay for editable tasks.
+
+The app is intentionally local-only:
+- no installer required;
+- no server;
+- no internet dependency;
+- state is stored in `%APPDATA%\TaskOverlay\state.json`;
+- logs are stored in `%APPDATA%\TaskOverlay\logs`.
+
+## Current behavior preserved from v13
+
+- editable task title;
+- task description;
+- subtasks;
+- done status;
+- completed section;
+- priority;
+- in-work marker;
+- due time / blink notification;
+- local JSON state;
+- diagnostics export;
+- topmost overlay;
+- resize;
+- visual settings.
+
+## Repository layout
+
+```text
+TaskOverlay/
+  cmd/taskoverlay/       Windows app source
+  assets/                Icon and static assets
+  build/                 Local build scripts and generated artifacts
+  docs/                  Architecture notes
+  legacy/                Original v13 single-file source for comparison
+  .github/workflows/     GitHub Actions build workflow
+```
+
+## Build locally on Windows
+
+Requirements:
+- Go 1.23 or newer;
+- Windows 10/11.
+
+Run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build\build_windows.ps1
+```
+
+Output:
+
+```text
+build\dist\TaskOverlay.exe
+build\dist\TaskOverlay_portable.zip
+```
+
+## Cross-build from Linux/macOS
+
+```bash
+GOOS=windows GOARCH=amd64 go build -ldflags="-H windowsgui" -o build/TaskOverlay.exe ./cmd/taskoverlay
+```
+
+## Release policy
+
+Use semantic tags:
+
+```text
+v13.1.0
+v14.0.0
+```
+
+Recommended release artifact:
+
+```text
+TaskOverlay_portable.zip
+```
+
+The portable ZIP should contain:
+
+```text
+TaskOverlay.exe
+README.txt
+CHANGELOG.txt
+```
+
+## State compatibility
+
+The refactor does not change the state path:
+
+```text
+%APPDATA%\TaskOverlay\state.json
+```
+
+The original v13 source is preserved in:
+
+```text
+legacy/main_v13.go
+```
+
+This allows behavior comparison during later changes.
