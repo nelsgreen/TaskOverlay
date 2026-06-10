@@ -1,0 +1,33 @@
+name: Build Windows WPF v2 prototype
+
+on:
+  push:
+    paths:
+      - "v2/**"
+      - "docs/V2_ARCHITECTURE.md"
+      - ".github/workflows/build-v2.yml"
+  pull_request:
+    paths:
+      - "v2/**"
+      - "docs/V2_ARCHITECTURE.md"
+      - ".github/workflows/build-v2.yml"
+  workflow_dispatch:
+
+jobs:
+  build-v2:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore v2/TaskOverlay.sln --configfile v2/NuGet.Config
+
+      - name: Build
+        run: dotnet build v2/TaskOverlay.sln --configuration Release --no-restore

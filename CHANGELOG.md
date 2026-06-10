@@ -1,5 +1,22 @@
 # Changelog
 
+## v2 WPF prototype
+
+### Added
+
+- Added an isolated Windows-only .NET 8 WPF prototype under `v2/`.
+- Added a transparent passive overlay with three static tasks and hover-active
+  background behavior.
+- Added a 500 ms return to passive mode.
+- Added a tray icon with Show overlay, Hide overlay, Settings, and Exit commands.
+- Added a separate settings window and Per-Monitor V2 DPI manifest.
+- Added separate v2 architecture documentation and a path-scoped Windows CI
+  workflow.
+
+### Not changed
+
+- The Go v1 application and its build workflow remain untouched.
+
 ## v13-refactor
 
 Architecture-only refactor.

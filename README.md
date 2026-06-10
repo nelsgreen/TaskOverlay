@@ -2,6 +2,22 @@
 
 Portable Windows 10/11 desktop overlay for editable tasks.
 
+## Windows WPF v2 prototype
+
+A separate Windows-only WPF prototype lives in `v2/`. It validates transparent
+overlay rendering, hover activation, tray lifecycle, a separate settings window,
+and practical DPI-aware monitor placement without replacing the Go v1 app.
+
+Build and run:
+
+```powershell
+dotnet restore .\v2\TaskOverlay.sln --configfile .\v2\NuGet.Config
+dotnet build .\v2\TaskOverlay.sln --configuration Release --no-restore
+dotnet run --project .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj
+```
+
+See `docs/V2_ARCHITECTURE.md` for scope and limitations.
+
 The app is intentionally local-only:
 - no installer required;
 - no server;
