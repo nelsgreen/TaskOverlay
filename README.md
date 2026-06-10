@@ -9,7 +9,29 @@ The app is intentionally local-only:
 - state is stored in `%APPDATA%\TaskOverlay\state.json`;
 - logs are stored in `%APPDATA%\TaskOverlay\logs`.
 
-## Current behavior preserved from v13
+## Quest-tracker overlay
+
+TaskOverlay starts in passive mode:
+
+- only non-completed task text and simple markers are visible;
+- the window background, borders, title, and controls are hidden;
+- completed tasks are never shown.
+
+Move the mouse into the overlay area to enter active mode. The normal background,
+editing controls, settings access, task details, and task actions appear. After the
+mouse leaves, TaskOverlay returns to passive mode after three seconds unless an edit
+is active.
+
+Passive marker styles are available in settings:
+
+- dot (default);
+- dash;
+- arrow;
+- checkbox.
+
+Completed tasks can be shown or hidden in active mode. They are shown by default.
+
+## Existing behavior preserved
 
 - editable task title;
 - task description;
@@ -87,7 +109,7 @@ CHANGELOG.txt
 
 ## State compatibility
 
-The refactor does not change the state path:
+The state path remains:
 
 ```text
 %APPDATA%\TaskOverlay\state.json
@@ -100,3 +122,7 @@ legacy/main_v13.go
 ```
 
 This allows behavior comparison during later changes.
+
+Version 14 adds optional settings for the passive marker and completed-task
+visibility. Existing version 13 state files are migrated in place without changing
+task data.

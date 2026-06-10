@@ -5,24 +5,34 @@ package main
 import (
 	"runtime"
 	"syscall"
+	"time"
 	"unsafe"
 )
+
+var passiveColorKey = rgb(1, 2, 3)
+
+func (a *App) isActiveMode() bool {
+	return a != nil && (a.overlayActive || a.editActive)
+}
 
 func applyAlpha() {
 	if app == nil || app.hwnd == 0 {
 		return
 	}
-	alpha := app.state.Settings.BgAlpha
-	if alpha == 0 {
-		alpha = app.state.Settings.Alpha
-	}
-	if app.windowActive || app.editActive {
-		alpha = 255
+	alpha := app.state.Settings.TextAlpha
+	if app.isActiveMode() {
+		alpha = app.state.Settings.BgAlpha
+		if alpha == 0 {
+			alpha = app.state.Settings.Alpha
+		}
+		if app.windowActive || app.editActive {
+			alpha = 255
+		}
 	}
 	if alpha < 35 {
 		alpha = 35
 	}
-	procSetLayeredWindowAttributes.Call(uintptr(app.hwnd), 0, uintptr(alpha), LWA_ALPHA)
+	procSetLayeredWindowAttributes.Call(uintptr(app.hwnd), uintptr(passiveColorKey), uintptr(alpha), LWA_COLORKEY|LWA_ALPHA)
 }
 
 func applyTopMost() {
@@ -37,14 +47,43 @@ func (a *App) effectiveTextColor() uint32 {
 	if a == nil {
 		return rgb(245, 245, 245)
 	}
-	if a.windowActive || a.editActive {
-		return a.state.Settings.TextColor
+	return a.state.Settings.TextColor
+}
+
+func (a *App) updateHoverState() {
+	if a == nil || a.hwnd == 0 || a.sizing {
+		return
 	}
-	alpha := a.state.Settings.TextAlpha
-	if alpha == 0 {
-		alpha = 255
+	var cursor POINT
+	var window RECT
+	okCursor, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
+	okWindow, _, _ := procGetWindowRect.Call(uintptr(a.hwnd), uintptr(unsafe.Pointer(&window)))
+	if okCursor == 0 || okWindow == 0 {
+		return
 	}
-	return blendColor(a.state.Settings.BgColor, a.state.Settings.TextColor, alpha)
+	inside := cursor.X >= window.Left && cursor.X < window.Right && cursor.Y >= window.Top && cursor.Y < window.Bottom
+	if inside {
+		procKillTimer.Call(uintptr(a.hwnd), TIMER_PASSIVE)
+		if !a.mouseInside || !a.overlayActive {
+			a.mouseInside = true
+			a.overlayActive = true
+			applyAlpha()
+			invalidate()
+		}
+		return
+	}
+	if !a.mouseInside {
+		return
+	}
+	a.mouseInside = false
+	a.schedulePassiveMode()
+}
+
+func (a *App) schedulePassiveMode() {
+	if a == nil || a.hwnd == 0 || a.mouseInside || a.editActive || !a.overlayActive {
+		return
+	}
+	procSetTimer.Call(uintptr(a.hwnd), TIMER_PASSIVE, uintptr((3*time.Second)/time.Millisecond), 0)
 }
 
 func blendColor(bg, fg uint32, alpha byte) uint32 {

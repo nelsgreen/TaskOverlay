@@ -13,9 +13,15 @@ func (a *App) paint() {
 	var rc RECT
 	procGetClientRect.Call(uintptr(a.hwnd), uintptr(unsafe.Pointer(&rc)))
 
-	fillRect(HDC(hdc), rc, a.state.Settings.BgColor)
 	a.actions = nil
+	if !a.isActiveMode() {
+		fillRect(HDC(hdc), rc, passiveColorKey)
+		a.drawPassiveTasks(HDC(hdc), rc)
+		procEndPaint.Call(uintptr(a.hwnd), uintptr(unsafe.Pointer(&ps)))
+		return
+	}
 
+	fillRect(HDC(hdc), rc, a.state.Settings.BgColor)
 	a.drawHeader(HDC(hdc), rc)
 	top := a.scale(38)
 	if a.settingsOpen {
@@ -61,7 +67,7 @@ func (a *App) drawHeader(hdc HDC, rc RECT) {
 func (a *App) drawSettings(hdc HDC, rc RECT, top int32) int32 {
 	s := &a.state.Settings
 	tc := a.effectiveTextColor()
-	panelH := a.scale(245)
+	panelH := a.scale(301)
 	if a.dropdown == "bg" {
 		panelH += a.scale(int32(len(bgOptions())) * 24)
 	}
@@ -91,6 +97,21 @@ func (a *App) drawSettings(hdc HDC, rc RECT, top int32) int32 {
 	a.settingsLineSafe(hdc, y, "Шрифт", []string{"-", strconv.Itoa(int(s.FontSize)), "+", "B", "тень", "объем"}, []string{"font_minus", "noop", "font_plus", "toggle_bold", "toggle_shadow", "toggle_outline"})
 	y += a.scale(26)
 	a.settingsLineSafe(hdc, y, "Выполненные", []string{"развернуть", "стиль", "рамка"}, []string{"toggle_completed", "toggle_done_style", "toggle_border"})
+	y += a.scale(26)
+	markerLabels := []string{"точка", "тире", "стрелка", "чекбокс"}
+	markerStyles := []string{"dot", "dash", "arrow", "checkbox"}
+	for i, style := range markerStyles {
+		if s.PassiveMarkerStyle == style {
+			markerLabels[i] = "[" + markerLabels[i] + "]"
+		}
+	}
+	a.settingsLineSafe(hdc, y, "Пассивный маркер", markerLabels, []string{"marker_dot", "marker_dash", "marker_arrow", "marker_checkbox"})
+	y += a.scale(26)
+	completedLabel := "скрыты"
+	if s.ShowCompletedActive {
+		completedLabel = "показаны"
+	}
+	a.settingsLineSafe(hdc, y, "Активный режим", []string{"выполненные: " + completedLabel}, []string{"toggle_show_completed_active"})
 	y += a.scale(26)
 	a.settingsLineSafe(hdc, y, "Экспорт", []string{"сегодня", "7 дней", "30 дней", "все"}, []string{"export_1", "export_7", "export_30", "export_all"})
 	y += a.scale(26)
@@ -242,7 +263,7 @@ func (a *App) drawTasks(hdc HDC, rc RECT, top int32) {
 			txt, kind string
 			w         int32
 		}{
-			{"+", "add_child", 22},
+			{"↳", "add_child", 22},
 			{"i", "details", 22},
 			{"⏰", "edit_due", 34},
 			{"▶", "inwork", 24},
@@ -288,7 +309,7 @@ func (a *App) drawTasks(hdc HDC, rc RECT, top int32) {
 	}
 
 	doneTasks := a.visibleTasks(true)
-	if len(doneTasks) > 0 {
+	if s.ShowCompletedActive && len(doneTasks) > 0 {
 		headerH := a.scale(28)
 		if y+headerH >= top && y <= rc.Bottom-a.scale(32) {
 			head := RECT{Left: a.scale(8), Top: y, Right: rc.Right - a.scale(8), Bottom: y + headerH}
@@ -310,6 +331,60 @@ func (a *App) drawTasks(hdc HDC, rc RECT, top int32) {
 				y = drawRow(task, y)
 			}
 		}
+	}
+}
+
+func (a *App) drawPassiveTasks(hdc HDC, rc RECT) {
+	s := a.state.Settings
+	tc := a.effectiveTextColor()
+	top := a.scale(8)
+	y := top - a.scroll
+	rowH := a.scale(max(28, s.FontSize+10))
+	gap := a.scale(4)
+	for _, task := range a.visibleTasks(false) {
+		if y+rowH < top {
+			y += rowH + gap
+			continue
+		}
+		if y > rc.Bottom-a.scale(8) {
+			break
+		}
+		indent := int32(0)
+		if task.ParentID != 0 {
+			indent = a.scale(24)
+		}
+		color := tc
+		if task.Blink && !a.blinkOn {
+			color = s.BorderColor
+		}
+		markerRect := RECT{
+			Left:   a.scale(8) + indent,
+			Top:    y,
+			Right:  a.scale(30) + indent,
+			Bottom: y + rowH,
+		}
+		textRect := RECT{
+			Left:   markerRect.Right,
+			Top:    y,
+			Right:  rc.Right - a.scale(8),
+			Bottom: y + rowH,
+		}
+		drawText(hdc, passiveMarker(s.PassiveMarkerStyle), markerRect, color, a.font(s.FontSize), s.Bold || task.InWork, s.Shadow, s.Outline, DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX)
+		drawText(hdc, task.Text, textRect, color, a.font(s.FontSize), s.Bold || task.InWork, s.Shadow, s.Outline, DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX)
+		y += rowH + gap
+	}
+}
+
+func passiveMarker(style string) string {
+	switch style {
+	case "dash":
+		return "-"
+	case "arrow":
+		return "›"
+	case "checkbox":
+		return "☐"
+	default:
+		return "•"
 	}
 }
 

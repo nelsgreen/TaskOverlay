@@ -66,6 +66,17 @@ func wndProc(hwnd HWND, msg uint32, wParam, lParam uintptr) (ret uintptr) {
 			logf("save timer begin reason=%s", app.lastSaveReason)
 			saveState(app.state)
 			logf("save timer end reason=%s", app.lastSaveReason)
+		} else if wParam == TIMER_HOVER_POLL {
+			app.updateHoverState()
+		} else if wParam == TIMER_PASSIVE {
+			procKillTimer.Call(uintptr(hwnd), TIMER_PASSIVE)
+			if !app.mouseInside && !app.editActive {
+				app.overlayActive = false
+				app.settingsOpen = false
+				app.dropdown = ""
+				applyAlpha()
+				invalidate()
+			}
 		}
 		return 0
 	case WM_COMMAND:

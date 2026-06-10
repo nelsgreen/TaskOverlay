@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	AppVersion    = "13.0.0"
-	SchemaVersion = 13
+	AppVersion    = "14.0.0"
+	SchemaVersion = 14
 	BaseW         = int32(620)
 	BaseH         = int32(520)
 )
@@ -96,7 +96,7 @@ func run() {
 		uintptr(WS_EX_LAYERED|WS_EX_TOOLWINDOW|WS_EX_TOPMOST),
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(utf16Ptr("TaskOverlay"))),
-		uintptr(WS_POPUP|WS_THICKFRAME|WS_VISIBLE|WS_CLIPCHILDREN),
+		uintptr(WS_POPUP|WS_VISIBLE|WS_CLIPCHILDREN),
 		uintptr(s.X), uintptr(s.Y), uintptr(s.W), uintptr(s.H),
 		0, 0, hInst, 0,
 	)
@@ -112,6 +112,7 @@ func run() {
 	procShowWindow.Call(hwnd, 1)
 	procUpdateWindow.Call(hwnd)
 	procSetTimer.Call(hwnd, TIMER_BLINK, 500, 0)
+	procSetTimer.Call(hwnd, TIMER_HOVER_POLL, 100, 0)
 
 	var msg MSG
 	for {

@@ -23,24 +23,26 @@ type Task struct {
 }
 
 type Settings struct {
-	X                 int32  `json:"x"`
-	Y                 int32  `json:"y"`
-	W                 int32  `json:"w"`
-	H                 int32  `json:"h"`
-	BgColor           uint32 `json:"bg_color"`
-	TextColor         uint32 `json:"text_color"`
-	BorderColor       uint32 `json:"border_color"`
-	Alpha             byte   `json:"alpha"`
-	BgAlpha           byte   `json:"bg_alpha"`
-	TextAlpha         byte   `json:"text_alpha"`
-	FontSize          int32  `json:"font_size"`
-	Bold              bool   `json:"bold"`
-	Shadow            bool   `json:"shadow"`
-	Outline           bool   `json:"outline"`
-	ShowBorders       bool   `json:"show_borders"`
-	DoneStyle         int    `json:"done_style"`
-	CollapseDone      bool   `json:"collapse_done"`
-	CompletedExpanded bool   `json:"completed_expanded"`
+	X                   int32  `json:"x"`
+	Y                   int32  `json:"y"`
+	W                   int32  `json:"w"`
+	H                   int32  `json:"h"`
+	BgColor             uint32 `json:"bg_color"`
+	TextColor           uint32 `json:"text_color"`
+	BorderColor         uint32 `json:"border_color"`
+	Alpha               byte   `json:"alpha"`
+	BgAlpha             byte   `json:"bg_alpha"`
+	TextAlpha           byte   `json:"text_alpha"`
+	FontSize            int32  `json:"font_size"`
+	Bold                bool   `json:"bold"`
+	Shadow              bool   `json:"shadow"`
+	Outline             bool   `json:"outline"`
+	ShowBorders         bool   `json:"show_borders"`
+	DoneStyle           int    `json:"done_style"`
+	CollapseDone        bool   `json:"collapse_done"`
+	CompletedExpanded   bool   `json:"completed_expanded"`
+	PassiveMarkerStyle  string `json:"passive_marker_style"`
+	ShowCompletedActive bool   `json:"show_completed_active"`
 }
 
 type State struct {
@@ -76,6 +78,8 @@ type App struct {
 	detailsTaskID       int64
 	dropdown            string
 	windowActive        bool
+	overlayActive       bool
+	mouseInside         bool
 	saveScheduled       bool
 	lastSaveReason      string
 	sizing              bool

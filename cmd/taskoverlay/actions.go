@@ -14,6 +14,7 @@ import (
 
 func (a *App) handleClick(x, y int32) {
 	a.windowActive = true
+	a.overlayActive = true
 	applyAlpha()
 	a.finishEdit(true)
 	for i := len(a.actions) - 1; i >= 0; i-- {
@@ -152,6 +153,16 @@ func (a *App) perform(act Action) {
 		a.state.Settings.CompletedExpanded = !a.state.Settings.CompletedExpanded
 	case "toggle_done_style":
 		a.state.Settings.DoneStyle = (a.state.Settings.DoneStyle + 1) % 2
+	case "marker_dot":
+		a.state.Settings.PassiveMarkerStyle = "dot"
+	case "marker_dash":
+		a.state.Settings.PassiveMarkerStyle = "dash"
+	case "marker_arrow":
+		a.state.Settings.PassiveMarkerStyle = "arrow"
+	case "marker_checkbox":
+		a.state.Settings.PassiveMarkerStyle = "checkbox"
+	case "toggle_show_completed_active":
+		a.state.Settings.ShowCompletedActive = !a.state.Settings.ShowCompletedActive
 	case "export_1":
 		a.export(1)
 	case "export_7":
@@ -287,6 +298,8 @@ func (a *App) startEdit(taskID int64, kind string, r RECT) {
 	a.editReplaceOnType = true
 	a.editCreatedNew = false
 	a.windowActive = true
+	a.overlayActive = true
+	procKillTimer.Call(uintptr(a.hwnd), TIMER_PASSIVE)
 	applyAlpha()
 	logf("edit begin task=%d field=%s original_len=%d replace_on_type=%v", taskID, kind, len([]rune(text)), a.editReplaceOnType)
 	procSetFocus.Call(uintptr(a.hwnd))
@@ -329,6 +342,7 @@ func (a *App) finishEdit(save bool) {
 			a.scheduleSave("edit_cancel_new")
 		}
 		applyAlpha()
+		a.schedulePassiveMode()
 		logf("edit cancel task=%d kind=%s removed_draft=%v", taskID, kind, createdNew)
 		invalidate()
 		return
@@ -337,6 +351,7 @@ func (a *App) finishEdit(save bool) {
 	if createdNew && trimmed == "" {
 		a.deleteTask(taskID)
 		a.scheduleSave("edit_empty_new")
+		a.schedulePassiveMode()
 		invalidate()
 		return
 	}
@@ -362,6 +377,7 @@ func (a *App) finishEdit(save bool) {
 	})
 	a.scheduleSave("edit_commit_" + kind)
 	applyAlpha()
+	a.schedulePassiveMode()
 	logf("edit finish end task=%d kind=%s save=%v", taskID, kind, save)
 	invalidate()
 }
