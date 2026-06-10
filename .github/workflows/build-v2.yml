@@ -31,3 +31,13 @@ jobs:
 
       - name: Build
         run: dotnet build v2/TaskOverlay.sln --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish v2/src/TaskOverlay.App/TaskOverlay.App.csproj --configuration Release --no-restore --output v2/publish
+
+      - name: Upload Windows app
+        uses: actions/upload-artifact@v4
+        with:
+          name: TaskOverlayV2_WPF
+          path: v2/publish
+          if-no-files-found: error

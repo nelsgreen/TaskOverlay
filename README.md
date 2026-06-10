@@ -16,6 +16,11 @@ dotnet build .\v2\TaskOverlay.sln --configuration Release --no-restore
 dotnet run --project .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj
 ```
 
+GitHub Actions publishes a runnable Windows build as the `TaskOverlayV2_WPF`
+artifact. Open a successful **Build Windows WPF v2 prototype** workflow run,
+download the artifact from its **Artifacts** section, extract it, and run
+`TaskOverlay.V2.exe`.
+
 See `docs/V2_ARCHITECTURE.md` for scope and limitations.
 
 The app is intentionally local-only:
