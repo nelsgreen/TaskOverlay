@@ -28,6 +28,26 @@ func max(a, b int32) int32 {
 	return b
 }
 
+func min32(a, b int32) int32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func clampInt32(value, minimum, maximum int32) int32 {
+	if maximum < minimum {
+		return maximum
+	}
+	if value < minimum {
+		return minimum
+	}
+	if value > maximum {
+		return maximum
+	}
+	return value
+}
+
 func inRect(x, y int32, r RECT) bool {
 	return x >= r.Left && x <= r.Right && y >= r.Top && y <= r.Bottom
 }
@@ -127,6 +147,9 @@ func (a *App) drawResizeGrip(hdc HDC, rc RECT) {
 
 func (a *App) hitTestResize(lParam uintptr) uintptr {
 	if a == nil || a.hwnd == 0 {
+		return HTCLIENT
+	}
+	if !a.isActiveMode() {
 		return HTCLIENT
 	}
 	x := int32(int16(lParam & 0xffff))

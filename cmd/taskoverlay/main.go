@@ -108,7 +108,8 @@ func run() {
 	logf("window created hwnd=%d x=%d y=%d w=%d h=%d", hwnd, s.X, s.Y, s.W, s.H)
 	app.windowActive = false
 	applyTopMost()
-	applyAlpha()
+	applyLayeredWindowMode()
+	app.setOverlayMode(false, "startup")
 	procShowWindow.Call(hwnd, 1)
 	procUpdateWindow.Call(hwnd)
 	procSetTimer.Call(hwnd, TIMER_BLINK, 500, 0)

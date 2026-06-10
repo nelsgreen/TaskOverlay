@@ -17,6 +17,14 @@ First quest-tracker passive overlay mode.
 - App title, settings, close, add, checkbox, border, and resize controls are hidden in passive mode.
 - The per-task subtask action uses a branch marker so active mode has one primary `+` Add button.
 - State schema advanced to version 14 while preserving existing task and setting fields.
+- Passive mode now shrinks the real window and hover hitbox to the visible task content bounds.
+- Active mode restores the saved active window bounds without persisting passive dimensions.
+- Background opacity is rendered independently from text instead of using whole-window alpha.
+
+### Diagnostics
+
+- Mode changes log active/passive bounds and whether global window alpha is enabled.
+- Diagnostic exports include active bounds, passive bounds, mode, and opacity-model status.
 
 ### Preserved
 

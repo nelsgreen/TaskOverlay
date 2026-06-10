@@ -15,24 +15,11 @@ func (a *App) isActiveMode() bool {
 	return a != nil && (a.overlayActive || a.editActive)
 }
 
-func applyAlpha() {
+func applyLayeredWindowMode() {
 	if app == nil || app.hwnd == 0 {
 		return
 	}
-	alpha := app.state.Settings.TextAlpha
-	if app.isActiveMode() {
-		alpha = app.state.Settings.BgAlpha
-		if alpha == 0 {
-			alpha = app.state.Settings.Alpha
-		}
-		if app.windowActive || app.editActive {
-			alpha = 255
-		}
-	}
-	if alpha < 35 {
-		alpha = 35
-	}
-	procSetLayeredWindowAttributes.Call(uintptr(app.hwnd), uintptr(passiveColorKey), uintptr(alpha), LWA_COLORKEY|LWA_ALPHA)
+	procSetLayeredWindowAttributes.Call(uintptr(app.hwnd), uintptr(passiveColorKey), 255, LWA_COLORKEY)
 }
 
 func applyTopMost() {
@@ -47,7 +34,15 @@ func (a *App) effectiveTextColor() uint32 {
 	if a == nil {
 		return rgb(245, 245, 245)
 	}
-	return a.state.Settings.TextColor
+	alpha := a.state.Settings.TextAlpha
+	if alpha == 0 {
+		alpha = 255
+	}
+	background := rgb(0, 0, 0)
+	if a.isActiveMode() {
+		background = a.state.Settings.BgColor
+	}
+	return blendColor(background, a.state.Settings.TextColor, alpha)
 }
 
 func (a *App) updateHoverState() {
@@ -66,9 +61,7 @@ func (a *App) updateHoverState() {
 		procKillTimer.Call(uintptr(a.hwnd), TIMER_PASSIVE)
 		if !a.mouseInside || !a.overlayActive {
 			a.mouseInside = true
-			a.overlayActive = true
-			applyAlpha()
-			invalidate()
+			a.setOverlayMode(true, "hover_enter")
 		}
 		return
 	}
@@ -84,6 +77,96 @@ func (a *App) schedulePassiveMode() {
 		return
 	}
 	procSetTimer.Call(uintptr(a.hwnd), TIMER_PASSIVE, uintptr((3*time.Second)/time.Millisecond), 0)
+}
+
+func (a *App) setOverlayMode(active bool, reason string) {
+	if a == nil || a.hwnd == 0 {
+		return
+	}
+	if active {
+		a.overlayActive = true
+		a.resizeForMode(a.activeBounds(), "active", reason)
+	} else {
+		a.overlayActive = false
+		a.settingsOpen = false
+		a.dropdown = ""
+		a.resizeForMode(a.passiveBounds(), "passive", reason)
+	}
+	applyLayeredWindowMode()
+	invalidate()
+}
+
+func (a *App) activeBounds() RECT {
+	return RECT{
+		Left:   a.state.Settings.X,
+		Top:    a.state.Settings.Y,
+		Right:  a.state.Settings.X + a.state.Settings.W,
+		Bottom: a.state.Settings.Y + a.state.Settings.H,
+	}
+}
+
+func (a *App) passiveBounds() RECT {
+	tasks := a.visibleTasks(false)
+	padding := a.scale(8)
+	rowH := a.scale(max(28, a.state.Settings.FontSize+10))
+	gap := a.scale(4)
+	height := padding * 2
+	if len(tasks) > 0 {
+		height += int32(len(tasks))*rowH + int32(len(tasks)-1)*gap
+	} else {
+		height += rowH
+	}
+
+	maxRunes := 8
+	hasChild := false
+	for _, task := range tasks {
+		if n := len([]rune(task.Text)); n > maxRunes {
+			maxRunes = n
+		}
+		if task.ParentID != 0 {
+			hasChild = true
+		}
+	}
+	textWidth := int32(float64(a.font(a.state.Settings.FontSize)) * 0.58 * float64(maxRunes))
+	width := padding*2 + a.scale(22) + textWidth
+	if hasChild {
+		width += a.scale(24)
+	}
+	width = clampInt32(width, a.scale(120), a.state.Settings.W)
+	height = clampInt32(height, a.scale(40), a.state.Settings.H)
+	return RECT{
+		Left:   a.state.Settings.X,
+		Top:    a.state.Settings.Y,
+		Right:  a.state.Settings.X + width,
+		Bottom: a.state.Settings.Y + height,
+	}
+}
+
+func (a *App) resizeForMode(bounds RECT, mode, reason string) {
+	width := bounds.Right - bounds.Left
+	height := bounds.Bottom - bounds.Top
+	a.modeChanging = true
+	procSetWindowPos.Call(
+		uintptr(a.hwnd),
+		0,
+		uintptr(bounds.Left),
+		uintptr(bounds.Top),
+		uintptr(width),
+		uintptr(height),
+		SWP_NOZORDER|SWP_NOACTIVATE,
+	)
+	a.modeChanging = false
+	logf(
+		"overlay mode=%s reason=%s bounds=%d,%d,%d,%d size=%dx%d global_window_alpha=false",
+		mode,
+		reason,
+		bounds.Left,
+		bounds.Top,
+		bounds.Right,
+		bounds.Bottom,
+		width,
+		height,
+	)
 }
 
 func blendColor(bg, fg uint32, alpha byte) uint32 {
@@ -104,6 +187,31 @@ func fillRect(hdc HDC, r RECT, color uint32) {
 	br, _, _ := procCreateSolidBrush.Call(uintptr(color))
 	procFillRect.Call(uintptr(hdc), uintptr(unsafe.Pointer(&r)), br)
 	procDeleteObject.Call(br)
+}
+
+func fillRectAlpha(hdc HDC, r RECT, color uint32, alpha byte) {
+	fillRect(hdc, r, passiveColorKey)
+	if alpha == 0 {
+		return
+	}
+	if alpha == 255 {
+		fillRect(hdc, r, color)
+		return
+	}
+	brush, _, _ := procCreateSolidBrush.Call(uintptr(color))
+	defer procDeleteObject.Call(brush)
+	bayer := [4][4]int{{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}}
+	level := (int(alpha)*16 + 254) / 255
+	cell := int32(4)
+	for y := r.Top; y < r.Bottom; y += cell {
+		for x := r.Left; x < r.Right; x += cell {
+			if bayer[(y/cell)&3][(x/cell)&3] >= level {
+				continue
+			}
+			block := RECT{Left: x, Top: y, Right: min32(x+cell, r.Right), Bottom: min32(y+cell, r.Bottom)}
+			procFillRect.Call(uintptr(hdc), uintptr(unsafe.Pointer(&block)), brush)
+		}
+	}
 }
 
 func drawBorder(hdc HDC, r RECT, color uint32) {

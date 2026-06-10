@@ -92,7 +92,7 @@ func (a *App) setStatus(s string) {
 }
 
 func (a *App) captureWindowRect() {
-	if a == nil || a.hwnd == 0 {
+	if a == nil || a.hwnd == 0 || a.modeChanging || !a.isActiveMode() {
 		return
 	}
 	var r RECT

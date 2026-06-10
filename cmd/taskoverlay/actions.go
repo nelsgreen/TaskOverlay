@@ -14,8 +14,10 @@ import (
 
 func (a *App) handleClick(x, y int32) {
 	a.windowActive = true
-	a.overlayActive = true
-	applyAlpha()
+	if !a.overlayActive {
+		a.setOverlayMode(true, "click")
+	}
+	applyLayeredWindowMode()
 	a.finishEdit(true)
 	for i := len(a.actions) - 1; i >= 0; i-- {
 		act := a.actions[i]
@@ -115,13 +117,13 @@ func (a *App) perform(act Action) {
 		if a.state.Settings.BgAlpha > 35 {
 			a.state.Settings.BgAlpha -= 15
 			a.state.Settings.Alpha = a.state.Settings.BgAlpha
-			applyAlpha()
+			applyLayeredWindowMode()
 		}
 	case "bg_alpha_plus":
 		if a.state.Settings.BgAlpha < 255 {
 			a.state.Settings.BgAlpha = byte(minInt(255, int(a.state.Settings.BgAlpha)+15))
 			a.state.Settings.Alpha = a.state.Settings.BgAlpha
-			applyAlpha()
+			applyLayeredWindowMode()
 		}
 	case "text_alpha_minus":
 		if a.state.Settings.TextAlpha > 35 {
@@ -300,7 +302,7 @@ func (a *App) startEdit(taskID int64, kind string, r RECT) {
 	a.windowActive = true
 	a.overlayActive = true
 	procKillTimer.Call(uintptr(a.hwnd), TIMER_PASSIVE)
-	applyAlpha()
+	applyLayeredWindowMode()
 	logf("edit begin task=%d field=%s original_len=%d replace_on_type=%v", taskID, kind, len([]rune(text)), a.editReplaceOnType)
 	procSetFocus.Call(uintptr(a.hwnd))
 	a.setStatus("Редактирование: Enter - сохранить, Esc - отменить")
@@ -341,7 +343,7 @@ func (a *App) finishEdit(save bool) {
 			a.deleteTask(taskID)
 			a.scheduleSave("edit_cancel_new")
 		}
-		applyAlpha()
+		applyLayeredWindowMode()
 		a.schedulePassiveMode()
 		logf("edit cancel task=%d kind=%s removed_draft=%v", taskID, kind, createdNew)
 		invalidate()
@@ -376,7 +378,7 @@ func (a *App) finishEdit(save bool) {
 		}
 	})
 	a.scheduleSave("edit_commit_" + kind)
-	applyAlpha()
+	applyLayeredWindowMode()
 	a.schedulePassiveMode()
 	logf("edit finish end task=%d kind=%s save=%v", taskID, kind, save)
 	invalidate()

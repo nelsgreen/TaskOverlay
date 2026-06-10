@@ -46,6 +46,20 @@ func (a *App) exportDiagnostics() {
 		b.WriteString("session: not available\r\n")
 	}
 	b.WriteString("log_path: " + logFilePath + "\r\n")
+	activeBounds := a.activeBounds()
+	passiveBounds := a.passiveBounds()
+	b.WriteString(fmt.Sprintf(
+		"overlay: active=%v global_window_alpha=false active_bounds=%d,%d,%d,%d passive_bounds=%d,%d,%d,%d\r\n",
+		a.isActiveMode(),
+		activeBounds.Left,
+		activeBounds.Top,
+		activeBounds.Right,
+		activeBounds.Bottom,
+		passiveBounds.Left,
+		passiveBounds.Top,
+		passiveBounds.Right,
+		passiveBounds.Bottom,
+	))
 	logf("diagnostics state read begin")
 	b.WriteString("\r\nSTATE\r\n")
 	if data, err := json.MarshalIndent(a.state, "", "  "); err == nil {
@@ -144,7 +158,7 @@ func (a *App) resetWindow() {
 	a.state.Settings.Y = 120
 	a.state.Settings.W = 620
 	a.state.Settings.H = 520
-	procSetWindowPos.Call(uintptr(a.hwnd), 0, uintptr(a.state.Settings.X), uintptr(a.state.Settings.Y), uintptr(a.state.Settings.W), uintptr(a.state.Settings.H), 0)
+	a.setOverlayMode(a.isActiveMode(), "reset_window")
 	saveState(a.state)
 	a.setStatus("Положение окна сброшено")
 }

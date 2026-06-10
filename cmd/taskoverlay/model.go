@@ -80,6 +80,7 @@ type App struct {
 	windowActive        bool
 	overlayActive       bool
 	mouseInside         bool
+	modeChanging        bool
 	saveScheduled       bool
 	lastSaveReason      string
 	sizing              bool

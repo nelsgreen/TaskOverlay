@@ -21,7 +21,7 @@ func (a *App) paint() {
 		return
 	}
 
-	fillRect(HDC(hdc), rc, a.state.Settings.BgColor)
+	fillRectAlpha(HDC(hdc), rc, a.state.Settings.BgColor, a.state.Settings.BgAlpha)
 	a.drawHeader(HDC(hdc), rc)
 	top := a.scale(38)
 	if a.settingsOpen {
@@ -205,7 +205,7 @@ func (a *App) drawTasks(hdc HDC, rc RECT, top int32) {
 
 		row := RECT{Left: a.scale(8) + indent, Top: y, Right: rc.Right - a.scale(8), Bottom: y + rowH}
 		if task.Blink && a.blinkOn {
-			fillRect(hdc, row, adjustColor(s.BgColor, 55))
+			fillRectAlpha(hdc, row, adjustColor(s.BgColor, 55), s.BgAlpha)
 		}
 		if task.InWork {
 			drawBorder(hdc, row, tc)

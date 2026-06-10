@@ -27,21 +27,21 @@ func wndProc(hwnd HWND, msg uint32, wParam, lParam uintptr) (ret uintptr) {
 		active := (wParam & 0xffff) != WA_INACTIVE
 		if app != nil {
 			app.windowActive = active
-			applyAlpha()
+			applyLayeredWindowMode()
 			invalidate()
 		}
 		return 0
 	case WM_SETFOCUS:
 		if app != nil {
 			app.windowActive = true
-			applyAlpha()
+			applyLayeredWindowMode()
 			invalidate()
 		}
 		return 0
 	case WM_KILLFOCUS:
 		if app != nil {
 			app.windowActive = false
-			applyAlpha()
+			applyLayeredWindowMode()
 			invalidate()
 		}
 		return 0
@@ -71,11 +71,7 @@ func wndProc(hwnd HWND, msg uint32, wParam, lParam uintptr) (ret uintptr) {
 		} else if wParam == TIMER_PASSIVE {
 			procKillTimer.Call(uintptr(hwnd), TIMER_PASSIVE)
 			if !app.mouseInside && !app.editActive {
-				app.overlayActive = false
-				app.settingsOpen = false
-				app.dropdown = ""
-				applyAlpha()
-				invalidate()
+				app.setOverlayMode(false, "hover_leave_delay")
 			}
 		}
 		return 0
@@ -84,8 +80,13 @@ func wndProc(hwnd HWND, msg uint32, wParam, lParam uintptr) (ret uintptr) {
 	case WM_GETMINMAXINFO:
 		if lParam != 0 {
 			mmi := (*MINMAXINFO)(unsafe.Pointer(lParam))
-			mmi.PtMinTrackSize.X = 420
-			mmi.PtMinTrackSize.Y = 320
+			if app != nil && app.isActiveMode() {
+				mmi.PtMinTrackSize.X = 420
+				mmi.PtMinTrackSize.Y = 320
+			} else {
+				mmi.PtMinTrackSize.X = 80
+				mmi.PtMinTrackSize.Y = 36
+			}
 			mmi.PtMaxTrackSize.X = 1800
 			mmi.PtMaxTrackSize.Y = 1400
 		}
@@ -133,14 +134,14 @@ func wndProc(hwnd HWND, msg uint32, wParam, lParam uintptr) (ret uintptr) {
 		return 0
 	case WM_MOVE:
 		app.captureWindowRect()
-		if !app.sizing {
+		if !app.sizing && !app.modeChanging && app.isActiveMode() {
 			app.scheduleSave("move")
 		}
 		return 0
 	case WM_SIZE:
 		app.captureWindowRect()
 		invalidate()
-		if !app.sizing {
+		if !app.sizing && !app.modeChanging && app.isActiveMode() {
 			app.scheduleSave("size")
 		}
 		return 0
