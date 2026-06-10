@@ -31,6 +31,15 @@ Passive marker styles are available in settings:
 
 Completed tasks can be shown or hidden in active mode. They are shown by default.
 
+The active-mode background uses a stable solid GDI fill. The background intensity
+setting controls how strongly the selected background color is applied; it is not
+presented as desktop transparency. Text opacity is independent and affects text/UI
+color only.
+
+After the pointer leaves, active mode returns to passive mode after 0.5 seconds by
+default. Available delays are 0.5, 1, 2, 3, and 5 seconds. Auto-hide pauses while
+editing, settings, a settings dropdown, or window resizing is active.
+
 ## Existing behavior preserved
 
 - editable task title;

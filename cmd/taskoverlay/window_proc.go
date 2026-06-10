@@ -75,7 +75,7 @@ func wndProc(hwnd HWND, msg uint32, wParam, lParam uintptr) (ret uintptr) {
 			app.updateHoverState()
 		} else if wParam == TIMER_PASSIVE {
 			procKillTimer.Call(uintptr(hwnd), TIMER_PASSIVE)
-			if !app.mouseInside && !app.editActive {
+			if !app.mouseInside && !app.passiveTransitionBlocked() {
 				app.setOverlayMode(false, "hover_leave_delay")
 			}
 		}
@@ -119,6 +119,7 @@ func wndProc(hwnd HWND, msg uint32, wParam, lParam uintptr) (ret uintptr) {
 		app.captureWindowRect()
 		app.scheduleSave("exit_size_move")
 		logf("sizing end x=%d y=%d w=%d h=%d scale=%.2f", app.state.Settings.X, app.state.Settings.Y, app.state.Settings.W, app.state.Settings.H, app.uiScale())
+		app.schedulePassiveMode()
 		invalidate()
 		return 0
 	case WM_MOUSEWHEEL:

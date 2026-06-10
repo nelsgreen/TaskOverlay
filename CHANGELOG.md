@@ -29,9 +29,19 @@ First quest-tracker passive overlay mode.
 ### Regression fix
 
 - Removed the ordered transparency coverage renderer that produced a checkerboard pattern.
-- Active mode now paints one stable solid background shade derived from the background opacity setting.
+- Active mode now paints one stable solid background shade derived from the background intensity setting.
 - Painting is double-buffered to avoid visible top-to-bottom redraw.
 - The blink timer repaints only for due-task blinking, edit-cursor blinking, or a newly triggered due state.
+
+### v14.1 behavior correction
+
+- Renamed the active background control to background intensity because the stable GDI renderer uses a solid background rather than true per-pixel transparency.
+- Background intensity changes only the active solid background shade; text opacity remains independent.
+- Added auto-hide delay choices: 0.5, 1, 2, 3, and 5 seconds.
+- Changed the default active-to-passive delay to 500 milliseconds.
+- Added schema 15 migration that defaults missing delays to 500 ms and normalizes saved values to the nearest supported delay.
+- Auto-hide is paused while editing, settings, dropdown, or resize interaction is active.
+- Diagnostics now report the transparency mode, background intensity, text opacity, and auto-hide delay.
 
 ### Preserved
 

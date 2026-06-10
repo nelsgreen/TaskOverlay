@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	AppVersion    = "14.0.0"
-	SchemaVersion = 14
+	AppVersion    = "14.1.0"
+	SchemaVersion = 15
 	BaseW         = int32(620)
 	BaseH         = int32(520)
 )

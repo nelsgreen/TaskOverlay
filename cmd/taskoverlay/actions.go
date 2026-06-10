@@ -58,6 +58,10 @@ func (a *App) perform(act Action) {
 		a.settingsOpen = !a.settingsOpen
 		a.settingsPaintLogged = false
 		logf("settings toggle end open=%v", a.settingsOpen)
+		if !a.settingsOpen {
+			a.dropdown = ""
+			a.schedulePassiveMode()
+		}
 		invalidate()
 		return
 	case "add":
@@ -117,13 +121,11 @@ func (a *App) perform(act Action) {
 		if a.state.Settings.BgAlpha > 35 {
 			a.state.Settings.BgAlpha -= 15
 			a.state.Settings.Alpha = a.state.Settings.BgAlpha
-			applyLayeredWindowMode()
 		}
 	case "bg_alpha_plus":
 		if a.state.Settings.BgAlpha < 255 {
 			a.state.Settings.BgAlpha = byte(minInt(255, int(a.state.Settings.BgAlpha)+15))
 			a.state.Settings.Alpha = a.state.Settings.BgAlpha
-			applyLayeredWindowMode()
 		}
 	case "text_alpha_minus":
 		if a.state.Settings.TextAlpha > 35 {
@@ -165,6 +167,16 @@ func (a *App) perform(act Action) {
 		a.state.Settings.PassiveMarkerStyle = "checkbox"
 	case "toggle_show_completed_active":
 		a.state.Settings.ShowCompletedActive = !a.state.Settings.ShowCompletedActive
+	case "delay_500":
+		a.state.Settings.AutoHideDelayMS = 500
+	case "delay_1000":
+		a.state.Settings.AutoHideDelayMS = 1000
+	case "delay_2000":
+		a.state.Settings.AutoHideDelayMS = 2000
+	case "delay_3000":
+		a.state.Settings.AutoHideDelayMS = 3000
+	case "delay_5000":
+		a.state.Settings.AutoHideDelayMS = 5000
 	case "export_1":
 		a.export(1)
 	case "export_7":

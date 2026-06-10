@@ -117,6 +117,10 @@ func normalizeState(st *State, oldSchema int) {
 	if oldSchema < 14 {
 		st.Settings.ShowCompletedActive = true
 	}
+	if oldSchema < 15 && st.Settings.AutoHideDelayMS == 0 {
+		st.Settings.AutoHideDelayMS = 500
+	}
+	st.Settings.AutoHideDelayMS = normalizeAutoHideDelay(st.Settings.AutoHideDelayMS)
 	switch st.Settings.PassiveMarkerStyle {
 	case "dot", "dash", "arrow", "checkbox":
 	default:
@@ -141,7 +145,7 @@ func defaultState() State {
 		SchemaVersion: SchemaVersion,
 		AppVersion:    AppVersion,
 		NextID:        3,
-		Settings:      Settings{X: 1200, Y: 120, W: 620, H: 520, BgColor: rgb(22, 25, 30), TextColor: rgb(255, 232, 120), BorderColor: rgb(150, 150, 150), Alpha: 170, BgAlpha: 170, TextAlpha: 255, FontSize: 20, Bold: false, Shadow: true, Outline: false, ShowBorders: false, DoneStyle: 0, CollapseDone: false, CompletedExpanded: true, PassiveMarkerStyle: "dot", ShowCompletedActive: true},
+		Settings:      Settings{X: 1200, Y: 120, W: 620, H: 520, BgColor: rgb(22, 25, 30), TextColor: rgb(255, 232, 120), BorderColor: rgb(150, 150, 150), Alpha: 170, BgAlpha: 170, TextAlpha: 255, FontSize: 20, Bold: false, Shadow: true, Outline: false, ShowBorders: false, DoneStyle: 0, CollapseDone: false, CompletedExpanded: true, PassiveMarkerStyle: "dot", ShowCompletedActive: true, AutoHideDelayMS: 500},
 		Tasks: []Task{
 			{ID: 1, Text: "Редактируйте текст задачи кликом", CreatedAt: now, Expanded: true},
 			{ID: 2, Text: "Кнопка + добавляет задачу", CreatedAt: now, Expanded: true},

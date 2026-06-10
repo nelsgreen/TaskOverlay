@@ -97,7 +97,7 @@ func (a *App) drawHeader(hdc HDC, rc RECT) {
 func (a *App) drawSettings(hdc HDC, rc RECT, top int32) int32 {
 	s := &a.state.Settings
 	tc := a.effectiveTextColor()
-	panelH := a.scale(301)
+	panelH := a.scale(327)
 	if a.dropdown == "bg" {
 		panelH += a.scale(int32(len(bgOptions())) * 24)
 	}
@@ -120,7 +120,7 @@ func (a *App) drawSettings(hdc HDC, rc RECT, top int32) int32 {
 		y = a.drawColorOptions(hdc, y, "text", textOptions(), s.TextColor)
 	}
 	y += a.scale(2)
-	a.settingsLineSafe(hdc, y, "Фон прозрачн.", []string{"-", strconv.Itoa(int(s.BgAlpha)), "+"}, []string{"bg_alpha_minus", "noop", "bg_alpha_plus"})
+	a.settingsLineSafe(hdc, y, "Интенсивн. фона", []string{"-", strconv.Itoa(int(s.BgAlpha)), "+"}, []string{"bg_alpha_minus", "noop", "bg_alpha_plus"})
 	y += a.scale(26)
 	a.settingsLineSafe(hdc, y, "Текст прозрачн.", []string{"-", strconv.Itoa(int(s.TextAlpha)), "+"}, []string{"text_alpha_minus", "noop", "text_alpha_plus"})
 	y += a.scale(26)
@@ -142,6 +142,15 @@ func (a *App) drawSettings(hdc HDC, rc RECT, top int32) int32 {
 		completedLabel = "показаны"
 	}
 	a.settingsLineSafe(hdc, y, "Активный режим", []string{"выполненные: " + completedLabel}, []string{"toggle_show_completed_active"})
+	y += a.scale(26)
+	delayLabels := []string{"0.5с", "1с", "2с", "3с", "5с"}
+	delayValues := []int{500, 1000, 2000, 3000, 5000}
+	for i, value := range delayValues {
+		if s.AutoHideDelayMS == value {
+			delayLabels[i] = "[" + delayLabels[i] + "]"
+		}
+	}
+	a.settingsLineSafe(hdc, y, "Автоскрытие", delayLabels, []string{"delay_500", "delay_1000", "delay_2000", "delay_3000", "delay_5000"})
 	y += a.scale(26)
 	a.settingsLineSafe(hdc, y, "Экспорт", []string{"сегодня", "7 дней", "30 дней", "все"}, []string{"export_1", "export_7", "export_30", "export_all"})
 	y += a.scale(26)

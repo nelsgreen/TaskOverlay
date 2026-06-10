@@ -5,7 +5,6 @@ package main
 import (
 	"runtime"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
@@ -38,11 +37,7 @@ func (a *App) effectiveTextColor() uint32 {
 	if alpha == 0 {
 		alpha = 255
 	}
-	background := rgb(0, 0, 0)
-	if a.isActiveMode() {
-		background = a.activeBackgroundColor()
-	}
-	return blendColor(background, a.state.Settings.TextColor, alpha)
+	return blendColor(rgb(0, 0, 0), a.state.Settings.TextColor, alpha)
 }
 
 func (a *App) updateHoverState() {
@@ -73,10 +68,15 @@ func (a *App) updateHoverState() {
 }
 
 func (a *App) schedulePassiveMode() {
-	if a == nil || a.hwnd == 0 || a.mouseInside || a.editActive || !a.overlayActive {
+	if a == nil || a.hwnd == 0 || a.mouseInside || a.passiveTransitionBlocked() || !a.overlayActive {
 		return
 	}
-	procSetTimer.Call(uintptr(a.hwnd), TIMER_PASSIVE, uintptr((3*time.Second)/time.Millisecond), 0)
+	delay := normalizeAutoHideDelay(a.state.Settings.AutoHideDelayMS)
+	procSetTimer.Call(uintptr(a.hwnd), TIMER_PASSIVE, uintptr(delay), 0)
+}
+
+func (a *App) passiveTransitionBlocked() bool {
+	return a.editActive || a.settingsOpen || a.dropdown != "" || a.sizing
 }
 
 func (a *App) setOverlayMode(active bool, reason string) {
@@ -157,7 +157,7 @@ func (a *App) resizeForMode(bounds RECT, mode, reason string) {
 	)
 	a.modeChanging = false
 	logf(
-		"overlay mode=%s reason=%s bounds=%d,%d,%d,%d size=%dx%d global_window_alpha=false",
+		"overlay mode=%s reason=%s bounds=%d,%d,%d,%d size=%dx%d transparency_mode=solid_background background_intensity=%d text_opacity=%d auto_hide_delay_ms=%d",
 		mode,
 		reason,
 		bounds.Left,
@@ -166,6 +166,9 @@ func (a *App) resizeForMode(bounds RECT, mode, reason string) {
 		bounds.Bottom,
 		width,
 		height,
+		a.state.Settings.BgAlpha,
+		a.state.Settings.TextAlpha,
+		a.state.Settings.AutoHideDelayMS,
 	)
 }
 

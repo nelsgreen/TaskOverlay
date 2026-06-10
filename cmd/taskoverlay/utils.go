@@ -41,6 +41,30 @@ func clampInt32(value, minimum, maximum int32) int32 {
 	return value
 }
 
+func normalizeAutoHideDelay(value int) int {
+	supported := []int{500, 1000, 2000, 3000, 5000}
+	if value <= 0 {
+		return supported[0]
+	}
+	closest := supported[0]
+	closestDistance := absInt(value - closest)
+	for _, candidate := range supported[1:] {
+		distance := absInt(value - candidate)
+		if distance < closestDistance {
+			closest = candidate
+			closestDistance = distance
+		}
+	}
+	return closest
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
 func inRect(x, y int32, r RECT) bool {
 	return x >= r.Left && x <= r.Right && y >= r.Top && y <= r.Bottom
 }

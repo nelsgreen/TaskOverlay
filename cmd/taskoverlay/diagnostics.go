@@ -49,8 +49,11 @@ func (a *App) exportDiagnostics() {
 	activeBounds := a.activeBounds()
 	passiveBounds := a.passiveBounds()
 	b.WriteString(fmt.Sprintf(
-		"overlay: active=%v global_window_alpha=false active_bounds=%d,%d,%d,%d passive_bounds=%d,%d,%d,%d\r\n",
+		"overlay: active=%v transparency_mode=solid_background global_window_alpha=false background_intensity=%d text_opacity=%d auto_hide_delay_ms=%d active_bounds=%d,%d,%d,%d passive_bounds=%d,%d,%d,%d\r\n",
 		a.isActiveMode(),
+		a.state.Settings.BgAlpha,
+		a.state.Settings.TextAlpha,
+		a.state.Settings.AutoHideDelayMS,
 		activeBounds.Left,
 		activeBounds.Top,
 		activeBounds.Right,

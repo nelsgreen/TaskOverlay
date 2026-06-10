@@ -43,6 +43,7 @@ type Settings struct {
 	CompletedExpanded   bool   `json:"completed_expanded"`
 	PassiveMarkerStyle  string `json:"passive_marker_style"`
 	ShowCompletedActive bool   `json:"show_completed_active"`
+	AutoHideDelayMS     int    `json:"auto_hide_delay_ms"`
 }
 
 type State struct {
