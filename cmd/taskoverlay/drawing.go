@@ -40,7 +40,7 @@ func (a *App) effectiveTextColor() uint32 {
 	}
 	background := rgb(0, 0, 0)
 	if a.isActiveMode() {
-		background = a.state.Settings.BgColor
+		background = a.activeBackgroundColor()
 	}
 	return blendColor(background, a.state.Settings.TextColor, alpha)
 }
@@ -187,31 +187,6 @@ func fillRect(hdc HDC, r RECT, color uint32) {
 	br, _, _ := procCreateSolidBrush.Call(uintptr(color))
 	procFillRect.Call(uintptr(hdc), uintptr(unsafe.Pointer(&r)), br)
 	procDeleteObject.Call(br)
-}
-
-func fillRectAlpha(hdc HDC, r RECT, color uint32, alpha byte) {
-	fillRect(hdc, r, passiveColorKey)
-	if alpha == 0 {
-		return
-	}
-	if alpha == 255 {
-		fillRect(hdc, r, color)
-		return
-	}
-	brush, _, _ := procCreateSolidBrush.Call(uintptr(color))
-	defer procDeleteObject.Call(brush)
-	bayer := [4][4]int{{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}}
-	level := (int(alpha)*16 + 254) / 255
-	cell := int32(4)
-	for y := r.Top; y < r.Bottom; y += cell {
-		for x := r.Left; x < r.Right; x += cell {
-			if bayer[(y/cell)&3][(x/cell)&3] >= level {
-				continue
-			}
-			block := RECT{Left: x, Top: y, Right: min32(x+cell, r.Right), Bottom: min32(y+cell, r.Bottom)}
-			procFillRect.Call(uintptr(hdc), uintptr(unsafe.Pointer(&block)), brush)
-		}
-	}
 }
 
 func drawBorder(hdc HDC, r RECT, color uint32) {

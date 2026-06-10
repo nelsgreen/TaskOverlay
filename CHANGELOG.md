@@ -26,6 +26,13 @@ First quest-tracker passive overlay mode.
 - Mode changes log active/passive bounds and whether global window alpha is enabled.
 - Diagnostic exports include active bounds, passive bounds, mode, and opacity-model status.
 
+### Regression fix
+
+- Removed the ordered transparency coverage renderer that produced a checkerboard pattern.
+- Active mode now paints one stable solid background shade derived from the background opacity setting.
+- Painting is double-buffered to avoid visible top-to-bottom redraw.
+- The blink timer repaints only for due-task blinking, edit-cursor blinking, or a newly triggered due state.
+
 ### Preserved
 
 - Task editing, descriptions, subtasks, due time and blinking, priority, in-work status, topmost behavior, diagnostics, and the Windows build workflow.

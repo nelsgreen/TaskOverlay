@@ -9,38 +9,68 @@ import (
 
 func (a *App) paint() {
 	var ps PAINTSTRUCT
-	hdc, _, _ := procBeginPaint.Call(uintptr(a.hwnd), uintptr(unsafe.Pointer(&ps)))
+	windowDC, _, _ := procBeginPaint.Call(uintptr(a.hwnd), uintptr(unsafe.Pointer(&ps)))
 	var rc RECT
 	procGetClientRect.Call(uintptr(a.hwnd), uintptr(unsafe.Pointer(&rc)))
+	width := rc.Right - rc.Left
+	height := rc.Bottom - rc.Top
+	drawDC := windowDC
+	var memoryDC, bitmap, oldBitmap uintptr
+	if width > 0 && height > 0 {
+		memoryDC, _, _ = procCreateCompatibleDC.Call(windowDC)
+		if memoryDC != 0 {
+			bitmap, _, _ = procCreateCompatibleBitmap.Call(windowDC, uintptr(width), uintptr(height))
+		}
+		if bitmap != 0 {
+			oldBitmap, _, _ = procSelectObject.Call(memoryDC, bitmap)
+			drawDC = memoryDC
+		} else if memoryDC != 0 {
+			procDeleteDC.Call(memoryDC)
+			memoryDC = 0
+		}
+	}
+	hdc := HDC(drawDC)
 
 	a.actions = nil
 	if !a.isActiveMode() {
-		fillRect(HDC(hdc), rc, passiveColorKey)
-		a.drawPassiveTasks(HDC(hdc), rc)
-		procEndPaint.Call(uintptr(a.hwnd), uintptr(unsafe.Pointer(&ps)))
-		return
-	}
-
-	fillRectAlpha(HDC(hdc), rc, a.state.Settings.BgColor, a.state.Settings.BgAlpha)
-	a.drawHeader(HDC(hdc), rc)
-	top := a.scale(38)
-	if a.settingsOpen {
-		if !a.settingsPaintLogged {
-			logf("paint settings begin rc=%d,%d,%d,%d", rc.Left, rc.Top, rc.Right, rc.Bottom)
+		fillRect(hdc, rc, passiveColorKey)
+		a.drawPassiveTasks(hdc, rc)
+	} else {
+		fillRect(hdc, rc, a.activeBackgroundColor())
+		a.drawHeader(hdc, rc)
+		top := a.scale(38)
+		if a.settingsOpen {
+			if !a.settingsPaintLogged {
+				logf("paint settings begin rc=%d,%d,%d,%d", rc.Left, rc.Top, rc.Right, rc.Bottom)
+			}
+			top = a.drawSettings(hdc, rc, top)
+			if !a.settingsPaintLogged {
+				logf("paint settings end top=%d", top)
+				a.settingsPaintLogged = true
+			}
 		}
-		top = a.drawSettings(HDC(hdc), rc, top)
-		if !a.settingsPaintLogged {
-			logf("paint settings end top=%d", top)
-			a.settingsPaintLogged = true
+		a.drawTasks(hdc, rc, top)
+		if a.status != "" {
+			r := RECT{Left: a.scale(12), Top: rc.Bottom - a.scale(26), Right: rc.Right - a.scale(12), Bottom: rc.Bottom - a.scale(4)}
+			drawText(hdc, a.status, r, a.effectiveTextColor(), a.font(max(14, a.state.Settings.FontSize-3)), false, false, false, DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX)
 		}
+		a.drawResizeGrip(hdc, rc)
 	}
-	a.drawTasks(HDC(hdc), rc, top)
-	if a.status != "" {
-		r := RECT{Left: a.scale(12), Top: rc.Bottom - a.scale(26), Right: rc.Right - a.scale(12), Bottom: rc.Bottom - a.scale(4)}
-		drawText(HDC(hdc), a.status, r, a.effectiveTextColor(), a.font(max(14, a.state.Settings.FontSize-3)), false, false, false, DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX)
+	if memoryDC != 0 {
+		procBitBlt.Call(windowDC, 0, 0, uintptr(width), uintptr(height), memoryDC, 0, 0, SRCCOPY)
+		procSelectObject.Call(memoryDC, oldBitmap)
+		procDeleteObject.Call(bitmap)
+		procDeleteDC.Call(memoryDC)
 	}
-	a.drawResizeGrip(HDC(hdc), rc)
 	procEndPaint.Call(uintptr(a.hwnd), uintptr(unsafe.Pointer(&ps)))
+}
+
+func (a *App) activeBackgroundColor() uint32 {
+	alpha := a.state.Settings.BgAlpha
+	if alpha == 0 {
+		alpha = a.state.Settings.Alpha
+	}
+	return blendColor(rgb(0, 0, 0), a.state.Settings.BgColor, alpha)
 }
 
 func (a *App) drawHeader(hdc HDC, rc RECT) {
@@ -205,7 +235,7 @@ func (a *App) drawTasks(hdc HDC, rc RECT, top int32) {
 
 		row := RECT{Left: a.scale(8) + indent, Top: y, Right: rc.Right - a.scale(8), Bottom: y + rowH}
 		if task.Blink && a.blinkOn {
-			fillRectAlpha(hdc, row, adjustColor(s.BgColor, 55), s.BgAlpha)
+			fillRect(hdc, row, adjustColor(a.activeBackgroundColor(), 55))
 		}
 		if task.InWork {
 			drawBorder(hdc, row, tc)

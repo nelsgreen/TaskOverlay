@@ -12,7 +12,7 @@ import (
 	"unsafe"
 )
 
-func (a *App) checkDue() {
+func (a *App) checkDue() bool {
 	now := time.Now().Format("15:04")
 	changed := false
 	for i := range a.state.Tasks {
@@ -30,6 +30,16 @@ func (a *App) checkDue() {
 	if changed {
 		a.scheduleSave("due_changed")
 	}
+	return changed
+}
+
+func (a *App) hasBlinkingTasks() bool {
+	for _, task := range a.state.Tasks {
+		if !task.Done && task.Blink {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) export(days int) {

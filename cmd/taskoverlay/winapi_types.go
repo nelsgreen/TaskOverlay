@@ -135,6 +135,7 @@ const (
 	NULL_BRUSH  = 5
 	FW_NORMAL   = 400
 	FW_BOLD     = 700
+	SRCCOPY     = 0x00CC0020
 
 	TIMER_BLINK      = 1
 	TIMER_STATUS     = 2
@@ -195,19 +196,23 @@ var (
 	procIsClipboardFormatAvailable = user32.NewProc("IsClipboardFormatAvailable")
 	procGetKeyState                = user32.NewProc("GetKeyState")
 
-	procCreateSolidBrush = gdi32.NewProc("CreateSolidBrush")
-	procDeleteObject     = gdi32.NewProc("DeleteObject")
-	procFillRect         = user32.NewProc("FillRect")
-	procSetBkMode        = gdi32.NewProc("SetBkMode")
-	procSetTextColor     = gdi32.NewProc("SetTextColor")
-	procDrawTextW        = user32.NewProc("DrawTextW")
-	procCreateFontW      = gdi32.NewProc("CreateFontW")
-	procSelectObject     = gdi32.NewProc("SelectObject")
-	procCreatePen        = gdi32.NewProc("CreatePen")
-	procRectangle        = gdi32.NewProc("Rectangle")
-	procMoveToEx         = gdi32.NewProc("MoveToEx")
-	procLineTo           = gdi32.NewProc("LineTo")
-	procGetStockObject   = gdi32.NewProc("GetStockObject")
+	procCreateSolidBrush       = gdi32.NewProc("CreateSolidBrush")
+	procCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
+	procCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
+	procDeleteDC               = gdi32.NewProc("DeleteDC")
+	procBitBlt                 = gdi32.NewProc("BitBlt")
+	procDeleteObject           = gdi32.NewProc("DeleteObject")
+	procFillRect               = user32.NewProc("FillRect")
+	procSetBkMode              = gdi32.NewProc("SetBkMode")
+	procSetTextColor           = gdi32.NewProc("SetTextColor")
+	procDrawTextW              = user32.NewProc("DrawTextW")
+	procCreateFontW            = gdi32.NewProc("CreateFontW")
+	procSelectObject           = gdi32.NewProc("SelectObject")
+	procCreatePen              = gdi32.NewProc("CreatePen")
+	procRectangle              = gdi32.NewProc("Rectangle")
+	procMoveToEx               = gdi32.NewProc("MoveToEx")
+	procLineTo                 = gdi32.NewProc("LineTo")
+	procGetStockObject         = gdi32.NewProc("GetStockObject")
 
 	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
 	procCreateMutexW     = kernel32.NewProc("CreateMutexW")

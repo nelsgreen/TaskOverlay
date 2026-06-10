@@ -28,13 +28,6 @@ func max(a, b int32) int32 {
 	return b
 }
 
-func min32(a, b int32) int32 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func clampInt32(value, minimum, maximum int32) int32 {
 	if maximum < minimum {
 		return maximum
@@ -60,7 +53,7 @@ func hiword(v uintptr) uint16 { return uint16((v >> 16) & 0xffff) }
 
 func invalidate() {
 	if app != nil && app.hwnd != 0 {
-		procInvalidateRect.Call(uintptr(app.hwnd), 0, 1)
+		procInvalidateRect.Call(uintptr(app.hwnd), 0, 0)
 	}
 }
 

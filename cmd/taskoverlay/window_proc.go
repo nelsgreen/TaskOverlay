@@ -50,10 +50,15 @@ func wndProc(hwnd HWND, msg uint32, wParam, lParam uintptr) (ret uintptr) {
 		return 0
 	case WM_TIMER:
 		if wParam == TIMER_BLINK {
-			app.blinkOn = !app.blinkOn
 			applyTopMost()
-			app.checkDue()
-			invalidate()
+			dueChanged := app.checkDue()
+			needsBlinkPaint := app.editActive || app.hasBlinkingTasks()
+			if needsBlinkPaint {
+				app.blinkOn = !app.blinkOn
+			}
+			if dueChanged || needsBlinkPaint {
+				invalidate()
+			}
 		} else if wParam == TIMER_STATUS {
 			if time.Now().After(app.statusUntil) {
 				app.status = ""

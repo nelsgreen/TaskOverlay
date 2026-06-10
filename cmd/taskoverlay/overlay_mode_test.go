@@ -62,3 +62,23 @@ func TestPassiveBoundsNeverExceedActiveBounds(t *testing.T) {
 		t.Fatalf("passive height = %d, exceeds active height %d", height, a.state.Settings.H)
 	}
 }
+
+func TestHasBlinkingTasksIgnoresCompletedTasks(t *testing.T) {
+	a := App{
+		state: State{
+			Tasks: []Task{
+				{ID: 1, Blink: true, Done: true},
+				{ID: 2, Blink: false},
+			},
+		},
+	}
+
+	if a.hasBlinkingTasks() {
+		t.Fatal("completed blinking task should not trigger repaint")
+	}
+
+	a.state.Tasks[1].Blink = true
+	if !a.hasBlinkingTasks() {
+		t.Fatal("active blinking task should trigger repaint")
+	}
+}
