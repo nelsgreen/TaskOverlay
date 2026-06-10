@@ -33,7 +33,7 @@ jobs:
         run: dotnet build v2/TaskOverlay.sln --configuration Release --no-restore
 
       - name: Publish
-        run: dotnet publish v2/src/TaskOverlay.App/TaskOverlay.App.csproj --configuration Release --no-restore --output v2/publish
+        run: dotnet publish v2/src/TaskOverlay.App/TaskOverlay.App.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false --source https://api.nuget.org/v3/index.json --output v2/publish
 
       - name: Upload Windows app
         uses: actions/upload-artifact@v4
