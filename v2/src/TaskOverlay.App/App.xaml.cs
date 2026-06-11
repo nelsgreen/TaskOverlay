@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -13,6 +14,7 @@ public partial class App : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private Forms.NotifyIcon? _trayIcon;
     private Forms.ContextMenuStrip? _trayMenu;
+    private GlobalHotkeyManager? _hotkeyManager;
     private AppStateStore? _stateStore;
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
@@ -40,6 +42,7 @@ public partial class App : System.Windows.Application
             _overlayWindow.Show();
 
             CreateTrayIcon();
+            RegisterGlobalHotkeys();
             _diagnostics.Log("Application startup completed.");
         }
         catch (Exception ex)
@@ -58,6 +61,7 @@ public partial class App : System.Windows.Application
             StopOverlayAndPersist();
         }
 
+        DisposeGlobalHotkeys();
         DisposeTrayIcon();
         UnregisterExceptionHandlers();
         _diagnostics?.Log("Application shutdown completed.");
@@ -90,17 +94,32 @@ public partial class App : System.Windows.Application
     {
         _trayMenu = new Forms.ContextMenuStrip();
         _trayMenu.Items.Add(
-            "Create task from clipboard",
+            "Create tasks from clipboard lines",
             null,
-            (_, _) => RunTrayCommand(
-                "Create task from clipboard",
-                CreateTaskFromClipboard));
+            (_, _) => RunCommand(
+                "Tray",
+                "Create tasks from clipboard lines",
+                CreateTasksFromClipboardLines));
+        _trayMenu.Items.Add(
+            "Create one task from clipboard",
+            null,
+            (_, _) => RunCommand(
+                "Tray",
+                "Create one task from clipboard",
+                CreateOneTaskFromClipboard));
+        _trayMenu.Items.Add(
+            "Create one task with description",
+            null,
+            (_, _) => RunCommand(
+                "Tray",
+                "Create one task with description",
+                CreateOneTaskWithDescription));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
-        _trayMenu.Items.Add("Show overlay", null, (_, _) => RunTrayCommand("Show overlay", ShowOverlay));
-        _trayMenu.Items.Add("Hide overlay", null, (_, _) => RunTrayCommand("Hide overlay", HideOverlay));
-        _trayMenu.Items.Add("Settings", null, (_, _) => RunTrayCommand("Settings", ShowSettings));
+        _trayMenu.Items.Add("Show overlay", null, (_, _) => RunCommand("Tray", "Show overlay", ShowOverlay));
+        _trayMenu.Items.Add("Hide overlay", null, (_, _) => RunCommand("Tray", "Hide overlay", HideOverlay));
+        _trayMenu.Items.Add("Settings", null, (_, _) => RunCommand("Tray", "Settings", ShowSettings));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
-        _trayMenu.Items.Add("Exit", null, (_, _) => RunTrayCommand("Exit", () => BeginShutdown("Tray Exit command.")));
+        _trayMenu.Items.Add("Exit", null, (_, _) => RunCommand("Tray", "Exit", () => BeginShutdown("Tray Exit command.")));
 
         _trayIcon = new Forms.NotifyIcon
         {
@@ -112,7 +131,98 @@ public partial class App : System.Windows.Application
         _trayIcon.DoubleClick += TrayIcon_OnDoubleClick;
     }
 
-    private void RunTrayCommand(string command, Action action)
+    private void RegisterGlobalHotkeys()
+    {
+        try
+        {
+            _hotkeyManager = new GlobalHotkeyManager();
+            _hotkeyManager.HotkeyPressed += HotkeyManager_OnHotkeyPressed;
+        }
+        catch (Exception ex)
+        {
+            _hotkeyManager = null;
+            _diagnostics?.Log(
+                "Global hotkey manager initialization failed; continuing without hotkeys.",
+                ex);
+            return;
+        }
+
+        RegisterGlobalHotkey(
+            1,
+            "Ctrl+Alt+A",
+            Forms.Keys.A,
+            GlobalHotkeyAction.CreateTasksFromLines);
+        RegisterGlobalHotkey(
+            2,
+            "Ctrl+Alt+S",
+            Forms.Keys.S,
+            GlobalHotkeyAction.CreateSingleTask);
+        RegisterGlobalHotkey(
+            3,
+            "Ctrl+Alt+D",
+            Forms.Keys.D,
+            GlobalHotkeyAction.CreateTaskWithDescription);
+        RegisterGlobalHotkey(
+            4,
+            "Ctrl+Alt+T",
+            Forms.Keys.T,
+            GlobalHotkeyAction.ToggleOverlay);
+    }
+
+    private void RegisterGlobalHotkey(
+        int id,
+        string displayName,
+        Forms.Keys key,
+        GlobalHotkeyAction action)
+    {
+        if (_hotkeyManager is null)
+        {
+            return;
+        }
+
+        if (_hotkeyManager.Register(id, key, action, out var error))
+        {
+            _diagnostics?.Log($"Global hotkey registered: {displayName}.");
+        }
+        else
+        {
+            _diagnostics?.Log(
+                $"Global hotkey registration failed: {displayName}; {error}");
+        }
+    }
+
+    private void HotkeyManager_OnHotkeyPressed(GlobalHotkeyAction action)
+    {
+        switch (action)
+        {
+            case GlobalHotkeyAction.CreateTasksFromLines:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+A - Create tasks from clipboard lines",
+                    CreateTasksFromClipboardLines);
+                break;
+            case GlobalHotkeyAction.CreateSingleTask:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+S - Create one task from clipboard",
+                    CreateOneTaskFromClipboard);
+                break;
+            case GlobalHotkeyAction.CreateTaskWithDescription:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+D - Create one task with description",
+                    CreateOneTaskWithDescription);
+                break;
+            case GlobalHotkeyAction.ToggleOverlay:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+T - Show/hide overlay",
+                    ToggleOverlay);
+                break;
+        }
+    }
+
+    private void RunCommand(string source, string command, Action action)
     {
         if (!Dispatcher.CheckAccess())
         {
@@ -120,11 +230,13 @@ public partial class App : System.Windows.Application
             {
                 Dispatcher.BeginInvoke(
                     DispatcherPriority.Normal,
-                    new Action(() => RunTrayCommand(command, action)));
+                    new Action(() => RunCommand(source, command, action)));
             }
             catch (Exception ex)
             {
-                _diagnostics?.Log($"Could not dispatch tray command: {command}.", ex);
+                _diagnostics?.Log(
+                    $"Could not dispatch {source.ToLowerInvariant()} command: {command}.",
+                    ex);
             }
 
             return;
@@ -137,54 +249,91 @@ public partial class App : System.Windows.Application
 
         try
         {
-            _diagnostics?.Log($"Tray command: {command}.");
+            _diagnostics?.Log($"{source} command: {command}.");
             action();
         }
         catch (Exception ex)
         {
-            _diagnostics?.Log($"Tray command failed: {command}.", ex);
+            _diagnostics?.Log($"{source} command failed: {command}.", ex);
         }
     }
 
     private void TrayIcon_OnDoubleClick(object? sender, EventArgs e)
     {
-        RunTrayCommand("Show overlay (double-click)", ShowOverlay);
+        RunCommand("Tray", "Show overlay (double-click)", ShowOverlay);
     }
 
-    private void CreateTaskFromClipboard()
+    private void CreateTasksFromClipboardLines()
+    {
+        CreateTasksFromClipboard(
+            "clipboard lines",
+            text => ClipboardTaskFactory.CreateFromLines(text));
+    }
+
+    private void CreateOneTaskFromClipboard()
+    {
+        CreateTasksFromClipboard(
+            "single task",
+            text => ToTaskList(ClipboardTaskFactory.CreateSingle(text)));
+    }
+
+    private void CreateOneTaskWithDescription()
+    {
+        CreateTasksFromClipboard(
+            "task with description",
+            text => ToTaskList(ClipboardTaskFactory.CreateWithDescription(text)));
+    }
+
+    private void CreateTasksFromClipboard(
+        string mode,
+        Func<string, IReadOnlyList<TaskItem>> createTasks)
     {
         if (_isShuttingDown || _state is null)
         {
             return;
         }
 
-        string clipboardText;
+        if (!TryReadClipboardText(out var clipboardText))
+        {
+            return;
+        }
+
+        var tasks = createTasks(clipboardText);
+        if (tasks.Count == 0)
+        {
+            _diagnostics?.Log(
+                $"Clipboard creation skipped for {mode}: clipboard text was empty.");
+            return;
+        }
+
+        _state.Tasks.AddRange(tasks);
+        PersistState();
+        ShowOverlay();
+        _overlayWindow?.RevealTasks(tasks);
+        _diagnostics?.Log(
+            $"Clipboard creation succeeded for {mode}: created {tasks.Count} task(s).");
+    }
+
+    private bool TryReadClipboardText(out string clipboardText)
+    {
         try
         {
             clipboardText = Clipboard.ContainsText(TextDataFormat.UnicodeText)
                 ? Clipboard.GetText(TextDataFormat.UnicodeText)
                 : string.Empty;
+            return true;
         }
         catch (Exception ex)
         {
-            _diagnostics?.Log("Clipboard read failed; task was not created.", ex);
-            return;
+            clipboardText = string.Empty;
+            _diagnostics?.Log("Clipboard read failed; no tasks were created.", ex);
+            return false;
         }
+    }
 
-        var task = ClipboardTaskFactory.Create(clipboardText);
-        if (task is null)
-        {
-            _diagnostics?.Log(
-                "Clipboard task creation skipped because the clipboard text was empty.");
-            return;
-        }
-
-        _state.Tasks.Add(task);
-        PersistState();
-        ShowOverlay();
-        _overlayWindow?.RevealTask(task);
-        _diagnostics?.Log(
-            $"Task created from clipboard: id={task.Id}; title={task.Title}");
+    private static IReadOnlyList<TaskItem> ToTaskList(TaskItem? task)
+    {
+        return task is null ? Array.Empty<TaskItem>() : new[] { task };
     }
 
     private void ShowOverlay()
@@ -216,6 +365,20 @@ public partial class App : System.Windows.Application
         _overlayWindow?.HideSafely();
     }
 
+    private void ToggleOverlay()
+    {
+        if (_overlayWindow is null ||
+            _overlayWindow.IsClosed ||
+            !_overlayWindow.IsVisible)
+        {
+            ShowOverlay();
+        }
+        else
+        {
+            HideOverlay();
+        }
+    }
+
     private void ShowSettings()
     {
         if (_isShuttingDown)
@@ -244,6 +407,7 @@ public partial class App : System.Windows.Application
         _diagnostics?.Log($"Application shutdown started. Reason: {reason}");
 
         StopOverlayAndPersist();
+        DisposeGlobalHotkeys();
         DisposeTrayIcon();
 
         try
@@ -334,6 +498,29 @@ public partial class App : System.Windows.Application
             {
                 _trayMenu = null;
             }
+        }
+    }
+
+    private void DisposeGlobalHotkeys()
+    {
+        if (_hotkeyManager is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _hotkeyManager.HotkeyPressed -= HotkeyManager_OnHotkeyPressed;
+            _hotkeyManager.Dispose();
+            _diagnostics?.Log("Global hotkeys unregistered.");
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("Global hotkey disposal failed.", ex);
+        }
+        finally
+        {
+            _hotkeyManager = null;
         }
     }
 

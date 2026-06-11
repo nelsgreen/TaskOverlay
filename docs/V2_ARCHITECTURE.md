@@ -11,29 +11,50 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
 - Passive mode renders active, non-completed task marker/text rows.
 - Clicking a task row marks it completed, persists the change, and removes it
   from the overlay.
-- The tray can create a task from Windows clipboard text and reveal it
-  immediately in the overlay.
+- The tray and fixed global hotkeys provide three clipboard task intake modes
+  and reveal created tasks immediately in the overlay.
 - Pointer entry enables a simple background panel; pointer exit returns to passive
   mode after 500 ms.
 - `SettingsWindow` validates independent settings-window lifecycle.
 - The manifest requests Per-Monitor V2 DPI awareness.
 
-No v1 migration, full editing, hotkeys, network access, or advanced themes are
-included.
+No v1 migration, full editing, editable hotkey bindings, network access, or
+advanced themes are included.
 
 ## Clipboard task creation
 
-The tray command **Create task from clipboard** reads Unicode text on the WPF UI
-dispatcher. A single trimmed line becomes the title. For multiple lines, the
-first non-empty line becomes the title and the remaining trimmed text becomes
-the description; internal description line breaks are preserved.
+The tray exposes three actions:
+
+- **Create tasks from clipboard lines** creates one task per trimmed non-empty
+  line.
+- **Create one task from clipboard** collapses trimmed non-empty lines into one
+  title with an empty description.
+- **Create one task with description** uses the first non-empty line as the
+  title and the remaining text as the description, preserving internal line
+  breaks.
 
 The Core `ClipboardTaskFactory` owns parsing and initializes the stable ID,
 normal priority, active status, UTC creation timestamp, and empty completion/due
-timestamps. The app appends the task to `AppState`, saves it atomically, shows
-the overlay, updates its active collection, and briefly reveals the active
+timestamps. The app appends the resulting task batch to `AppState`, saves once,
+shows the overlay, updates its active collection, and briefly reveals the active
 background. Empty clipboard text and clipboard access failures are logged and
-do not create a task or crash the app.
+do not create tasks or crash the app.
+
+## Fixed global hotkeys
+
+`GlobalHotkeyManager` owns a message-only Win32 window and registers:
+
+```text
+Ctrl+Alt+A  Create tasks from clipboard lines
+Ctrl+Alt+S  Create one task from clipboard
+Ctrl+Alt+D  Create one task with description
+Ctrl+Alt+T  Show or hide overlay
+```
+
+Registrations use `MOD_NOREPEAT` so one held keypress does not repeatedly invoke
+an action. Each registration succeeds or fails independently; collisions with
+other applications are logged and do not stop TaskOverlay. Registered hotkeys
+are unregistered and the message window is destroyed during shutdown.
 
 ## State and storage
 
@@ -74,8 +95,9 @@ throws back into the application.
 
 Shutdown is idempotent. It blocks new storage writes, stops and detaches the
 hover `DispatcherTimer`, captures placement once, performs one final guarded
-save, disposes the tray icon and menu, and then closes the windows. Timer and UI
-callbacks check the overlay lifecycle before touching controls.
+save, unregisters global hotkeys, disposes the tray icon and menu, and then
+closes the windows. Timer and UI callbacks check the overlay lifecycle before
+touching controls.
 
 ## Build and run
 
@@ -100,7 +122,8 @@ or its architecture documentation changes.
 - hover activation and 500 ms passive delay;
 - topmost behavior;
 - tray Show, Hide, Settings, and Exit commands;
-- tray task creation from single-line and multi-line clipboard text;
+- all three tray and global-hotkey clipboard creation modes;
+- global overlay show/hide hotkey and graceful registration collisions;
 - settings window recreation after close;
 - first-run seed state, save/load roundtrip, and corrupted-state recovery;
 - completed tasks disappearing immediately and remaining completed after restart;
@@ -118,9 +141,27 @@ or its architecture documentation changes.
 7. Confirm the process exits, the tray icon disappears, and no new
    `crash-*.log` was created.
 
+## Manual hotkey test
+
+1. Copy three non-empty lines separated by blank lines and press `Ctrl+Alt+A`;
+   confirm three tasks appear and only one state save is logged.
+2. Copy multi-line text and press `Ctrl+Alt+S`; confirm one task appears with a
+   single-line title and empty description.
+3. Copy a title followed by description lines and press `Ctrl+Alt+D`; confirm
+   one task is persisted with its description.
+4. Press `Ctrl+Alt+T` repeatedly and confirm it alternates overlay visibility
+   once per keypress.
+5. Start a second TaskOverlay instance to force registration collisions; confirm
+   it stays running and logs each unavailable hotkey.
+6. Exit both instances and confirm the hotkeys can be registered again on the
+   next launch.
+
 ## Known limitations
 
 - There is no full UI for editing, restoring, or viewing completed tasks.
+- Hotkey bindings are fixed and cannot yet be edited.
+- A fixed hotkey that is already owned by Windows or another application remains
+  unavailable until the conflict is removed; the other hotkeys continue working.
 - Passive hit testing covers the prototype window bounds.
 - Overlay settings are persisted but not editable in the placeholder settings
   window.

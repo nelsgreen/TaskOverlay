@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
@@ -56,16 +57,19 @@ public partial class OverlayWindow : Window
     public string CurrentMode => _isClosed ? "closed" : _isActiveMode ? "active" : "passive";
     public bool IsClosed => _isClosed;
 
-    public void RevealTask(TaskItem task)
+    public void RevealTasks(IEnumerable<TaskItem> tasks)
     {
         if (_isClosed || _isShuttingDown)
         {
             return;
         }
 
-        if (_activeTasks.All(item => item.Id != task.Id))
+        foreach (var task in tasks)
         {
-            _activeTasks.Add(task);
+            if (_activeTasks.All(item => item.Id != task.Id))
+            {
+                _activeTasks.Add(task);
+            }
         }
 
         _passiveTimer.Stop();

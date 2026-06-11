@@ -1,53 +1,72 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace TaskOverlay.Core;
 
 public static class ClipboardTaskFactory
 {
-    public static TaskItem? Create(string? clipboardText, DateTimeOffset? now = null)
+    public static IReadOnlyList<TaskItem> CreateFromLines(
+        string? clipboardText,
+        DateTimeOffset? now = null)
     {
-        var parsed = Parse(clipboardText);
-        if (parsed is null)
+        if (string.IsNullOrWhiteSpace(clipboardText))
         {
-            return null;
+            return Array.Empty<TaskItem>();
         }
 
-        return new TaskItem
-        {
-            Id = Guid.NewGuid(),
-            Title = parsed.Value.Title,
-            Description = parsed.Value.Description,
-            Completed = false,
-            Priority = TaskPriority.Normal,
-            InWork = false,
-            CreatedAtUtc = now ?? DateTimeOffset.UtcNow,
-            CompletedAtUtc = null,
-            DueAtUtc = null
-        };
+        var timestamp = now ?? DateTimeOffset.UtcNow;
+        return SplitLines(clipboardText)
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0)
+            .Select(title => CreateTask(title, string.Empty, timestamp))
+            .ToArray();
     }
 
-    public static ClipboardTaskText? Parse(string? clipboardText)
+    public static TaskItem? CreateSingle(
+        string? clipboardText,
+        DateTimeOffset? now = null)
     {
         if (string.IsNullOrWhiteSpace(clipboardText))
         {
             return null;
         }
 
-        var normalized = clipboardText
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n');
-        var lines = normalized.Split('\n');
+        var title = string.Join(
+            " ",
+            SplitLines(clipboardText)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0));
 
-        var titleIndex = -1;
-        for (var index = 0; index < lines.Length; index++)
+        return title.Length == 0
+            ? null
+            : CreateTask(title, string.Empty, now ?? DateTimeOffset.UtcNow);
+    }
+
+    public static TaskItem? CreateWithDescription(
+        string? clipboardText,
+        DateTimeOffset? now = null)
+    {
+        var parsed = ParseWithDescription(clipboardText);
+        return parsed is null
+            ? null
+            : CreateTask(
+                parsed.Value.Title,
+                parsed.Value.Description,
+                now ?? DateTimeOffset.UtcNow);
+    }
+
+    public static ClipboardTaskText? ParseWithDescription(string? clipboardText)
+    {
+        if (string.IsNullOrWhiteSpace(clipboardText))
         {
-            if (!string.IsNullOrWhiteSpace(lines[index]))
-            {
-                titleIndex = index;
-                break;
-            }
+            return null;
         }
+
+        var lines = SplitLines(clipboardText);
+        var titleIndex = Array.FindIndex(
+            lines,
+            line => !string.IsNullOrWhiteSpace(line));
 
         if (titleIndex < 0)
         {
@@ -55,11 +74,10 @@ public static class ClipboardTaskFactory
         }
 
         var title = lines[titleIndex].Trim();
-        var descriptionLines = new List<string>();
-        for (var index = titleIndex + 1; index < lines.Length; index++)
-        {
-            descriptionLines.Add(lines[index]);
-        }
+        var descriptionLines = lines
+            .Skip(titleIndex + 1)
+            .Select(line => line.TrimEnd())
+            .ToList();
 
         while (descriptionLines.Count > 0 &&
                string.IsNullOrWhiteSpace(descriptionLines[0]))
@@ -75,6 +93,33 @@ public static class ClipboardTaskFactory
 
         var description = string.Join("\n", descriptionLines).Trim();
         return new ClipboardTaskText(title, description);
+    }
+
+    private static TaskItem CreateTask(
+        string title,
+        string description,
+        DateTimeOffset createdAtUtc)
+    {
+        return new TaskItem
+        {
+            Id = Guid.NewGuid(),
+            Title = title,
+            Description = description,
+            Completed = false,
+            Priority = TaskPriority.Normal,
+            InWork = false,
+            CreatedAtUtc = createdAtUtc,
+            CompletedAtUtc = null,
+            DueAtUtc = null
+        };
+    }
+
+    private static string[] SplitLines(string text)
+    {
+        return text
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
     }
 }
 

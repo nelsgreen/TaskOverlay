@@ -16,8 +16,9 @@ internal static class Program
             ("corrupted state backup", CorruptedStateBackup),
             ("crash log contents", CrashLogContents),
             ("diagnostic callback isolation", DiagnosticCallbackIsolation),
-            ("single-line clipboard task", SingleLineClipboardTask),
-            ("multi-line clipboard task", MultiLineClipboardTask),
+            ("clipboard lines create multiple tasks", ClipboardLinesCreateMultipleTasks),
+            ("single clipboard task collapses lines", SingleClipboardTaskCollapsesLines),
+            ("clipboard task with description", ClipboardTaskWithDescription),
             ("empty clipboard text", EmptyClipboardText)
         };
 
@@ -157,30 +158,49 @@ internal static class Program
         });
     }
 
-    private static void SingleLineClipboardTask()
+    private static void ClipboardLinesCreateMultipleTasks()
     {
         var now = DateTimeOffset.Parse("2026-06-11T08:30:00Z");
-        var task = ClipboardTaskFactory.Create("  Ship the prototype  ", now);
+        var tasks = ClipboardTaskFactory.CreateFromLines(
+            "  First task  \r\n\r\n Second task\n\t\nThird task ",
+            now);
 
-        Assert(task is not null, "Single-line text should create a task.");
-        Assert(task!.Id != Guid.Empty, "Created task should have a stable ID.");
-        Assert(task.Title == "Ship the prototype", "Title should be trimmed.");
-        Assert(task.Description == string.Empty, "Single-line description should be empty.");
-        Assert(!task.Completed, "Created task should be active.");
-        Assert(task.Priority == TaskPriority.Normal, "Created task priority should be normal.");
-        Assert(!task.InWork, "Created task should not be in work.");
-        Assert(task.CreatedAtUtc == now, "Created timestamp should use the supplied UTC time.");
-        Assert(task.CompletedAtUtc is null, "Completed timestamp should be empty.");
-        Assert(task.DueAtUtc is null, "Due time should be empty.");
+        Assert(tasks.Count == 3, "Each non-empty line should create one task.");
+        Assert(tasks[0].Title == "First task", "First title should be trimmed.");
+        Assert(tasks[1].Title == "Second task", "Second title should be trimmed.");
+        Assert(tasks[2].Title == "Third task", "Third title should be trimmed.");
+        Assert(
+            tasks.Select(task => task.Id).Distinct().Count() == 3,
+            "Created tasks should have unique stable IDs.");
+        Assert(
+            tasks.All(task => task.Description == string.Empty),
+            "Line-created tasks should have empty descriptions.");
+        foreach (var task in tasks)
+        {
+            AssertClipboardTaskDefaults(task, now);
+        }
     }
 
-    private static void MultiLineClipboardTask()
+    private static void SingleClipboardTaskCollapsesLines()
+    {
+        var task = ClipboardTaskFactory.CreateSingle(
+            "  Prepare release \r\n\r\n notes for QA  ");
+
+        Assert(task is not null, "Non-empty clipboard should create one task.");
+        Assert(
+            task!.Title == "Prepare release notes for QA",
+            "Single-task mode should collapse non-empty lines into one title.");
+        Assert(task.Description == string.Empty, "Single-task description should be empty.");
+        AssertClipboardTaskDefaults(task, task.CreatedAtUtc);
+    }
+
+    private static void ClipboardTaskWithDescription()
     {
         const string clipboardText =
             "\r\n  Prepare release notes  \r\n\r\nFirst paragraph\r\n\r\nSecond paragraph\r\n  ";
 
-        var parsed = ClipboardTaskFactory.Parse(clipboardText);
-        var task = ClipboardTaskFactory.Create(clipboardText);
+        var parsed = ClipboardTaskFactory.ParseWithDescription(clipboardText);
+        var task = ClipboardTaskFactory.CreateWithDescription(clipboardText);
 
         Assert(parsed is not null, "Multi-line text should parse.");
         Assert(parsed!.Value.Title == "Prepare release notes", "First non-empty line should be the title.");
@@ -188,15 +208,23 @@ internal static class Program
             parsed.Value.Description == "First paragraph\n\nSecond paragraph",
             "Description should preserve internal line breaks.");
         Assert(task?.Description == parsed.Value.Description, "Task should use the parsed description.");
+        AssertClipboardTaskDefaults(task!, task!.CreatedAtUtc);
     }
 
     private static void EmptyClipboardText()
     {
-        Assert(ClipboardTaskFactory.Parse(null) is null, "Null clipboard should be ignored.");
-        Assert(ClipboardTaskFactory.Parse(string.Empty) is null, "Empty clipboard should be ignored.");
         Assert(
-            ClipboardTaskFactory.Create(" \r\n\t\r\n ") is null,
-            "Whitespace-only clipboard should not create a task.");
+            ClipboardTaskFactory.CreateFromLines(null).Count == 0,
+            "Null clipboard should create no line tasks.");
+        Assert(
+            ClipboardTaskFactory.CreateFromLines(" \r\n\t").Count == 0,
+            "Whitespace lines should be ignored.");
+        Assert(
+            ClipboardTaskFactory.CreateSingle(string.Empty) is null,
+            "Empty clipboard should create no single task.");
+        Assert(
+            ClipboardTaskFactory.CreateWithDescription(" \r\n\t\r\n ") is null,
+            "Whitespace-only clipboard should create no described task.");
     }
 
     private static void WithTemporaryDirectory(Action<string> test)
@@ -216,6 +244,21 @@ internal static class Program
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private static void AssertClipboardTaskDefaults(
+        TaskItem task,
+        DateTimeOffset expectedCreatedAtUtc)
+    {
+        Assert(task.Id != Guid.Empty, "Created task should have a stable ID.");
+        Assert(!task.Completed, "Created task should be active.");
+        Assert(task.Priority == TaskPriority.Normal, "Created task priority should be normal.");
+        Assert(!task.InWork, "Created task should not be in work.");
+        Assert(
+            task.CreatedAtUtc == expectedCreatedAtUtc,
+            "Created task should have the expected UTC timestamp.");
+        Assert(task.CompletedAtUtc is null, "Completed timestamp should be empty.");
+        Assert(task.DueAtUtc is null, "Due time should be empty.");
     }
 
     private static void Assert(bool condition, string message)

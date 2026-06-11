@@ -1,5 +1,23 @@
 # Changelog
 
+## v2 clipboard modes and global hotkeys
+
+### Added
+
+- Added separate tray actions for clipboard lines, a collapsed single task, and
+  a task with description.
+- Added fixed global hotkeys: `Ctrl+Alt+A`, `Ctrl+Alt+S`, `Ctrl+Alt+D`, and
+  `Ctrl+Alt+T`.
+- Added independent hotkey registration diagnostics, no-repeat handling, and
+  shutdown unregistration.
+- Added a Settings placeholder section listing the fixed hotkeys.
+- Expanded Core tests for all clipboard creation modes and empty-line handling.
+
+### Not changed
+
+- Hotkeys are not editable yet.
+- The Go v1 application, state, and workflow remain untouched.
+
 ## v2 clipboard task creation
 
 ### Added
@@ -14,8 +32,8 @@
 ### Not changed
 
 - The Go v1 application and state remain untouched.
-- Full task editing, hotkeys, themes, reminders, and v1 migration remain outside
-  this prototype scope.
+- Full task editing, editable hotkeys, themes, reminders, and v1 migration
+  remain outside this prototype scope.
 
 ## v2 runtime stability diagnostics
 
