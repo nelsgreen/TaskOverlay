@@ -41,6 +41,26 @@ The tray **Toggle collapsed mode** item reflects the persisted value with a
 checkmark. The Settings placeholder displays the current value. `Ctrl+Alt+T`
 continues to show or hide the whole overlay and does not change collapsed mode.
 
+## Window placement and layout
+
+The active panel and collapsed activation strip share pointer-threshold drag
+handling. A task row remains a click-to-complete target until pointer movement
+exceeds the standard Windows drag distance; after that, the gesture moves the
+window and suppresses the task click. Collapsed hover expansion waits briefly so
+a drag can begin without expanding the strip.
+
+At drag completion, the window snaps within 16 DIPs of the left, right, top, or
+bottom edge of the current monitor work area. The resulting `Left` and `Top`
+values are persisted in `WindowPlacement`. Work-area calculations preserve
+negative coordinates and account for taskbar space. Saved positions are clamped
+to a visible work area at startup.
+
+Collapsed expansion keeps the compact strip position as its resting anchor but
+shifts the larger active panel left or upward when necessary to remain inside
+the same monitor. The task content width and scrollable height are bounded by
+that monitor work area. Titles wrap inside a stretch layout, including long
+unbroken text, instead of increasing the overlay width.
+
 ## Clipboard task creation
 
 The tray exposes three actions:
@@ -146,6 +166,9 @@ or its architecture documentation changes.
 - global overlay show/hide hotkey and graceful registration collisions;
 - collapsed setting persistence and backward-compatible old-state loading;
 - collapsed activation-strip expansion and 500 ms return behavior;
+- active-panel and collapsed-strip dragging with edge snapping;
+- saved-position restoration and off-screen correction;
+- long-title wrapping and monitor-bound expansion;
 - settings window recreation after close;
 - first-run seed state, save/load roundtrip, and corrupted-state recovery;
 - completed tasks disappearing immediately and remaining completed after restart;
@@ -190,12 +213,30 @@ or its architecture documentation changes.
 6. Disable collapsed mode and confirm the existing passive task list and hover
    behavior return.
 
+## Manual placement test
+
+1. Drag the active panel from its background and confirm it follows the pointer.
+2. Click a task without moving and confirm it completes; drag from a task row
+   past the Windows drag threshold and confirm the task is not completed.
+3. Drag within about 16 DIPs of every work-area edge and confirm edge snapping.
+4. Enable collapsed mode, drag the activation strip, then leave and re-enter it;
+   confirm hover expansion still works.
+5. Put the strip near the right and bottom edges and confirm expansion shifts
+   left/up without crossing the current monitor work area.
+6. Repeat on a secondary monitor, including one arranged left or above the
+   primary monitor, then restart and confirm the position is restored.
+7. Create a task with a very long title and an unbroken string; confirm text
+   wraps or trims without extending the window past the work area.
+
 ## Known limitations
 
 - There is no full UI for editing, restoring, or viewing completed tasks.
 - Hotkey bindings are fixed and cannot yet be edited.
 - Collapsed mode is only toggled from the tray; the Settings window is
   informational.
+- Dragging uses WPF/WinForms DPI transforms and is designed for per-monitor
+  safety, but mixed-DPI transitions should still be validated on physical
+  multi-monitor hardware.
 - A fixed hotkey that is already owned by Windows or another application remains
   unavailable until the conflict is removed; the other hotkeys continue working.
 - Passive hit testing covers the prototype window bounds.

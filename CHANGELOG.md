@@ -1,5 +1,24 @@
 # Changelog
 
+## v2 overlay placement and screen bounds
+
+### Added
+
+- Added drag movement for the active overlay and collapsed activation strip,
+  while preserving click-to-complete for non-drag task clicks.
+- Added 16-DIP snapping to every edge of the current monitor work area.
+- Added persisted placement restoration, negative-coordinate support, and
+  off-screen correction.
+- Added monitor-bound expansion, task-list height constraints, and wrapping for
+  long task titles.
+- Added dependency-free geometry tests for snapping, negative monitor
+  coordinates, and off-screen correction.
+
+### Preserved
+
+- Collapsed/passive hover behavior, 500 ms return timing, task storage,
+  clipboard intake, global hotkeys, artifacts, and Go v1 remain unchanged.
+
 ## v2 collapsed quest tracker mode
 
 ### Added

@@ -15,6 +15,9 @@ internal static class Program
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("collapsed setting persistence", CollapsedSettingPersistence),
             ("old state collapsed default", OldStateCollapsedDefault),
+            ("window placement negative monitor clamp", WindowPlacementNegativeMonitorClamp),
+            ("window placement edge snap", WindowPlacementEdgeSnap),
+            ("window placement off-screen correction", WindowPlacementOffScreenCorrection),
             ("corrupted state backup", CorruptedStateBackup),
             ("crash log contents", CrashLogContents),
             ("diagnostic callback isolation", DiagnosticCallbackIsolation),
@@ -149,6 +152,49 @@ internal static class Program
                 Directory.GetFiles(directory, "state.corrupt.*.json").Length == 0,
                 "A missing collapsed setting should not mark old state as corrupted.");
         });
+    }
+
+    private static void WindowPlacementNegativeMonitorClamp()
+    {
+        var workArea = new OverlayBounds(-1920, -200, 1920, 1040);
+        var window = new OverlayBounds(-2200, -350, 520, 600);
+
+        var corrected = WindowPlacementGeometry.ClampToWorkArea(window, workArea);
+
+        Assert(corrected.Left == -1920, "Window should clamp to a negative left edge.");
+        Assert(corrected.Top == -200, "Window should clamp to a negative top edge.");
+        Assert(corrected.Right <= workArea.Right, "Window should remain inside the work area.");
+        Assert(corrected.Bottom <= workArea.Bottom, "Window should remain inside the work area.");
+    }
+
+    private static void WindowPlacementEdgeSnap()
+    {
+        var workArea = new OverlayBounds(100, 50, 1200, 800);
+        var nearRightBottom = new OverlayBounds(887, 637, 400, 200);
+
+        var snapped = WindowPlacementGeometry.SnapToWorkArea(
+            nearRightBottom,
+            workArea,
+            threshold: 16);
+
+        Assert(snapped.Right == workArea.Right, "Window should snap to the right edge.");
+        Assert(snapped.Bottom == workArea.Bottom, "Window should snap to the bottom edge.");
+    }
+
+    private static void WindowPlacementOffScreenCorrection()
+    {
+        var workArea = new OverlayBounds(1920, 0, 1280, 720);
+        var offScreen = new OverlayBounds(5000, 2000, 1600, 900);
+
+        var corrected = WindowPlacementGeometry.ClampToWorkArea(offScreen, workArea);
+
+        Assert(corrected.Left == workArea.Left, "Oversized window should anchor to the work-area left.");
+        Assert(corrected.Top == workArea.Top, "Oversized window should anchor to the work-area top.");
+        Assert(corrected.Width == workArea.Width, "Oversized width should be constrained.");
+        Assert(corrected.Height == workArea.Height, "Oversized height should be constrained.");
+        Assert(
+            WindowPlacementGeometry.Intersects(corrected, workArea),
+            "Corrected window should intersect the current monitor work area.");
     }
 
     private static void CorruptedStateBackup()

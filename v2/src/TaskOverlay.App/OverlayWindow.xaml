@@ -12,7 +12,11 @@
     <Grid x:Name="HoverSurface"
           Background="Transparent"
           MouseEnter="HoverSurface_OnMouseEnter"
-          MouseLeave="HoverSurface_OnMouseLeave">
+          MouseLeave="HoverSurface_OnMouseLeave"
+          PreviewMouseLeftButtonDown="HoverSurface_OnPreviewMouseLeftButtonDown"
+          PreviewMouseMove="HoverSurface_OnPreviewMouseMove"
+          PreviewMouseLeftButtonUp="HoverSurface_OnPreviewMouseLeftButtonUp"
+          LostMouseCapture="HoverSurface_OnLostMouseCapture">
         <Border x:Name="CollapsedActivation"
                 Width="42"
                 Height="14"
@@ -37,7 +41,8 @@
                 BorderBrush="Transparent"
                 BorderThickness="1"
                 CornerRadius="10">
-            <StackPanel MinWidth="300">
+            <StackPanel x:Name="ContentStack"
+                        Width="420">
                 <DockPanel x:Name="ActiveChrome"
                            LastChildFill="False"
                            Margin="2,0,2,10"
@@ -53,42 +58,53 @@
                                Text="ACTIVE" />
                 </DockPanel>
 
-                <ItemsControl x:Name="ActiveTasks">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Button Margin="0,1"
-                                    Padding="0,3"
-                                    HorizontalContentAlignment="Left"
-                                    Background="Transparent"
-                                    BorderThickness="0"
-                                    Cursor="Hand"
-                                    FocusVisualStyle="{x:Null}"
-                                    Click="TaskRow_OnClick">
-                                <Button.Template>
-                                    <ControlTemplate TargetType="Button">
-                                        <Border Padding="{TemplateBinding Padding}"
-                                                Background="Transparent">
-                                            <ContentPresenter />
-                                        </Border>
-                                    </ControlTemplate>
-                                </Button.Template>
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Margin="0,0,9,0"
-                                               VerticalAlignment="Center"
-                                               Foreground="#FFFFE878"
-                                               FontSize="16"
-                                               Text="&#x25CF;" />
-                                    <TextBlock VerticalAlignment="Center"
-                                               Foreground="#FFFFE878"
-                                               FontSize="20"
-                                               FontWeight="SemiBold"
-                                               Text="{Binding Title}"
-                                               TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Button>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <ScrollViewer x:Name="TasksScroller"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                    <ItemsControl x:Name="ActiveTasks">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Margin="0,1"
+                                        Padding="0,3"
+                                        HorizontalContentAlignment="Stretch"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Cursor="Hand"
+                                        FocusVisualStyle="{x:Null}"
+                                        Click="TaskRow_OnClick">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Padding="{TemplateBinding Padding}"
+                                                    Background="Transparent">
+                                                <ContentPresenter HorizontalAlignment="Stretch" />
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                                   Margin="0,0,9,0"
+                                                   VerticalAlignment="Top"
+                                                   Foreground="#FFFFE878"
+                                                   FontSize="16"
+                                                   Text="&#x25CF;" />
+                                        <TextBlock Grid.Column="1"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="#FFFFE878"
+                                                   FontSize="20"
+                                                   FontWeight="SemiBold"
+                                                   Text="{Binding Title}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   TextWrapping="Wrap" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </StackPanel>
         </Border>
     </Grid>

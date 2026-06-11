@@ -39,6 +39,12 @@ a small activation strip. Hovering the strip expands the active overlay; leaving
 the overlay returns it to the strip after 500 ms. The setting is stored in the
 v2 state file. `Ctrl+Alt+T` continues to show or hide the entire overlay.
 
+Drag the active panel or collapsed activation strip to move it. A click on a
+task still completes it; moving beyond the normal Windows drag threshold moves
+the overlay instead. The window snaps near any edge of the current monitor work
+area, saves its position, and keeps expanded content on-screen. Long task titles
+wrap within the monitor-safe overlay width.
+
 V2 runtime and crash logs are stored under
 `%APPDATA%\TaskOverlayV2\logs`. Unhandled exceptions create a dedicated
 `crash-<timestamp>.log` containing the exception chain, stack traces, state path,
