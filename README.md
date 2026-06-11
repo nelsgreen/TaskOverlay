@@ -16,11 +16,16 @@ dotnet build .\v2\TaskOverlay.sln --configuration Release --no-restore
 dotnet run --project .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj
 ```
 
-GitHub Actions publishes a self-contained Windows x64 build as the
-`TaskOverlayV2_WPF` artifact. Open a successful **Build Windows WPF v2
-prototype** workflow run, download the artifact from its **Artifacts** section,
-extract it, and run `TaskOverlay.V2.exe`. A separate .NET installation is not
-required.
+GitHub Actions publishes two Windows artifacts:
+
+- `TaskOverlayV2_WPF_FrameworkDependent` requires the .NET 8 Desktop Runtime.
+- `TaskOverlayV2_WPF_SelfContained` includes the Windows x64 runtime, so a
+  separate .NET installation is not required.
+
+Open a successful **Build Windows WPF v2 prototype** workflow run and download
+one artifact from its **Artifacts** section. Extract the downloaded zip once;
+the app files are directly inside it, with no nested zip. Run
+`TaskOverlay.V2.exe`.
 
 See `docs/V2_ARCHITECTURE.md` for scope and limitations.
 
