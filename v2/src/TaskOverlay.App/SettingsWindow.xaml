@@ -17,7 +17,7 @@
                        Foreground="#FFA1A1AA"
                        FontSize="14"
                        TextWrapping="Wrap"
-                       Text="Prototype placeholder. Persistence, themes, hotkeys, clipboard task creation, and migration are intentionally out of scope." />
+                       Text="Prototype placeholder. Settings editing, themes, hotkeys, and v1 migration are intentionally out of scope." />
         </StackPanel>
     </Grid>
 </Window>

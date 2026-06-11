@@ -1,5 +1,22 @@
 # Changelog
 
+## v2 clipboard task creation
+
+### Added
+
+- Added **Create task from clipboard** to the WPF v2 tray menu.
+- Added tested clipboard parsing for single-line titles and multi-line
+  title/description input.
+- Added immediate atomic persistence and overlay reveal for newly created tasks.
+- Added diagnostics for successful creation, empty clipboard text, and clipboard
+  access failures.
+
+### Not changed
+
+- The Go v1 application and state remain untouched.
+- Full task editing, hotkeys, themes, reminders, and v1 migration remain outside
+  this prototype scope.
+
 ## v2 runtime stability diagnostics
 
 ### Fixed

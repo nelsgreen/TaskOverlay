@@ -22,6 +22,11 @@ V2 stores its independent local state at
 created as seed data. Click a task marker or row to complete it; completed tasks
 are saved and removed from the overlay. The Go v1 state is not read or modified.
 
+To create a task, copy text and choose **Create task from clipboard** from the
+tray menu. For one line, that line becomes the title. For multiple lines, the
+first non-empty line becomes the title and the remaining text becomes the
+description. The task is saved immediately and the overlay is shown.
+
 V2 runtime and crash logs are stored under
 `%APPDATA%\TaskOverlayV2\logs`. Unhandled exceptions create a dedicated
 `crash-<timestamp>.log` containing the exception chain, stack traces, state path,

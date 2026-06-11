@@ -15,7 +15,10 @@ internal static class Program
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("corrupted state backup", CorruptedStateBackup),
             ("crash log contents", CrashLogContents),
-            ("diagnostic callback isolation", DiagnosticCallbackIsolation)
+            ("diagnostic callback isolation", DiagnosticCallbackIsolation),
+            ("single-line clipboard task", SingleLineClipboardTask),
+            ("multi-line clipboard task", MultiLineClipboardTask),
+            ("empty clipboard text", EmptyClipboardText)
         };
 
         foreach (var test in tests)
@@ -152,6 +155,48 @@ internal static class Program
 
             Assert(File.Exists(store.StatePath), "Logger failures must not break storage.");
         });
+    }
+
+    private static void SingleLineClipboardTask()
+    {
+        var now = DateTimeOffset.Parse("2026-06-11T08:30:00Z");
+        var task = ClipboardTaskFactory.Create("  Ship the prototype  ", now);
+
+        Assert(task is not null, "Single-line text should create a task.");
+        Assert(task!.Id != Guid.Empty, "Created task should have a stable ID.");
+        Assert(task.Title == "Ship the prototype", "Title should be trimmed.");
+        Assert(task.Description == string.Empty, "Single-line description should be empty.");
+        Assert(!task.Completed, "Created task should be active.");
+        Assert(task.Priority == TaskPriority.Normal, "Created task priority should be normal.");
+        Assert(!task.InWork, "Created task should not be in work.");
+        Assert(task.CreatedAtUtc == now, "Created timestamp should use the supplied UTC time.");
+        Assert(task.CompletedAtUtc is null, "Completed timestamp should be empty.");
+        Assert(task.DueAtUtc is null, "Due time should be empty.");
+    }
+
+    private static void MultiLineClipboardTask()
+    {
+        const string clipboardText =
+            "\r\n  Prepare release notes  \r\n\r\nFirst paragraph\r\n\r\nSecond paragraph\r\n  ";
+
+        var parsed = ClipboardTaskFactory.Parse(clipboardText);
+        var task = ClipboardTaskFactory.Create(clipboardText);
+
+        Assert(parsed is not null, "Multi-line text should parse.");
+        Assert(parsed!.Value.Title == "Prepare release notes", "First non-empty line should be the title.");
+        Assert(
+            parsed.Value.Description == "First paragraph\n\nSecond paragraph",
+            "Description should preserve internal line breaks.");
+        Assert(task?.Description == parsed.Value.Description, "Task should use the parsed description.");
+    }
+
+    private static void EmptyClipboardText()
+    {
+        Assert(ClipboardTaskFactory.Parse(null) is null, "Null clipboard should be ignored.");
+        Assert(ClipboardTaskFactory.Parse(string.Empty) is null, "Empty clipboard should be ignored.");
+        Assert(
+            ClipboardTaskFactory.Create(" \r\n\t\r\n ") is null,
+            "Whitespace-only clipboard should not create a task.");
     }
 
     private static void WithTemporaryDirectory(Action<string> test)

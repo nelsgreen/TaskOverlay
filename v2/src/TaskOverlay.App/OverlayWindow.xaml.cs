@@ -56,6 +56,23 @@ public partial class OverlayWindow : Window
     public string CurrentMode => _isClosed ? "closed" : _isActiveMode ? "active" : "passive";
     public bool IsClosed => _isClosed;
 
+    public void RevealTask(TaskItem task)
+    {
+        if (_isClosed || _isShuttingDown)
+        {
+            return;
+        }
+
+        if (_activeTasks.All(item => item.Id != task.Id))
+        {
+            _activeTasks.Add(task);
+        }
+
+        _passiveTimer.Stop();
+        SetActiveMode(true);
+        _passiveTimer.Start();
+    }
+
     public void HideSafely()
     {
         if (_isClosed || _isShuttingDown)
