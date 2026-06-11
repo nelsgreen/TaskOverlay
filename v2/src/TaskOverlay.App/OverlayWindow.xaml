@@ -35,21 +35,42 @@
                                Text="ACTIVE" />
                 </DockPanel>
 
-                <TextBlock Margin="0,4"
-                           Foreground="#FFFFE878"
-                           FontSize="20"
-                           FontWeight="SemiBold"
-                           Text="•  Validate transparent overlay" />
-                <TextBlock Margin="0,4"
-                           Foreground="#FFFFE878"
-                           FontSize="20"
-                           FontWeight="SemiBold"
-                           Text="•  Test tray lifecycle" />
-                <TextBlock Margin="0,4"
-                           Foreground="#FFFFE878"
-                           FontSize="20"
-                           FontWeight="SemiBold"
-                           Text="•  Check DPI and hover behavior" />
+                <ItemsControl x:Name="ActiveTasks">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Margin="0,1"
+                                    Padding="0,3"
+                                    HorizontalContentAlignment="Left"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Cursor="Hand"
+                                    FocusVisualStyle="{x:Null}"
+                                    Click="TaskRow_OnClick">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border Padding="{TemplateBinding Padding}"
+                                                Background="Transparent">
+                                            <ContentPresenter />
+                                        </Border>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Margin="0,0,9,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="#FFFFE878"
+                                               FontSize="16"
+                                               Text="&#x25CF;" />
+                                    <TextBlock VerticalAlignment="Center"
+                                               Foreground="#FFFFE878"
+                                               FontSize="20"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding Title}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </StackPanel>
         </Border>
     </Grid>
