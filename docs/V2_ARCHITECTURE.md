@@ -11,13 +11,29 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
 - Passive mode renders active, non-completed task marker/text rows.
 - Clicking a task row marks it completed, persists the change, and removes it
   from the overlay.
+- The tray can create a task from Windows clipboard text and reveal it
+  immediately in the overlay.
 - Pointer entry enables a simple background panel; pointer exit returns to passive
   mode after 500 ms.
 - `SettingsWindow` validates independent settings-window lifecycle.
 - The manifest requests Per-Monitor V2 DPI awareness.
 
-No v1 migration, full editing, hotkeys, clipboard integration, network access,
-or advanced themes are included.
+No v1 migration, full editing, hotkeys, network access, or advanced themes are
+included.
+
+## Clipboard task creation
+
+The tray command **Create task from clipboard** reads Unicode text on the WPF UI
+dispatcher. A single trimmed line becomes the title. For multiple lines, the
+first non-empty line becomes the title and the remaining trimmed text becomes
+the description; internal description line breaks are preserved.
+
+The Core `ClipboardTaskFactory` owns parsing and initializes the stable ID,
+normal priority, active status, UTC creation timestamp, and empty completion/due
+timestamps. The app appends the task to `AppState`, saves it atomically, shows
+the overlay, updates its active collection, and briefly reveals the active
+background. Empty clipboard text and clipboard access failures are logged and
+do not create a task or crash the app.
 
 ## State and storage
 
@@ -84,6 +100,7 @@ or its architecture documentation changes.
 - hover activation and 500 ms passive delay;
 - topmost behavior;
 - tray Show, Hide, Settings, and Exit commands;
+- tray task creation from single-line and multi-line clipboard text;
 - settings window recreation after close;
 - first-run seed state, save/load roundtrip, and corrupted-state recovery;
 - completed tasks disappearing immediately and remaining completed after restart;
@@ -103,7 +120,7 @@ or its architecture documentation changes.
 
 ## Known limitations
 
-- There is no UI for creating, editing, restoring, or viewing completed tasks.
+- There is no full UI for editing, restoring, or viewing completed tasks.
 - Passive hit testing covers the prototype window bounds.
 - Overlay settings are persisted but not editable in the placeholder settings
   window.

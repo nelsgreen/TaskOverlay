@@ -89,6 +89,13 @@ public partial class App : System.Windows.Application
     private void CreateTrayIcon()
     {
         _trayMenu = new Forms.ContextMenuStrip();
+        _trayMenu.Items.Add(
+            "Create task from clipboard",
+            null,
+            (_, _) => RunTrayCommand(
+                "Create task from clipboard",
+                CreateTaskFromClipboard));
+        _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("Show overlay", null, (_, _) => RunTrayCommand("Show overlay", ShowOverlay));
         _trayMenu.Items.Add("Hide overlay", null, (_, _) => RunTrayCommand("Hide overlay", HideOverlay));
         _trayMenu.Items.Add("Settings", null, (_, _) => RunTrayCommand("Settings", ShowSettings));
@@ -142,6 +149,42 @@ public partial class App : System.Windows.Application
     private void TrayIcon_OnDoubleClick(object? sender, EventArgs e)
     {
         RunTrayCommand("Show overlay (double-click)", ShowOverlay);
+    }
+
+    private void CreateTaskFromClipboard()
+    {
+        if (_isShuttingDown || _state is null)
+        {
+            return;
+        }
+
+        string clipboardText;
+        try
+        {
+            clipboardText = Clipboard.ContainsText(TextDataFormat.UnicodeText)
+                ? Clipboard.GetText(TextDataFormat.UnicodeText)
+                : string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("Clipboard read failed; task was not created.", ex);
+            return;
+        }
+
+        var task = ClipboardTaskFactory.Create(clipboardText);
+        if (task is null)
+        {
+            _diagnostics?.Log(
+                "Clipboard task creation skipped because the clipboard text was empty.");
+            return;
+        }
+
+        _state.Tasks.Add(task);
+        PersistState();
+        ShowOverlay();
+        _overlayWindow?.RevealTask(task);
+        _diagnostics?.Log(
+            $"Task created from clipboard: id={task.Id}; title={task.Title}");
     }
 
     private void ShowOverlay()
