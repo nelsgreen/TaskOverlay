@@ -67,6 +67,7 @@ public sealed class OverlaySettings
 {
     public int ActiveToPassiveDelayMilliseconds { get; set; } = 500;
     public bool AlwaysOnTop { get; set; } = true;
+    public bool CollapsedMode { get; set; }
 }
 
 public sealed class WindowPlacement

@@ -1,5 +1,24 @@
 # Changelog
 
+## v2 collapsed quest tracker mode
+
+### Added
+
+- Added persistent `OverlaySettings.collapsedMode` with backward-compatible
+  loading for existing schema v1 state files.
+- Added a compact WPF activation strip that expands to the active task overlay
+  on hover and collapses again after 500 ms.
+- Added checked tray command **Toggle collapsed mode** and an informational
+  Settings status line.
+- Added tests for collapsed-setting persistence, serialization, and old-state
+  default behavior.
+
+### Preserved
+
+- `Ctrl+Alt+T` still shows or hides the entire overlay.
+- Passive mode, clipboard intake, global hotkeys, JSON recovery, artifacts, and
+  the Go v1 application are unchanged.
+
 ## v2 clipboard modes and global hotkeys
 
 ### Added

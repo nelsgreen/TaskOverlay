@@ -34,6 +34,11 @@ hotkeys:
 Created tasks are saved together in one atomic state update and the overlay is
 shown. Empty clipboard text is ignored and logged.
 
+Use **Toggle collapsed mode** in the tray to replace the resting task list with
+a small activation strip. Hovering the strip expands the active overlay; leaving
+the overlay returns it to the strip after 500 ms. The setting is stored in the
+v2 state file. `Ctrl+Alt+T` continues to show or hide the entire overlay.
+
 V2 runtime and crash logs are stored under
 `%APPDATA%\TaskOverlayV2\logs`. Unhandled exceptions create a dedicated
 `crash-<timestamp>.log` containing the exception chain, stack traces, state path,

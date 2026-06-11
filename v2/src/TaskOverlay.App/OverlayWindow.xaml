@@ -13,6 +13,24 @@
           Background="Transparent"
           MouseEnter="HoverSurface_OnMouseEnter"
           MouseLeave="HoverSurface_OnMouseLeave">
+        <Border x:Name="CollapsedActivation"
+                Width="42"
+                Height="14"
+                Margin="2"
+                Background="#CC272A32"
+                BorderBrush="#99FFE878"
+                BorderThickness="1"
+                CornerRadius="7"
+                Visibility="Collapsed">
+            <Rectangle Width="18"
+                       Height="2"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Fill="#FFFFE878"
+                       RadiusX="1"
+                       RadiusY="1" />
+        </Border>
+
         <Border x:Name="OverlayPanel"
                 Padding="14"
                 Background="Transparent"

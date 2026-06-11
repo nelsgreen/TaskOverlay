@@ -13,6 +13,8 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
   from the overlay.
 - The tray and fixed global hotkeys provide three clipboard task intake modes
   and reveal created tasks immediately in the overlay.
+- Optional collapsed mode replaces the resting task list with a compact
+  activation strip and expands to active mode on pointer entry.
 - Pointer entry enables a simple background panel; pointer exit returns to passive
   mode after 500 ms.
 - `SettingsWindow` validates independent settings-window lifecycle.
@@ -20,6 +22,24 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
 
 No v1 migration, full editing, editable hotkey bindings, network access, or
 advanced themes are included.
+
+## Collapsed mode
+
+`OverlaySettings.collapsedMode` is persisted in the existing schema v1 JSON and
+defaults to `false`. Older state files omit the property and continue loading as
+non-collapsed without migration or recovery.
+
+When collapsed mode is resting, `OverlayPanel` and all task rows are collapsed
+and a small border/line activation strip is the only visible WPF content.
+Because the window uses `SizeToContent`, its bounds shrink to that strip. Pointer
+entry swaps the strip for the full active panel. Pointer exit starts the existing
+500 ms dispatcher timer, which returns to collapsed mode. With collapsed mode
+disabled, the same timer continues returning to the normal transparent passive
+task list.
+
+The tray **Toggle collapsed mode** item reflects the persisted value with a
+checkmark. The Settings placeholder displays the current value. `Ctrl+Alt+T`
+continues to show or hide the whole overlay and does not change collapsed mode.
 
 ## Clipboard task creation
 
@@ -124,6 +144,8 @@ or its architecture documentation changes.
 - tray Show, Hide, Settings, and Exit commands;
 - all three tray and global-hotkey clipboard creation modes;
 - global overlay show/hide hotkey and graceful registration collisions;
+- collapsed setting persistence and backward-compatible old-state loading;
+- collapsed activation-strip expansion and 500 ms return behavior;
 - settings window recreation after close;
 - first-run seed state, save/load roundtrip, and corrupted-state recovery;
 - completed tasks disappearing immediately and remaining completed after restart;
@@ -156,10 +178,24 @@ or its architecture documentation changes.
 6. Exit both instances and confirm the hotkeys can be registered again on the
    next launch.
 
+## Manual collapsed-mode test
+
+1. Enable **Toggle collapsed mode** in the tray and confirm the task rows are
+   replaced by a compact activation strip.
+2. Hover the strip and confirm the full active overlay appears.
+3. Move the pointer away and confirm the strip returns after about 500 ms.
+4. Hide and show the overlay with `Ctrl+Alt+T`; confirm collapsed mode remains
+   enabled.
+5. Restart the app and confirm collapsed mode is restored.
+6. Disable collapsed mode and confirm the existing passive task list and hover
+   behavior return.
+
 ## Known limitations
 
 - There is no full UI for editing, restoring, or viewing completed tasks.
 - Hotkey bindings are fixed and cannot yet be edited.
+- Collapsed mode is only toggled from the tray; the Settings window is
+  informational.
 - A fixed hotkey that is already owned by Windows or another application remains
   unavailable until the conflict is removed; the other hotkeys continue working.
 - Passive hit testing covers the prototype window bounds.

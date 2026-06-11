@@ -3,12 +3,13 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="TaskOverlay v2 Settings"
         Width="520"
-        Height="430"
+        Height="520"
         MinWidth="420"
         MinHeight="260"
         WindowStartupLocation="CenterScreen">
     <Grid Background="#FF181B22">
-        <StackPanel Margin="32">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="32">
             <TextBlock Foreground="#FFF4F4F5"
                        FontSize="24"
                        FontWeight="SemiBold"
@@ -50,6 +51,18 @@
                        FontSize="12"
                        TextWrapping="Wrap"
                        Text="These bindings are fixed in this prototype. Registration failures are logged if another application already owns a shortcut." />
-        </StackPanel>
+            <Border Margin="0,24,0,18"
+                    Height="1"
+                    Background="#FF3F3F46" />
+            <TextBlock Foreground="#FFF4F4F5"
+                       FontSize="16"
+                       FontWeight="SemiBold"
+                       Text="Overlay state" />
+                <TextBlock x:Name="CollapsedModeStatus"
+                           Margin="0,12,0,0"
+                           Foreground="#FFD4D4D8"
+                           FontSize="14" />
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Window>

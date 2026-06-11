@@ -54,8 +54,28 @@ public partial class OverlayWindow : Window
         Closed += OverlayWindow_OnClosed;
     }
 
-    public string CurrentMode => _isClosed ? "closed" : _isActiveMode ? "active" : "passive";
+    public string CurrentMode =>
+        _isClosed
+            ? "closed"
+            : _isActiveMode
+                ? "active"
+                : _state.OverlaySettings.CollapsedMode
+                    ? "collapsed"
+                    : "passive";
     public bool IsClosed => _isClosed;
+    public bool IsCollapsedModeEnabled => _state.OverlaySettings.CollapsedMode;
+
+    public void SetCollapsedMode(bool enabled)
+    {
+        if (_isClosed || _isShuttingDown)
+        {
+            return;
+        }
+
+        _state.OverlaySettings.CollapsedMode = enabled;
+        _passiveTimer.Stop();
+        SetActiveMode(IsMouseOver);
+    }
 
     public void RevealTasks(IEnumerable<TaskItem> tasks)
     {
@@ -147,7 +167,7 @@ public partial class OverlayWindow : Window
         }
 
         RestoreWindowPlacement();
-        SetActiveMode(false);
+        SetActiveMode(IsMouseOver);
     }
 
     private void OverlayWindow_OnClosed(object? sender, EventArgs e)
@@ -202,6 +222,16 @@ public partial class OverlayWindow : Window
         }
 
         _isActiveMode = active;
+
+        if (!active && _state.OverlaySettings.CollapsedMode)
+        {
+            CollapsedActivation.Visibility = Visibility.Visible;
+            OverlayPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        CollapsedActivation.Visibility = Visibility.Collapsed;
+        OverlayPanel.Visibility = Visibility.Visible;
         OverlayPanel.Background = active ? ActiveBackground : Brushes.Transparent;
         OverlayPanel.BorderBrush = active ? ActiveBorder : Brushes.Transparent;
         ActiveChrome.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
