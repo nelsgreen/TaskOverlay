@@ -22,14 +22,19 @@ public partial class OverlayWindow : Window
 
     private readonly AppState _state;
     private readonly Action _saveState;
+    private readonly Action<string> _log;
     private readonly ObservableCollection<TaskItem> _activeTasks;
     private readonly DispatcherTimer _passiveTimer;
     private bool _allowClose;
+    private bool _isShuttingDown;
+    private bool _isClosed;
+    private bool _isActiveMode;
 
-    public OverlayWindow(AppState state, Action saveState)
+    public OverlayWindow(AppState state, Action saveState, Action<string> log)
     {
         _state = state;
         _saveState = saveState;
+        _log = log;
         _activeTasks = new ObservableCollection<TaskItem>(
             state.Tasks.Where(task => !task.Completed));
 
@@ -37,33 +42,59 @@ public partial class OverlayWindow : Window
         ActiveTasks.ItemsSource = _activeTasks;
         Topmost = state.OverlaySettings.AlwaysOnTop;
 
-        _passiveTimer = new DispatcherTimer
+        _passiveTimer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher)
         {
             Interval = TimeSpan.FromMilliseconds(
                 Math.Max(0, state.OverlaySettings.ActiveToPassiveDelayMilliseconds))
         };
-        _passiveTimer.Tick += (_, _) =>
-        {
-            _passiveTimer.Stop();
-            SetActiveMode(false);
-        };
+        _passiveTimer.Tick += PassiveTimer_OnTick;
 
-        Loaded += (_, _) =>
+        Loaded += OverlayWindow_OnLoaded;
+        Closed += OverlayWindow_OnClosed;
+    }
+
+    public string CurrentMode => _isClosed ? "closed" : _isActiveMode ? "active" : "passive";
+    public bool IsClosed => _isClosed;
+
+    public void HideSafely()
+    {
+        if (_isClosed || _isShuttingDown)
         {
-            RestoreWindowPlacement();
-            SetActiveMode(false);
-        };
+            return;
+        }
+
+        _passiveTimer.Stop();
+        SetActiveMode(false);
+        Hide();
+    }
+
+    public void PrepareForShutdown()
+    {
+        if (_isClosed || _isShuttingDown)
+        {
+            return;
+        }
+
+        _isShuttingDown = true;
+        _passiveTimer.Stop();
+        CaptureWindowPlacement();
     }
 
     public void CloseForExit()
     {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        PrepareForShutdown();
         _allowClose = true;
         Close();
     }
 
     public void CaptureWindowPlacement()
     {
-        if (WindowState != WindowState.Normal)
+        if (_isClosed || WindowState != WindowState.Normal)
         {
             return;
         }
@@ -74,9 +105,12 @@ public partial class OverlayWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (!_allowClose)
+        _passiveTimer.Stop();
+
+        if (!_allowClose && !_isShuttingDown)
         {
             e.Cancel = true;
+            SetActiveMode(false);
             Hide();
             return;
         }
@@ -84,20 +118,69 @@ public partial class OverlayWindow : Window
         base.OnClosing(e);
     }
 
+    private void OverlayWindow_OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (_isClosed || _isShuttingDown)
+        {
+            return;
+        }
+
+        RestoreWindowPlacement();
+        SetActiveMode(false);
+    }
+
+    private void OverlayWindow_OnClosed(object? sender, EventArgs e)
+    {
+        _isClosed = true;
+        _isShuttingDown = true;
+        _passiveTimer.Stop();
+        _passiveTimer.Tick -= PassiveTimer_OnTick;
+        Loaded -= OverlayWindow_OnLoaded;
+        Closed -= OverlayWindow_OnClosed;
+    }
+
+    private void PassiveTimer_OnTick(object? sender, EventArgs e)
+    {
+        _passiveTimer.Stop();
+
+        if (_isClosed || _isShuttingDown || !IsLoaded)
+        {
+            return;
+        }
+
+        SetActiveMode(false);
+    }
+
     private void HoverSurface_OnMouseEnter(object sender, MouseEventArgs e)
     {
+        if (_isClosed || _isShuttingDown)
+        {
+            return;
+        }
+
         _passiveTimer.Stop();
         SetActiveMode(true);
     }
 
     private void HoverSurface_OnMouseLeave(object sender, MouseEventArgs e)
     {
+        if (_isClosed || _isShuttingDown)
+        {
+            return;
+        }
+
         _passiveTimer.Stop();
         _passiveTimer.Start();
     }
 
     private void SetActiveMode(bool active)
     {
+        if (_isClosed || _isShuttingDown || !Dispatcher.CheckAccess())
+        {
+            return;
+        }
+
+        _isActiveMode = active;
         OverlayPanel.Background = active ? ActiveBackground : Brushes.Transparent;
         OverlayPanel.BorderBrush = active ? ActiveBorder : Brushes.Transparent;
         ActiveChrome.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
@@ -105,7 +188,10 @@ public partial class OverlayWindow : Window
 
     private void TaskRow_OnClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { DataContext: TaskItem task } || task.Completed)
+        if (_isClosed ||
+            _isShuttingDown ||
+            sender is not Button { DataContext: TaskItem task } ||
+            task.Completed)
         {
             return;
         }
@@ -113,6 +199,7 @@ public partial class OverlayWindow : Window
         task.Completed = true;
         task.CompletedAtUtc = DateTimeOffset.UtcNow;
         _activeTasks.Remove(task);
+        _log($"Task completed: id={task.Id}; title={task.Title}");
         _saveState();
     }
 

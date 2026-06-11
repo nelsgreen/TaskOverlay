@@ -16,12 +16,16 @@ public sealed class AppStateStore
         WriteIndented = true,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
+    private readonly Action<string, Exception?>? _diagnostic;
 
-    public AppStateStore(string? stateDirectory = null)
+    public AppStateStore(
+        string? stateDirectory = null,
+        Action<string, Exception?>? diagnostic = null)
     {
         StateDirectory = stateDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "TaskOverlayV2");
+        _diagnostic = diagnostic;
     }
 
     public string StateDirectory { get; }
@@ -30,24 +34,31 @@ public sealed class AppStateStore
 
     public AppState Load()
     {
-        Directory.CreateDirectory(StateDirectory);
-
-        if (!File.Exists(StatePath))
-        {
-            var defaultState = AppState.CreateDefault();
-            TrySave(defaultState);
-            return defaultState;
-        }
-
         try
         {
+            Directory.CreateDirectory(StateDirectory);
+
+            if (!File.Exists(StatePath))
+            {
+                Report("State file is missing; creating seed state.");
+                var defaultState = AppState.CreateDefault();
+                TrySave(defaultState);
+                return defaultState;
+            }
+
             var json = File.ReadAllText(StatePath);
             var state = JsonSerializer.Deserialize<AppState>(json, _jsonOptions);
             Validate(state);
+            Report($"State load succeeded with {state!.Tasks.Count} tasks.");
             return state!;
         }
-        catch (Exception ex) when (ex is JsonException or IOException or InvalidDataException)
+        catch (Exception ex) when (
+            ex is JsonException or
+            IOException or
+            InvalidDataException or
+            UnauthorizedAccessException)
         {
+            Report("State load failed; recovering seed state.", ex);
             TryBackupCorruptedState();
             var defaultState = AppState.CreateDefault();
             TrySave(defaultState);
@@ -92,6 +103,8 @@ public sealed class AppStateStore
             {
                 File.Move(temporaryPath, StatePath);
             }
+
+            Report($"State save succeeded with {state.Tasks.Count} tasks.");
         }
         finally
         {
@@ -128,6 +141,7 @@ public sealed class AppStateStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            Report("Seed/recovery state save failed.", ex);
             // The in-memory defaults still let the overlay start safely.
         }
     }
@@ -150,7 +164,20 @@ public sealed class AppStateStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            Report("Corrupted state backup failed.", ex);
             // Recovery must not fail just because the backup could not be created.
+        }
+    }
+
+    private void Report(string message, Exception? exception = null)
+    {
+        try
+        {
+            _diagnostic?.Invoke(message, exception);
+        }
+        catch
+        {
+            // Diagnostics must never change storage behavior.
         }
     }
 

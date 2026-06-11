@@ -38,6 +38,29 @@ preserved as `state.corrupt.<timestamp>.json`; the app then loads and writes the
 three prototype tasks as fresh seed data. Storage recovery does not prevent the
 overlay from starting if a backup or recovery write fails.
 
+## Diagnostics and lifecycle
+
+Runtime diagnostics are written to:
+
+```text
+%APPDATA%\TaskOverlayV2\logs\runtime-<date>.log
+```
+
+WPF dispatcher, AppDomain, and unobserved task exceptions are captured in:
+
+```text
+%APPDATA%\TaskOverlayV2\logs\crash-<timestamp>.log
+```
+
+Crash logs include the exception and inner-exception chain, stack traces, state
+path, shutdown status, and current overlay mode. Logging is fail-safe and never
+throws back into the application.
+
+Shutdown is idempotent. It blocks new storage writes, stops and detaches the
+hover `DispatcherTimer`, captures placement once, performs one final guarded
+save, disposes the tray icon and menu, and then closes the windows. Timer and UI
+callbacks check the overlay lifecycle before touching controls.
+
 ## Build and run
 
 Requirements:
@@ -66,6 +89,17 @@ or its architecture documentation changes.
 - completed tasks disappearing immediately and remaining completed after restart;
 - placement inside the working area of the monitor containing the pointer;
 - behavior under mixed DPI and multiple monitors.
+
+## Manual idle stress test
+
+1. Launch the app and confirm startup/state-load entries in the runtime log.
+2. Leave it idle for at least 60 minutes.
+3. Use tray Show, Hide, and Settings after the idle period.
+4. Hover the overlay, leave it, and confirm the 500 ms passive transition.
+5. Complete a task after the idle period and confirm it is saved.
+6. Exit through the tray.
+7. Confirm the process exits, the tray icon disappears, and no new
+   `crash-*.log` was created.
 
 ## Known limitations
 

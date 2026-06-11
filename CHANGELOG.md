@@ -1,5 +1,23 @@
 # Changelog
 
+## v2 runtime stability diagnostics
+
+### Fixed
+
+- Stopped and detached the hover `DispatcherTimer` before overlay shutdown.
+- Prevented storage writes and UI callbacks after shutdown begins.
+- Made tray disposal and application shutdown idempotent and exception-safe.
+- Kept state load, save, corrupted-state recovery, and backup failures from
+  escaping into the WPF dispatcher.
+
+### Added
+
+- Added runtime logging and crash logs under
+  `%APPDATA%\TaskOverlayV2\logs`.
+- Added handlers for WPF dispatcher, AppDomain, and unobserved task exceptions.
+- Added startup, state, task completion, tray command, and shutdown diagnostics.
+- Added crash-log coverage to the dependency-free v2 Core tests.
+
 ## v2 local task state
 
 ### Added

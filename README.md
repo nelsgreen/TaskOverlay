@@ -22,6 +22,11 @@ V2 stores its independent local state at
 created as seed data. Click a task marker or row to complete it; completed tasks
 are saved and removed from the overlay. The Go v1 state is not read or modified.
 
+V2 runtime and crash logs are stored under
+`%APPDATA%\TaskOverlayV2\logs`. Unhandled exceptions create a dedicated
+`crash-<timestamp>.log` containing the exception chain, stack traces, state path,
+shutdown status, and current overlay mode.
+
 GitHub Actions publishes two Windows artifacts:
 
 - `TaskOverlayV2_WPF_FrameworkDependent` requires the .NET 8 Desktop Runtime.

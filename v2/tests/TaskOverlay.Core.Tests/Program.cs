@@ -13,7 +13,9 @@ internal static class Program
         {
             ("default state creation", DefaultStateCreation),
             ("save/load roundtrip", SaveLoadRoundtrip),
-            ("corrupted state backup", CorruptedStateBackup)
+            ("corrupted state backup", CorruptedStateBackup),
+            ("crash log contents", CrashLogContents),
+            ("diagnostic callback isolation", DiagnosticCallbackIsolation)
         };
 
         foreach (var test in tests)
@@ -86,7 +88,10 @@ internal static class Program
     {
         WithTemporaryDirectory(directory =>
         {
-            var store = new AppStateStore(directory);
+            var diagnostics = new System.Collections.Generic.List<string>();
+            var store = new AppStateStore(
+                directory,
+                (message, exception) => diagnostics.Add(message));
             store.Load();
             File.WriteAllText(store.StatePath, "{ definitely not valid json");
 
@@ -98,9 +103,54 @@ internal static class Program
             Assert(
                 File.ReadAllText(corruptBackups[0]).Contains("definitely not valid json"),
                 "Corrupted backup should contain the original data.");
+            Assert(
+                diagnostics.Any(message => message.Contains("State load failed")),
+                "Corrupted state recovery should be logged.");
 
             var reloaded = store.Load();
             Assert(reloaded.Tasks.Count == 3, "Recovered state.json should be valid.");
+        });
+    }
+
+    private static void CrashLogContents()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var diagnostics = new AppDiagnostics(directory);
+            var exception = new InvalidOperationException(
+                "outer failure",
+                new IOException("inner failure"));
+
+            var path = diagnostics.LogCrash(
+                "test source",
+                exception,
+                "OverlayMode=active");
+
+            Assert(path is not null && File.Exists(path), "Crash log should be created.");
+
+            var contents = File.ReadAllText(path!);
+            Assert(contents.Contains("test source"), "Crash source should be logged.");
+            Assert(contents.Contains("InvalidOperationException"), "Exception type should be logged.");
+            Assert(contents.Contains("outer failure"), "Exception message should be logged.");
+            Assert(contents.Contains("IOException"), "Inner exception type should be logged.");
+            Assert(contents.Contains("inner failure"), "Inner exception message should be logged.");
+            Assert(contents.Contains("StatePath:"), "State path should be logged.");
+            Assert(contents.Contains("OverlayMode=active"), "Runtime context should be logged.");
+        });
+    }
+
+    private static void DiagnosticCallbackIsolation()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(
+                directory,
+                (_, _) => throw new InvalidOperationException("logger failed"));
+
+            var state = store.Load();
+            store.Save(state);
+
+            Assert(File.Exists(store.StatePath), "Logger failures must not break storage.");
         });
     }
 
