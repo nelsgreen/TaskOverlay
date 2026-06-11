@@ -1,5 +1,24 @@
 # Changelog
 
+## v2 local task state
+
+### Added
+
+- Added versioned `AppState`, `TaskItem`, `OverlaySettings`, and
+  `WindowPlacement` models for the WPF prototype.
+- Added atomic JSON persistence at `%APPDATA%\TaskOverlayV2\state.json`, with
+  overwrite backups and corrupted-state recovery.
+- Added first-run seed tasks and click-to-complete behavior for active overlay
+  tasks.
+- Added dependency-free tests for default state creation, save/load roundtrips,
+  and corrupted-state backups.
+
+### Not changed
+
+- The Go v1 application, its state file, and its build workflow remain
+  untouched.
+- Full task editing and settings UI are still outside the prototype scope.
+
 ## v2 WPF prototype
 
 ### Added

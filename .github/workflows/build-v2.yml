@@ -32,6 +32,9 @@ jobs:
       - name: Build
         run: dotnet build v2/TaskOverlay.sln --configuration Release --no-restore
 
+      - name: Test storage
+        run: dotnet run --project v2/tests/TaskOverlay.Core.Tests/TaskOverlay.Core.Tests.csproj --configuration Release --no-build
+
       - name: Publish framework-dependent app
         run: dotnet publish v2/src/TaskOverlay.App/TaskOverlay.App.csproj --configuration Release --no-restore --output v2/publish/framework-dependent
 

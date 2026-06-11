@@ -13,8 +13,14 @@ Build and run:
 ```powershell
 dotnet restore .\v2\TaskOverlay.sln --configfile .\v2\NuGet.Config
 dotnet build .\v2\TaskOverlay.sln --configuration Release --no-restore
+dotnet run --project .\v2\tests\TaskOverlay.Core.Tests\TaskOverlay.Core.Tests.csproj --configuration Release --no-build
 dotnet run --project .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj
 ```
+
+V2 stores its independent local state at
+`%APPDATA%\TaskOverlayV2\state.json`. On first run, the three prototype tasks are
+created as seed data. Click a task marker or row to complete it; completed tasks
+are saved and removed from the overlay. The Go v1 state is not read or modified.
 
 GitHub Actions publishes two Windows artifacts:
 

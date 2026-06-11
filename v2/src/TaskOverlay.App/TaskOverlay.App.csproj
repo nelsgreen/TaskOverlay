@@ -12,4 +12,8 @@
     <RootNamespace>TaskOverlay.App</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\TaskOverlay.Core\TaskOverlay.Core.csproj" />
+  </ItemGroup>
+
 </Project>

@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.Windows;
+using TaskOverlay.Core;
 using Forms = System.Windows.Forms;
 
 namespace TaskOverlay.App;
@@ -9,12 +11,17 @@ public partial class App : System.Windows.Application
     private OverlayWindow? _overlayWindow;
     private SettingsWindow? _settingsWindow;
     private Forms.NotifyIcon? _trayIcon;
+    private AppStateStore? _stateStore;
+    private AppState? _state;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        _overlayWindow = new OverlayWindow();
+        _stateStore = new AppStateStore();
+        _state = _stateStore.Load();
+
+        _overlayWindow = new OverlayWindow(_state, PersistState);
         _overlayWindow.Show();
 
         var menu = new Forms.ContextMenuStrip();
@@ -36,6 +43,8 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        CaptureAndPersistState();
+
         if (_trayIcon is not null)
         {
             _trayIcon.Visible = false;
@@ -47,7 +56,16 @@ public partial class App : System.Windows.Application
 
     private void ShowOverlay()
     {
-        _overlayWindow ??= new OverlayWindow();
+        if (_overlayWindow is null)
+        {
+            if (_state is null)
+            {
+                return;
+            }
+
+            _overlayWindow = new OverlayWindow(_state, PersistState);
+        }
+
         _overlayWindow.Show();
         _overlayWindow.Activate();
     }
@@ -69,5 +87,33 @@ public partial class App : System.Windows.Application
         _settingsWindow?.Close();
         _overlayWindow?.CloseForExit();
         Shutdown();
+    }
+
+    private void CaptureAndPersistState()
+    {
+        if (_state is null)
+        {
+            return;
+        }
+
+        _overlayWindow?.CaptureWindowPlacement();
+        PersistState();
+    }
+
+    private void PersistState()
+    {
+        if (_stateStore is null || _state is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _stateStore.Save(_state);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"TaskOverlay v2 state save failed: {ex}");
+        }
     }
 }
