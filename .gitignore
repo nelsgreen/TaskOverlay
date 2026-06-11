@@ -8,6 +8,10 @@
 *.out
 /vendor/
 
+# .NET v2
+/v2/**/bin/
+/v2/**/obj/
+
 # Local IDE
 .vscode/
 .idea/
