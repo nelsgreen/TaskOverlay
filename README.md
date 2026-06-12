@@ -19,8 +19,18 @@ dotnet run --project .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj
 
 V2 stores its independent local state at
 `%APPDATA%\TaskOverlayV2\state.json`. On first run, the three prototype tasks are
-created as seed data. Click a task marker or row to complete it; completed tasks
-are saved and removed from the overlay. The Go v1 state is not read or modified.
+created as seed data. Click the marker to complete a task. Click the task text
+to mark it in work, or right-click a row for Edit, description visibility,
+in-work, completion, and delete actions. Completed tasks are saved and removed
+from the overlay. The Go v1 state is not read or modified.
+
+The Settings window provides two in-work modes. **Multiple tasks** independently
+toggles focus on each text click and is the default. **Single task** focuses the
+clicked task and clears focus from the others. In-work rows are highlighted.
+Right-click **Edit** opens a separate details window for title, description,
+in-work, completion, and deletion. Save persists changes; Cancel discards them.
+Descriptions remain hidden in passive mode and may appear in active mode for
+expanded or in-work tasks.
 
 V2 provides three clipboard intake modes through the tray and fixed global
 hotkeys:
@@ -33,6 +43,18 @@ hotkeys:
 
 Created tasks are saved together in one atomic state update and the overlay is
 shown. Empty clipboard text is ignored and logged.
+
+Use **Toggle collapsed mode** in the tray to replace the resting task list with
+a small activation strip. Hovering the strip expands the active overlay; leaving
+the overlay returns it to the strip after 500 ms. The setting is stored in the
+v2 state file. `Ctrl+Alt+T` continues to show or hide the entire overlay.
+
+Drag the active panel or collapsed activation strip to move it. Moving beyond
+the normal Windows drag threshold suppresses marker/body clicks. The window
+snaps near any edge of the current monitor work area and keeps expanded content
+on-screen. The collapsed strip has its own saved anchor, so temporary left/up
+adjustment during expansion does not move a right/bottom snapped strip. Long
+task titles and visible descriptions wrap within the monitor-safe overlay width.
 
 V2 runtime and crash logs are stored under
 `%APPDATA%\TaskOverlayV2\logs`. Unhandled exceptions create a dedicated

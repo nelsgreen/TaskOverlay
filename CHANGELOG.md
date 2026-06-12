@@ -1,5 +1,71 @@
 # Changelog
 
+## v2 task interaction and independent collapsed anchor
+
+### Added
+
+- Added marker-only completion and body-click in-work interaction.
+- Added persisted `MultipleTasks` and `SingleTask` in-work modes with a Settings
+  selector and backward-compatible defaults.
+- Added in-work row highlighting, persisted description expansion, and
+  active-only description display.
+- Added task row actions for Edit, description visibility, in-work, completion,
+  and confirmed deletion.
+- Added a separate task details window with Save, Cancel, complete, in-work, and
+  delete behavior.
+- Added Core tests for focus modes, editing, completion, deletion, new settings,
+  old-state defaults, and collapsed-anchor serialization.
+
+### Fixed
+
+- Separated normal overlay placement from the collapsed strip anchor.
+- Prevented temporary screen-bound expansion offsets from overwriting the
+  collapsed anchor.
+- Kept marker/body actions from firing after a drag gesture.
+
+### Preserved
+
+- Clipboard modes, global hotkeys, tray lifecycle, 500 ms hover return, JSON
+  recovery, both WPF artifacts, and Go v1 remain unchanged.
+
+## v2 overlay placement and screen bounds
+
+### Added
+
+- Added drag movement for the active overlay and collapsed activation strip,
+  while preserving click-to-complete for non-drag task clicks.
+- Added 16-DIP snapping to every edge of the current monitor work area.
+- Added persisted placement restoration, negative-coordinate support, and
+  off-screen correction.
+- Added monitor-bound expansion, task-list height constraints, and wrapping for
+  long task titles.
+- Added dependency-free geometry tests for snapping, negative monitor
+  coordinates, and off-screen correction.
+
+### Preserved
+
+- Collapsed/passive hover behavior, 500 ms return timing, task storage,
+  clipboard intake, global hotkeys, artifacts, and Go v1 remain unchanged.
+
+## v2 collapsed quest tracker mode
+
+### Added
+
+- Added persistent `OverlaySettings.collapsedMode` with backward-compatible
+  loading for existing schema v1 state files.
+- Added a compact WPF activation strip that expands to the active task overlay
+  on hover and collapses again after 500 ms.
+- Added checked tray command **Toggle collapsed mode** and an informational
+  Settings status line.
+- Added tests for collapsed-setting persistence, serialization, and old-state
+  default behavior.
+
+### Preserved
+
+- `Ctrl+Alt+T` still shows or hides the entire overlay.
+- Passive mode, clipboard intake, global hotkeys, JSON recovery, artifacts, and
+  the Go v1 application are unchanged.
+
 ## v2 clipboard modes and global hotkeys
 
 ### Added

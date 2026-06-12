@@ -14,6 +14,7 @@ public partial class App : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private Forms.NotifyIcon? _trayIcon;
     private Forms.ContextMenuStrip? _trayMenu;
+    private Forms.ToolStripMenuItem? _collapsedModeMenuItem;
     private GlobalHotkeyManager? _hotkeyManager;
     private AppStateStore? _stateStore;
     private AppState? _state;
@@ -117,6 +118,12 @@ public partial class App : System.Windows.Application
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("Show overlay", null, (_, _) => RunCommand("Tray", "Show overlay", ShowOverlay));
         _trayMenu.Items.Add("Hide overlay", null, (_, _) => RunCommand("Tray", "Hide overlay", HideOverlay));
+        _collapsedModeMenuItem = new Forms.ToolStripMenuItem("Toggle collapsed mode")
+        {
+            Checked = _state?.OverlaySettings.CollapsedMode ?? false
+        };
+        _collapsedModeMenuItem.Click += CollapsedModeMenuItem_OnClick;
+        _trayMenu.Items.Add(_collapsedModeMenuItem);
         _trayMenu.Items.Add("Settings", null, (_, _) => RunCommand("Tray", "Settings", ShowSettings));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("Exit", null, (_, _) => RunCommand("Tray", "Exit", () => BeginShutdown("Tray Exit command.")));
@@ -263,6 +270,11 @@ public partial class App : System.Windows.Application
         RunCommand("Tray", "Show overlay (double-click)", ShowOverlay);
     }
 
+    private void CollapsedModeMenuItem_OnClick(object? sender, EventArgs e)
+    {
+        RunCommand("Tray", "Toggle collapsed mode", ToggleCollapsedMode);
+    }
+
     private void CreateTasksFromClipboardLines()
     {
         CreateTasksFromClipboard(
@@ -379,6 +391,27 @@ public partial class App : System.Windows.Application
         }
     }
 
+    private void ToggleCollapsedMode()
+    {
+        if (_state is null)
+        {
+            return;
+        }
+
+        var enabled = !_state.OverlaySettings.CollapsedMode;
+        _state.OverlaySettings.CollapsedMode = enabled;
+        _overlayWindow?.SetCollapsedMode(enabled);
+
+        if (_collapsedModeMenuItem is not null)
+        {
+            _collapsedModeMenuItem.Checked = enabled;
+        }
+
+        _settingsWindow?.UpdateFromSettings();
+        PersistState();
+        _diagnostics?.Log($"Collapsed mode changed: enabled={enabled}.");
+    }
+
     private void ShowSettings()
     {
         if (_isShuttingDown)
@@ -388,10 +421,19 @@ public partial class App : System.Windows.Application
 
         if (_settingsWindow is null)
         {
-            _settingsWindow = new SettingsWindow();
+            if (_state is null)
+            {
+                return;
+            }
+
+            _settingsWindow = new SettingsWindow(
+                _state,
+                PersistState,
+                () => _overlayWindow?.RefreshTaskPresentation());
             _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         }
 
+        _settingsWindow.UpdateFromSettings();
         _settingsWindow.Show();
         _settingsWindow.Activate();
     }
@@ -488,6 +530,12 @@ public partial class App : System.Windows.Application
         {
             try
             {
+                if (_collapsedModeMenuItem is not null)
+                {
+                    _collapsedModeMenuItem.Click -= CollapsedModeMenuItem_OnClick;
+                    _collapsedModeMenuItem = null;
+                }
+
                 _trayMenu.Dispose();
             }
             catch (Exception ex)
