@@ -40,6 +40,7 @@ public sealed class TaskItem
     public bool Completed { get; set; }
     public TaskPriority Priority { get; set; } = TaskPriority.Normal;
     public bool InWork { get; set; }
+    public bool DescriptionExpanded { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAtUtc { get; set; }
     public DateTimeOffset? DueAtUtc { get; set; }
@@ -63,15 +64,24 @@ public enum TaskPriority
     Critical
 }
 
+public enum InWorkMode
+{
+    MultipleTasks,
+    SingleTask
+}
+
 public sealed class OverlaySettings
 {
     public int ActiveToPassiveDelayMilliseconds { get; set; } = 500;
     public bool AlwaysOnTop { get; set; } = true;
     public bool CollapsedMode { get; set; }
+    public InWorkMode InWorkMode { get; set; } = InWorkMode.MultipleTasks;
 }
 
 public sealed class WindowPlacement
 {
     public double? Left { get; set; }
     public double? Top { get; set; }
+    public double? CollapsedLeft { get; set; }
+    public double? CollapsedTop { get; set; }
 }

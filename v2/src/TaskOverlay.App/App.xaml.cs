@@ -407,7 +407,7 @@ public partial class App : System.Windows.Application
             _collapsedModeMenuItem.Checked = enabled;
         }
 
-        _settingsWindow?.UpdateCollapsedMode(enabled);
+        _settingsWindow?.UpdateFromSettings();
         PersistState();
         _diagnostics?.Log($"Collapsed mode changed: enabled={enabled}.");
     }
@@ -421,13 +421,19 @@ public partial class App : System.Windows.Application
 
         if (_settingsWindow is null)
         {
+            if (_state is null)
+            {
+                return;
+            }
+
             _settingsWindow = new SettingsWindow(
-                _state?.OverlaySettings.CollapsedMode ?? false);
+                _state,
+                PersistState,
+                () => _overlayWindow?.RefreshTaskPresentation());
             _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         }
 
-        _settingsWindow.UpdateCollapsedMode(
-            _state?.OverlaySettings.CollapsedMode ?? false);
+        _settingsWindow.UpdateFromSettings();
         _settingsWindow.Show();
         _settingsWindow.Activate();
     }

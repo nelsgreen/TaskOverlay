@@ -64,43 +64,111 @@
                     <ItemsControl x:Name="ActiveTasks">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Button Margin="0,1"
-                                        Padding="0,3"
-                                        HorizontalContentAlignment="Stretch"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Cursor="Hand"
-                                        FocusVisualStyle="{x:Null}"
-                                        Click="TaskRow_OnClick">
-                                    <Button.Template>
-                                        <ControlTemplate TargetType="Button">
-                                            <Border Padding="{TemplateBinding Padding}"
-                                                    Background="Transparent">
-                                                <ContentPresenter HorizontalAlignment="Stretch" />
-                                            </Border>
-                                        </ControlTemplate>
-                                    </Button.Template>
+                                <Border Margin="0,1"
+                                        Padding="0,2"
+                                        CornerRadius="5"
+                                        ContextMenuOpening="TaskRow_OnContextMenuOpening">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background"
+                                                    Value="Transparent" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding InWork}"
+                                                             Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="#3329B6F6" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Border.ContextMenu>
+                                        <ContextMenu Opened="TaskContextMenu_OnOpened"
+                                                     Closed="TaskContextMenu_OnClosed"
+                                                     DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                            <MenuItem Header="Edit"
+                                                      Click="EditTaskMenuItem_OnClick" />
+                                            <MenuItem Header="Show description"
+                                                      Click="ToggleDescriptionMenuItem_OnClick" />
+                                            <MenuItem Header="Mark as in work"
+                                                      Click="ToggleInWorkMenuItem_OnClick" />
+                                            <Separator />
+                                            <MenuItem Header="Mark completed"
+                                                      Click="CompleteTaskMenuItem_OnClick" />
+                                            <MenuItem Header="Delete"
+                                                      Click="DeleteTaskMenuItem_OnClick" />
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0"
-                                                   Margin="0,0,9,0"
-                                                   VerticalAlignment="Top"
-                                                   Foreground="#FFFFE878"
-                                                   FontSize="16"
-                                                   Text="&#x25CF;" />
-                                        <TextBlock Grid.Column="1"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="#FFFFE878"
-                                                   FontSize="20"
-                                                   FontWeight="SemiBold"
-                                                   Text="{Binding Title}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   TextWrapping="Wrap" />
+
+                                        <Button Grid.Column="0"
+                                                Width="28"
+                                                MinHeight="30"
+                                                Margin="0,0,4,0"
+                                                VerticalAlignment="Stretch"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Cursor="Hand"
+                                                FocusVisualStyle="{x:Null}"
+                                                ToolTip="Mark completed"
+                                                Click="TaskMarker_OnClick">
+                                            <TextBlock VerticalAlignment="Top"
+                                                       Foreground="#FFFFE878"
+                                                       FontSize="16"
+                                                       Text="&#x25CF;" />
+                                        </Button>
+
+                                        <Button Grid.Column="1"
+                                                Padding="0,2"
+                                                HorizontalContentAlignment="Stretch"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Cursor="Hand"
+                                                FocusVisualStyle="{x:Null}"
+                                                Click="TaskBody_OnClick">
+                                            <Button.Template>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border Padding="{TemplateBinding Padding}"
+                                                            Background="Transparent">
+                                                        <ContentPresenter HorizontalAlignment="Stretch" />
+                                                    </Border>
+                                                </ControlTemplate>
+                                            </Button.Template>
+                                            <StackPanel>
+                                                <TextBlock VerticalAlignment="Center"
+                                                           Foreground="#FFFFE878"
+                                                           FontSize="20"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding Title}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           TextWrapping="Wrap" />
+                                                <TextBlock Margin="0,5,0,2"
+                                                           Foreground="#FFD4D4D8"
+                                                           FontSize="13"
+                                                           Text="{Binding Description}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           TextWrapping="Wrap">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility"
+                                                                    Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding ShowDescription}"
+                                                                             Value="True">
+                                                                    <Setter Property="Visibility"
+                                                                            Value="Visible" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </Button>
                                     </Grid>
-                                </Button>
+                                </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

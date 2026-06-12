@@ -1,5 +1,33 @@
 # Changelog
 
+## v2 task interaction and independent collapsed anchor
+
+### Added
+
+- Added marker-only completion and body-click in-work interaction.
+- Added persisted `MultipleTasks` and `SingleTask` in-work modes with a Settings
+  selector and backward-compatible defaults.
+- Added in-work row highlighting, persisted description expansion, and
+  active-only description display.
+- Added task row actions for Edit, description visibility, in-work, completion,
+  and confirmed deletion.
+- Added a separate task details window with Save, Cancel, complete, in-work, and
+  delete behavior.
+- Added Core tests for focus modes, editing, completion, deletion, new settings,
+  old-state defaults, and collapsed-anchor serialization.
+
+### Fixed
+
+- Separated normal overlay placement from the collapsed strip anchor.
+- Prevented temporary screen-bound expansion offsets from overwriting the
+  collapsed anchor.
+- Kept marker/body actions from firing after a drag gesture.
+
+### Preserved
+
+- Clipboard modes, global hotkeys, tray lifecycle, 500 ms hover return, JSON
+  recovery, both WPF artifacts, and Go v1 remain unchanged.
+
 ## v2 overlay placement and screen bounds
 
 ### Added

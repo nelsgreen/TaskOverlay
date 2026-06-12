@@ -28,7 +28,7 @@ public partial class OverlayWindow : Window
     private readonly AppState _state;
     private readonly Action _saveState;
     private readonly Action<string> _log;
-    private readonly ObservableCollection<TaskItem> _activeTasks;
+    private readonly ObservableCollection<TaskRowViewModel> _activeTasks;
     private readonly DispatcherTimer _passiveTimer;
     private readonly DispatcherTimer _collapsedExpandTimer;
 
@@ -41,23 +41,26 @@ public partial class OverlayWindow : Window
     private bool _dragStartedCollapsed;
     private bool _suppressTaskClick;
     private bool _adjustingBounds;
+    private bool _contextInteractionActive;
     private DrawingPoint _dragStartCursorPixels;
     private double _dragStartLeft;
     private double _dragStartTop;
     private Matrix _dragFromDevice = Matrix.Identity;
     private double? _collapsedRestingLeft;
     private double? _collapsedRestingTop;
+    private Forms.Screen? _collapsedRestingScreen;
+    private TaskDetailsWindow? _taskDetailsWindow;
 
     public OverlayWindow(AppState state, Action saveState, Action<string> log)
     {
         _state = state;
         _saveState = saveState;
         _log = log;
-        _activeTasks = new ObservableCollection<TaskItem>(
-            state.Tasks.Where(task => !task.Completed));
+        _activeTasks = new ObservableCollection<TaskRowViewModel>();
 
         InitializeComponent();
         ActiveTasks.ItemsSource = _activeTasks;
+        RefreshTasks();
         Topmost = state.OverlaySettings.AlwaysOnTop;
 
         _passiveTimer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher)
@@ -103,11 +106,22 @@ public partial class OverlayWindow : Window
         {
             _collapsedRestingLeft = Left;
             _collapsedRestingTop = Top;
+            _collapsedRestingScreen = GetCurrentScreen();
+            _state.WindowPlacement.CollapsedLeft = Left;
+            _state.WindowPlacement.CollapsedTop = Top;
         }
         else
         {
             _collapsedRestingLeft = null;
             _collapsedRestingTop = null;
+            _collapsedRestingScreen = null;
+
+            if (_state.WindowPlacement.Left is double normalLeft &&
+                _state.WindowPlacement.Top is double normalTop)
+            {
+                Left = normalLeft;
+                Top = normalTop;
+            }
         }
 
         SetActiveMode(IsMouseOver);
@@ -120,13 +134,7 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        foreach (var task in tasks)
-        {
-            if (_activeTasks.All(item => item.Id != task.Id))
-            {
-                _activeTasks.Add(task);
-            }
-        }
+        RefreshTasks();
 
         StopModeTimers();
         SetActiveMode(true);
@@ -154,6 +162,8 @@ public partial class OverlayWindow : Window
 
         _isShuttingDown = true;
         StopModeTimers();
+        _taskDetailsWindow?.Close();
+        _taskDetailsWindow = null;
         CaptureWindowPlacement();
     }
 
@@ -180,8 +190,8 @@ public partial class OverlayWindow : Window
             _collapsedRestingLeft is double collapsedLeft &&
             _collapsedRestingTop is double collapsedTop)
         {
-            _state.WindowPlacement.Left = collapsedLeft;
-            _state.WindowPlacement.Top = collapsedTop;
+            _state.WindowPlacement.CollapsedLeft = collapsedLeft;
+            _state.WindowPlacement.CollapsedTop = collapsedTop;
             return;
         }
 
@@ -254,7 +264,12 @@ public partial class OverlayWindow : Window
     {
         _passiveTimer.Stop();
 
-        if (_isClosed || _isShuttingDown || _isDragging || !IsLoaded)
+        if (_isClosed ||
+            _isShuttingDown ||
+            _isDragging ||
+            _contextInteractionActive ||
+            _taskDetailsWindow is not null ||
+            !IsLoaded)
         {
             return;
         }
@@ -320,7 +335,10 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        var anchorScreen = GetCurrentScreen();
+        var anchorScreen =
+            _state.OverlaySettings.CollapsedMode && _collapsedRestingScreen is not null
+                ? _collapsedRestingScreen
+                : GetCurrentScreen();
         var wasCollapsedResting =
             !_isActiveMode &&
             _state.OverlaySettings.CollapsedMode &&
@@ -330,9 +348,15 @@ public partial class OverlayWindow : Window
         {
             _collapsedRestingLeft = Left;
             _collapsedRestingTop = Top;
+            _collapsedRestingScreen = anchorScreen;
         }
 
+        var modeChanged = _isActiveMode != active;
         _isActiveMode = active;
+        if (modeChanged)
+        {
+            RefreshTasks();
+        }
 
         if (!active && _state.OverlaySettings.CollapsedMode)
         {
@@ -350,6 +374,7 @@ public partial class OverlayWindow : Window
             ConstrainToWorkArea(anchorScreen, snap: false);
             _collapsedRestingLeft = Left;
             _collapsedRestingTop = Top;
+            _collapsedRestingScreen = anchorScreen;
             return;
         }
 
@@ -476,13 +501,20 @@ public partial class OverlayWindow : Window
         var screen = Forms.Screen.FromPoint(Forms.Cursor.Position);
         ConstrainToWorkArea(screen, snap: true);
 
-        if (_state.OverlaySettings.CollapsedMode)
+        if (startedCollapsed)
         {
             _collapsedRestingLeft = Left;
             _collapsedRestingTop = Top;
+            _collapsedRestingScreen = screen;
+            _state.WindowPlacement.CollapsedLeft = Left;
+            _state.WindowPlacement.CollapsedTop = Top;
+        }
+        else
+        {
+            _state.WindowPlacement.Left = Left;
+            _state.WindowPlacement.Top = Top;
         }
 
-        CaptureWindowPlacement();
         _saveState();
         _log($"Overlay moved: left={Left:F1}; top={Top:F1}; mode={CurrentMode}");
 
@@ -522,33 +554,279 @@ public partial class OverlayWindow : Window
             new Action(() => _suppressTaskClick = false));
     }
 
-    private void TaskRow_OnClick(object sender, RoutedEventArgs e)
+    private void TaskMarker_OnClick(object sender, RoutedEventArgs e)
     {
+        if (!TryGetTask(sender, out var task))
+        {
+            return;
+        }
+
+        if (!TaskInteractionService.Complete(task))
+        {
+            return;
+        }
+
+        _log($"Task completed: id={task.Id}; title={task.Title}");
+        RefreshTasks();
+        _saveState();
+    }
+
+    private void TaskBody_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetTask(sender, out var task))
+        {
+            return;
+        }
+
+        TaskInteractionService.ActivateFromClick(_state, task);
+        _log($"Task in-work changed: id={task.Id}; inWork={task.InWork}");
+        RefreshTasks();
+        _saveState();
+    }
+
+    private bool TryGetTask(object sender, out TaskItem task)
+    {
+        task = null!;
+
         if (_suppressTaskClick)
         {
             _suppressTaskClick = false;
-            return;
+            return false;
         }
 
         if (_isClosed ||
             _isShuttingDown ||
-            sender is not Button { DataContext: TaskItem task } ||
-            task.Completed)
+            sender is not FrameworkElement
+            {
+                DataContext: TaskRowViewModel row
+            } ||
+            row.Task.Completed)
+        {
+            return false;
+        }
+
+        task = row.Task;
+        return true;
+    }
+
+    private void TaskRow_OnContextMenuOpening(
+        object sender,
+        ContextMenuEventArgs e)
+    {
+        StopModeTimers();
+        SetActiveMode(true);
+
+        if (sender is not Border
+            {
+                DataContext: TaskRowViewModel row,
+                ContextMenu: ContextMenu contextMenu
+            })
         {
             return;
         }
 
-        task.Completed = true;
-        task.CompletedAtUtc = DateTimeOffset.UtcNow;
-        _activeTasks.Remove(task);
-        _log($"Task completed: id={task.Id}; title={task.Title}");
+        if (contextMenu.Items[1] is MenuItem descriptionItem)
+        {
+            descriptionItem.Header =
+                row.Task.DescriptionExpanded
+                    ? "Hide description"
+                    : "Show description";
+            descriptionItem.IsEnabled =
+                !string.IsNullOrWhiteSpace(row.Task.Description);
+        }
+
+        if (contextMenu.Items[2] is MenuItem inWorkItem)
+        {
+            inWorkItem.Header = "Mark as in work";
+            inWorkItem.IsEnabled = !row.Task.InWork;
+        }
+    }
+
+    private void TaskContextMenu_OnOpened(object sender, RoutedEventArgs e)
+    {
+        _contextInteractionActive = true;
+        StopModeTimers();
+    }
+
+    private void TaskContextMenu_OnClosed(object sender, RoutedEventArgs e)
+    {
+        _contextInteractionActive = false;
+        if (!IsMouseOver && _taskDetailsWindow is null)
+        {
+            _passiveTimer.Start();
+        }
+    }
+
+    private void EditTaskMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (TryGetMenuTask(sender, out var task))
+        {
+            OpenTaskDetails(task);
+        }
+    }
+
+    private void ToggleDescriptionMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetMenuTask(sender, out var task))
+        {
+            return;
+        }
+
+        TaskInteractionService.ToggleDescription(task);
+        RefreshTasks();
         _saveState();
+    }
+
+    private void ToggleInWorkMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetMenuTask(sender, out var task))
+        {
+            return;
+        }
+
+        TaskInteractionService.SetInWork(_state, task, true);
+        RefreshTasks();
+        _saveState();
+    }
+
+    private void CompleteTaskMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetMenuTask(sender, out var task) ||
+            !TaskInteractionService.Complete(task))
+        {
+            return;
+        }
+
+        RefreshTasks();
+        _saveState();
+    }
+
+    private void DeleteTaskMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetMenuTask(sender, out var task))
+        {
+            return;
+        }
+
+        var result = MessageBox.Show(
+            this,
+            $"Delete \"{task.Title}\"?",
+            "Delete task",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (result == MessageBoxResult.Yes)
+        {
+            DeleteTask(task);
+        }
+    }
+
+    private static bool TryGetMenuTask(object sender, out TaskItem task)
+    {
+        task = null!;
+
+        if (sender is not MenuItem
+            {
+                DataContext: TaskRowViewModel row
+            })
+        {
+            return false;
+        }
+
+        task = row.Task;
+        return true;
+    }
+
+    private void OpenTaskDetails(TaskItem task)
+    {
+        if (_taskDetailsWindow is not null)
+        {
+            _taskDetailsWindow.Activate();
+            return;
+        }
+
+        StopModeTimers();
+        SetActiveMode(true);
+        _taskDetailsWindow = new TaskDetailsWindow(
+            task,
+            SaveTaskEdits,
+            DeleteTask)
+        {
+            Owner = this
+        };
+        _taskDetailsWindow.Closed += TaskDetailsWindow_OnClosed;
+        _taskDetailsWindow.Show();
+        _taskDetailsWindow.Activate();
+    }
+
+    private void TaskDetailsWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (_taskDetailsWindow is not null)
+        {
+            _taskDetailsWindow.Closed -= TaskDetailsWindow_OnClosed;
+            _taskDetailsWindow = null;
+        }
+
+        if (!_isShuttingDown && !IsMouseOver)
+        {
+            _passiveTimer.Start();
+        }
+    }
+
+    private void SaveTaskEdits(TaskItem task, TaskEditValues values)
+    {
+        TaskInteractionService.Update(_state, task, values);
+        RefreshTasks();
+        _saveState();
+        _log($"Task edited: id={task.Id}; completed={task.Completed}; inWork={task.InWork}");
+    }
+
+    private void DeleteTask(TaskItem task)
+    {
+        if (!TaskInteractionService.Delete(_state, task))
+        {
+            return;
+        }
+
+        RefreshTasks();
+        _saveState();
+        _log($"Task deleted: id={task.Id}; title={task.Title}");
+    }
+
+    public void RefreshTaskPresentation()
+    {
+        if (!_isClosed && !_isShuttingDown)
+        {
+            RefreshTasks();
+        }
+    }
+
+    private void RefreshTasks()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(RefreshTasks));
+            return;
+        }
+
+        _activeTasks.Clear();
+        foreach (var task in _state.Tasks.Where(task => !task.Completed))
+        {
+            _activeTasks.Add(new TaskRowViewModel(task, _isActiveMode));
+        }
     }
 
     private void RestoreWindowPlacement()
     {
-        if (_state.WindowPlacement.Left is double left &&
-            _state.WindowPlacement.Top is double top)
+        var useCollapsedAnchor = _state.OverlaySettings.CollapsedMode;
+        var savedLeft = useCollapsedAnchor
+            ? _state.WindowPlacement.CollapsedLeft ?? _state.WindowPlacement.Left
+            : _state.WindowPlacement.Left;
+        var savedTop = useCollapsedAnchor
+            ? _state.WindowPlacement.CollapsedTop ?? _state.WindowPlacement.Top
+            : _state.WindowPlacement.Top;
+
+        if (savedLeft is double left && savedTop is double top)
         {
             Left = left;
             Top = top;
@@ -566,6 +844,9 @@ public partial class OverlayWindow : Window
         {
             _collapsedRestingLeft = Left;
             _collapsedRestingTop = Top;
+            _collapsedRestingScreen = screen;
+            _state.WindowPlacement.CollapsedLeft = Left;
+            _state.WindowPlacement.CollapsedTop = Top;
         }
     }
 
