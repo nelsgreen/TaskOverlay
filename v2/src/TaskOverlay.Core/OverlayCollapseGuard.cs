@@ -4,7 +4,7 @@ public static class OverlayCollapseGuard
 {
     public static bool CanCollapse(OverlayInteractionState state)
     {
-        return !state.PinnedActiveMode &&
+        return state.OverlayMode != OverlayMode.PinnedExpanded &&
                !state.TaskDetailsOpen &&
                !state.ContextMenuOpen &&
                !state.SettingsOpen &&
@@ -14,7 +14,7 @@ public static class OverlayCollapseGuard
 }
 
 public readonly record struct OverlayInteractionState(
-    bool PinnedActiveMode,
+    OverlayMode OverlayMode,
     bool TaskDetailsOpen,
     bool ContextMenuOpen,
     bool SettingsOpen,

@@ -57,6 +57,10 @@ public partial class OverlayWindow : Window
     private bool _dragCandidate;
     private bool _isDragging;
     private bool _dragStartedCollapsed;
+    private bool _handleDragCandidate;
+    private bool _isHandleDragging;
+    private bool _handleDragStartedCollapsed;
+    private bool _finishingHandleDrag;
     private bool _suppressTaskClick;
     private bool _adjustingBounds;
     private bool _contextInteractionActive;
@@ -71,7 +75,7 @@ public partial class OverlayWindow : Window
     private Forms.Screen? _collapsedRestingScreen;
     private TaskDetailsWindow? _taskDetailsWindow;
 
-    public event Action<bool>? PinnedActiveModeChanged;
+    public event Action<OverlayMode>? OverlayModeChanged;
 
     public OverlayWindow(AppState state, Action saveState, Action<string> log)
     {
@@ -106,17 +110,14 @@ public partial class OverlayWindow : Window
     public string CurrentMode =>
         _isClosed
             ? "closed"
-            : _state.OverlaySettings.PinnedActiveMode
-                ? "pinned"
+            : _state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded
+                ? "pinned-expanded"
                 : _isActiveMode
                     ? "active"
-                    : _state.OverlaySettings.CollapsedMode
-                        ? "collapsed"
+                    : _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle
+                        ? "collapsed-handle"
                         : "passive";
     public bool IsClosed => _isClosed;
-    public bool IsCollapsedModeEnabled => _state.OverlaySettings.CollapsedMode;
-    public bool IsPinnedActiveModeEnabled =>
-        _state.OverlaySettings.PinnedActiveMode;
 
     public void RestoreVisibleMode()
     {
@@ -125,72 +126,63 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        if (_state.OverlaySettings.PinnedActiveMode)
+        if (_state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded)
         {
             SetActiveMode(true);
         }
-    }
-
-    public void SetCollapsedMode(bool enabled)
-    {
-        if (_isClosed || _isShuttingDown)
-        {
-            return;
-        }
-
-        _state.OverlaySettings.CollapsedMode = enabled;
-        StopModeTimers();
-
-        if (enabled)
-        {
-            _collapsedRestingLeft = Left;
-            _collapsedRestingTop = Top;
-            _collapsedRestingScreen = GetCurrentScreen();
-            _state.WindowPlacement.CollapsedLeft = Left;
-            _state.WindowPlacement.CollapsedTop = Top;
-        }
         else
         {
-            _collapsedRestingLeft = null;
-            _collapsedRestingTop = null;
-            _collapsedRestingScreen = null;
-
-            if (_state.WindowPlacement.Left is double normalLeft &&
-                _state.WindowPlacement.Top is double normalTop)
-            {
-                Left = normalLeft;
-                Top = normalTop;
-            }
+            SetActiveMode(false, force: true);
         }
-
-        SetActiveMode(IsMouseOver);
     }
 
-    public void SetPinnedActiveMode(bool enabled)
+    public void SetOverlayMode(OverlayMode mode)
     {
         if (_isClosed ||
             _isShuttingDown ||
-            _state.OverlaySettings.PinnedActiveMode == enabled)
+            _state.OverlaySettings.OverlayMode == mode)
         {
             return;
         }
 
-        _state.OverlaySettings.PinnedActiveMode = enabled;
+        var previousMode = _state.OverlaySettings.OverlayMode;
         StopModeTimers();
+        _state.OverlaySettings.OverlayMode = mode;
 
-        if (enabled)
+        if (mode == OverlayMode.CollapsedHandle)
         {
+            if (previousMode == OverlayMode.AutoQuestTracker ||
+                _state.WindowPlacement.CollapsedLeft is null ||
+                _state.WindowPlacement.CollapsedTop is null)
+            {
+                CaptureCollapsedAnchor();
+            }
+
+            SetActiveMode(false, force: true);
+        }
+        else if (mode == OverlayMode.PinnedExpanded)
+        {
+            if (previousMode == OverlayMode.CollapsedHandle &&
+                _state.WindowPlacement.CollapsedLeft is double anchorLeft &&
+                _state.WindowPlacement.CollapsedTop is double anchorTop)
+            {
+                Left = anchorLeft;
+                Top = anchorTop;
+            }
+
             SetActiveMode(true);
+            _state.WindowPlacement.Left = Left;
+            _state.WindowPlacement.Top = Top;
         }
         else
         {
-            UpdateHandleVisual();
-            ScheduleCollapse();
+            RestoreNormalPosition();
+            SetActiveMode(IsMouseOver);
         }
 
         _saveState();
-        _log($"Pinned active mode changed: enabled={enabled}.");
-        PinnedActiveModeChanged?.Invoke(enabled);
+        _log($"Overlay mode changed: previous={previousMode}; current={mode}.");
+        OverlayModeChanged?.Invoke(mode);
     }
 
     public void SetSettingsInteractionActive(bool active)
@@ -234,7 +226,7 @@ public partial class OverlayWindow : Window
         }
 
         StopModeTimers();
-        if (!_state.OverlaySettings.PinnedActiveMode)
+        if (_state.OverlaySettings.OverlayMode != OverlayMode.PinnedExpanded)
         {
             SetActiveMode(false, force: true);
         }
@@ -275,7 +267,7 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        if (_state.OverlaySettings.CollapsedMode &&
+        if (_state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle &&
             _collapsedRestingLeft is double collapsedLeft &&
             _collapsedRestingTop is double collapsedTop)
         {
@@ -295,7 +287,7 @@ public partial class OverlayWindow : Window
         if (!_allowClose && !_isShuttingDown)
         {
             e.Cancel = true;
-            if (!_state.OverlaySettings.PinnedActiveMode)
+            if (_state.OverlaySettings.OverlayMode != OverlayMode.PinnedExpanded)
             {
                 SetActiveMode(false, force: true);
             }
@@ -317,7 +309,7 @@ public partial class OverlayWindow : Window
         SetActiveMode(false, force: true);
         RestoreWindowPlacement();
 
-        if (_state.OverlaySettings.PinnedActiveMode)
+        if (_state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded)
         {
             SetActiveMode(true);
         }
@@ -381,6 +373,8 @@ public partial class OverlayWindow : Window
             _isShuttingDown ||
             _dragCandidate ||
             _isDragging ||
+            _handleDragCandidate ||
+            _isHandleDragging ||
             !IsMouseOver)
         {
             return;
@@ -391,7 +385,11 @@ public partial class OverlayWindow : Window
 
     private void HoverSurface_OnMouseEnter(object sender, MouseEventArgs e)
     {
-        if (_isClosed || _isShuttingDown || _isDragging)
+        if (_isClosed ||
+            _isShuttingDown ||
+            _isDragging ||
+            _handleDragCandidate ||
+            _isHandleDragging)
         {
             return;
         }
@@ -402,7 +400,12 @@ public partial class OverlayWindow : Window
 
     private void HoverSurface_OnMouseLeave(object sender, MouseEventArgs e)
     {
-        if (_isClosed || _isShuttingDown || _dragCandidate || _isDragging)
+        if (_isClosed ||
+            _isShuttingDown ||
+            _dragCandidate ||
+            _isDragging ||
+            _handleDragCandidate ||
+            _isHandleDragging)
         {
             return;
         }
@@ -413,7 +416,8 @@ public partial class OverlayWindow : Window
 
     private void StartCollapsedExpansionOrActivate()
     {
-        if (_state.OverlaySettings.CollapsedMode && !_isActiveMode)
+        if (_state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle &&
+            !_isActiveMode)
         {
             _collapsedExpandTimer.Stop();
             _collapsedExpandTimer.Start();
@@ -437,12 +441,13 @@ public partial class OverlayWindow : Window
         }
 
         var anchorScreen =
-            _state.OverlaySettings.CollapsedMode && _collapsedRestingScreen is not null
+            _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle &&
+            _collapsedRestingScreen is not null
                 ? _collapsedRestingScreen
                 : GetCurrentScreen();
         var wasCollapsedResting =
             !_isActiveMode &&
-            _state.OverlaySettings.CollapsedMode &&
+            _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle &&
             OverlayPanel.Visibility == Visibility.Collapsed;
 
         if (active && wasCollapsedResting)
@@ -459,7 +464,8 @@ public partial class OverlayWindow : Window
             RefreshTasks();
         }
 
-        if (!active && _state.OverlaySettings.CollapsedMode)
+        if (!active &&
+            _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle)
         {
             OverlayPanel.Visibility = Visibility.Collapsed;
             UpdateLayout();
@@ -493,7 +499,10 @@ public partial class OverlayWindow : Window
         object sender,
         MouseButtonEventArgs e)
     {
-        if (_isClosed || _isShuttingDown || e.ChangedButton != MouseButton.Left)
+        if (_isClosed ||
+            _isShuttingDown ||
+            e.ChangedButton != MouseButton.Left ||
+            IsHandleEventSource(e.OriginalSource))
         {
             return;
         }
@@ -502,7 +511,7 @@ public partial class OverlayWindow : Window
         _dragCandidate = true;
         _isDragging = false;
         _dragStartedCollapsed =
-            _state.OverlaySettings.CollapsedMode &&
+            _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle &&
             !_isActiveMode &&
             OverlayPanel.Visibility == Visibility.Collapsed;
         _dragStartCursorPixels = Forms.Cursor.Position;
@@ -515,7 +524,10 @@ public partial class OverlayWindow : Window
 
     private void HoverSurface_OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (!_dragCandidate || _isClosed || _isShuttingDown)
+        if (!_dragCandidate ||
+            _isClosed ||
+            _isShuttingDown ||
+            IsHandleEventSource(e.OriginalSource))
         {
             return;
         }
@@ -554,7 +566,9 @@ public partial class OverlayWindow : Window
         object sender,
         MouseButtonEventArgs e)
     {
-        if (!_dragCandidate || e.ChangedButton != MouseButton.Left)
+        if (!_dragCandidate ||
+            e.ChangedButton != MouseButton.Left ||
+            IsHandleEventSource(e.OriginalSource))
         {
             return;
         }
@@ -655,15 +669,198 @@ public partial class OverlayWindow : Window
             new Action(() => _suppressTaskClick = false));
     }
 
-    private void ActivationHandle_OnClick(object sender, RoutedEventArgs e)
+    private void ActivationHandle_OnPreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
     {
-        if (_suppressTaskClick)
+        if (_isClosed || _isShuttingDown || e.ChangedButton != MouseButton.Left)
         {
-            _suppressTaskClick = false;
             return;
         }
 
-        SetPinnedActiveMode(!_state.OverlaySettings.PinnedActiveMode);
+        StopModeTimers();
+        ResetDragState();
+        _handleDragCandidate = true;
+        _isHandleDragging = false;
+        _handleDragStartedCollapsed =
+            _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle &&
+            !_isActiveMode &&
+            OverlayPanel.Visibility == Visibility.Collapsed;
+        _dragStartCursorPixels = Forms.Cursor.Position;
+        _dragStartLeft = Left;
+        _dragStartTop = Top;
+        _dragFromDevice =
+            PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ??
+            Matrix.Identity;
+        Mouse.Capture(CollapsedActivation, CaptureMode.Element);
+        e.Handled = true;
+    }
+
+    private void ActivationHandle_OnPreviewMouseMove(
+        object sender,
+        MouseEventArgs e)
+    {
+        if (!_handleDragCandidate || _isClosed || _isShuttingDown)
+        {
+            return;
+        }
+
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            CancelHandleDrag();
+            return;
+        }
+
+        var cursor = Forms.Cursor.Position;
+        var pixelDelta = new Vector(
+            cursor.X - _dragStartCursorPixels.X,
+            cursor.Y - _dragStartCursorPixels.Y);
+        var logicalDelta = _dragFromDevice.Transform(pixelDelta);
+
+        if (!_isHandleDragging &&
+            !PointerDragGesture.HasExceededThreshold(
+                0,
+                0,
+                logicalDelta.X,
+                logicalDelta.Y))
+        {
+            return;
+        }
+
+        _isHandleDragging = true;
+        Left = _dragStartLeft + logicalDelta.X;
+        Top = _dragStartTop + logicalDelta.Y;
+        e.Handled = true;
+    }
+
+    private void ActivationHandle_OnPreviewMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (!_handleDragCandidate || e.ChangedButton != MouseButton.Left)
+        {
+            return;
+        }
+
+        var dragged = _isHandleDragging;
+        var startedCollapsed = _handleDragStartedCollapsed;
+        ResetHandleDragState(releaseCapture: true);
+
+        if (dragged)
+        {
+            FinishDrag(startedCollapsed);
+        }
+        else
+        {
+            ToggleModeFromHandle();
+        }
+
+        e.Handled = true;
+    }
+
+    private void ActivationHandle_OnLostMouseCapture(
+        object sender,
+        MouseEventArgs e)
+    {
+        if (_finishingHandleDrag || !_handleDragCandidate)
+        {
+            return;
+        }
+
+        var dragged = _isHandleDragging;
+        var startedCollapsed = _handleDragStartedCollapsed;
+        ResetHandleDragState(releaseCapture: false);
+
+        if (dragged)
+        {
+            FinishDrag(startedCollapsed);
+        }
+    }
+
+    private void CancelHandleDrag()
+    {
+        ResetHandleDragState(releaseCapture: true);
+        ScheduleCollapse();
+    }
+
+    private void ResetHandleDragState(bool releaseCapture)
+    {
+        _handleDragCandidate = false;
+        _isHandleDragging = false;
+        _handleDragStartedCollapsed = false;
+
+        if (!releaseCapture || !CollapsedActivation.IsMouseCaptured)
+        {
+            return;
+        }
+
+        _finishingHandleDrag = true;
+        try
+        {
+            Mouse.Capture(null);
+        }
+        finally
+        {
+            _finishingHandleDrag = false;
+        }
+    }
+
+    private void ToggleModeFromHandle()
+    {
+        var nextMode =
+            _state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded
+                ? OverlayMode.CollapsedHandle
+                : OverlayMode.PinnedExpanded;
+        SetOverlayMode(nextMode);
+    }
+
+    private void HandleModeContextMenu_OnOpened(object sender, RoutedEventArgs e)
+    {
+        _contextInteractionActive = true;
+        StopModeTimers();
+
+        if (sender is not ContextMenu menu)
+        {
+            return;
+        }
+
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            item.IsChecked =
+                Enum.TryParse(item.Tag?.ToString(), out OverlayMode mode) &&
+                mode == _state.OverlaySettings.OverlayMode;
+        }
+    }
+
+    private void HandleModeContextMenu_OnClosed(object sender, RoutedEventArgs e)
+    {
+        _contextInteractionActive = false;
+        ScheduleCollapse();
+    }
+
+    private void HandleModeMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem item &&
+            Enum.TryParse(item.Tag?.ToString(), out OverlayMode mode))
+        {
+            SetOverlayMode(mode);
+        }
+    }
+
+    private bool IsHandleEventSource(object source)
+    {
+        var current = source as DependencyObject;
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, CollapsedActivation))
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private void TaskMarker_OnClick(object sender, RoutedEventArgs e)
@@ -927,7 +1124,8 @@ public partial class OverlayWindow : Window
 
     private void RestoreWindowPlacement()
     {
-        var useCollapsedAnchor = _state.OverlaySettings.CollapsedMode;
+        var useCollapsedAnchor =
+            _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle;
         var savedLeft = useCollapsedAnchor
             ? _state.WindowPlacement.CollapsedLeft ?? _state.WindowPlacement.Left
             : _state.WindowPlacement.Left;
@@ -949,7 +1147,7 @@ public partial class OverlayWindow : Window
         var screen = GetCurrentScreen();
         ConstrainToWorkArea(screen, snap: false);
 
-        if (_state.OverlaySettings.CollapsedMode)
+        if (useCollapsedAnchor)
         {
             _collapsedRestingLeft = Left;
             _collapsedRestingTop = Top;
@@ -957,6 +1155,30 @@ public partial class OverlayWindow : Window
             _state.WindowPlacement.CollapsedLeft = Left;
             _state.WindowPlacement.CollapsedTop = Top;
         }
+    }
+
+    private void CaptureCollapsedAnchor()
+    {
+        var screen = GetCurrentScreen();
+        ConstrainToWorkArea(screen, snap: true);
+        _collapsedRestingLeft = Left;
+        _collapsedRestingTop = Top;
+        _collapsedRestingScreen = screen;
+        _state.WindowPlacement.CollapsedLeft = Left;
+        _state.WindowPlacement.CollapsedTop = Top;
+    }
+
+    private void RestoreNormalPosition()
+    {
+        if (_state.WindowPlacement.Left is not double normalLeft ||
+            _state.WindowPlacement.Top is not double normalTop)
+        {
+            return;
+        }
+
+        Left = normalLeft;
+        Top = normalTop;
+        ConstrainToWorkArea(GetCurrentScreen(), snap: false);
     }
 
     private void PositionOnCurrentMonitor()
@@ -1054,12 +1276,15 @@ public partial class OverlayWindow : Window
     {
         return OverlayCollapseGuard.CanCollapse(
             new OverlayInteractionState(
-                PinnedActiveMode: _state.OverlaySettings.PinnedActiveMode,
+                OverlayMode: _state.OverlaySettings.OverlayMode,
                 TaskDetailsOpen: _taskDetailsWindow is not null,
                 ContextMenuOpen: _contextInteractionActive,
                 SettingsOpen: _settingsInteractionActive,
                 ModalDialogOpen: _modalInteractionCount > 0,
-                Dragging: _dragCandidate || _isDragging));
+                Dragging: _dragCandidate ||
+                          _isDragging ||
+                          _handleDragCandidate ||
+                          _isHandleDragging));
     }
 
     private void ScheduleCollapse()
@@ -1112,12 +1337,13 @@ public partial class OverlayWindow : Window
 
     private void UpdateHandleVisual()
     {
-        if (_state.OverlaySettings.PinnedActiveMode)
+        if (_state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded)
         {
             CollapsedActivation.Background = PinnedHandleBackground;
             CollapsedActivation.BorderBrush = PinnedHandleBorder;
-            CollapsedActivation.Foreground = PinnedHandleForeground;
-            CollapsedActivation.ToolTip = "Pinned expanded. Click to unpin.";
+            HandleIndicator.Fill = PinnedHandleForeground;
+            CollapsedActivation.ToolTip =
+                "Pinned expanded. Click to return to collapsed handle.";
             ModeStatus.Text = "PINNED";
             return;
         }
@@ -1126,7 +1352,7 @@ public partial class OverlayWindow : Window
         {
             CollapsedActivation.Background = CollapsedHandleBackground;
             CollapsedActivation.BorderBrush = CollapsedHandleBorder;
-            CollapsedActivation.Foreground = CollapsedHandleForeground;
+            HandleIndicator.Fill = CollapsedHandleForeground;
             CollapsedActivation.ToolTip = "Collapsed. Click to pin expanded.";
             ModeStatus.Text = "COLLAPSED";
             return;
@@ -1134,8 +1360,9 @@ public partial class OverlayWindow : Window
 
         CollapsedActivation.Background = ExpandedHandleBackground;
         CollapsedActivation.BorderBrush = ExpandedHandleBorder;
-        CollapsedActivation.Foreground = ExpandedHandleForeground;
-        CollapsedActivation.ToolTip = "Expanded. Click to keep expanded.";
+        HandleIndicator.Fill = ExpandedHandleForeground;
+        CollapsedActivation.ToolTip =
+            "Expanded. Click to pin; right-click to choose overlay mode.";
         ModeStatus.Text = "ACTIVE";
     }
 

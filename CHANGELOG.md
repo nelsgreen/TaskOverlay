@@ -1,5 +1,24 @@
 # Changelog
 
+## v2 unified overlay modes and reliable handle dragging
+
+### Added
+
+- Replaced independent collapsed and pinned flags with persisted
+  `AutoQuestTracker`, `CollapsedHandle`, and `PinnedExpanded` modes.
+- Added a radio-style tray submenu and a right-click handle mode menu.
+- Added backward-compatible migration from the old collapsed/pinned fields.
+- Added Core coverage for mode serialization, legacy migration, and the
+  click-versus-drag threshold.
+
+### Fixed
+
+- Gave the handle an independent mouse capture and five-DIP drag threshold.
+- Prevented parent overlay dragging from stealing handle gestures after the
+  first pixel.
+- Preserved the collapsed anchor through screen-bound expansion and mode
+  changes.
+
 ## v2 pinned active mode and interaction-safe collapse
 
 ### Added

@@ -13,11 +13,12 @@ internal static class Program
         {
             ("default state creation", DefaultStateCreation),
             ("save/load roundtrip", SaveLoadRoundtrip),
-            ("collapsed setting persistence", CollapsedSettingPersistence),
-            ("old state collapsed default", OldStateCollapsedDefault),
-            ("pinned active setting persistence", PinnedActiveSettingPersistence),
-            ("old state pinned active default", OldStatePinnedActiveDefault),
+            ("overlay mode serialization", OverlayModeSerialization),
+            ("old collapsed mode migration", OldCollapsedModeMigration),
+            ("old pinned mode migration", OldPinnedModeMigration),
+            ("old overlay mode default", OldOverlayModeDefault),
             ("overlay collapse guard", OverlayCollapseGuardBehavior),
+            ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
             ("single task in-work mode", SingleTaskInWorkMode),
             ("multiple tasks in-work mode", MultipleTasksInWorkMode),
             ("task edit values", TaskEditValuesUpdate),
@@ -68,11 +69,8 @@ internal static class Program
             Assert(state.Tasks.All(task => task.Id != Guid.Empty), "Seed tasks need stable IDs.");
             Assert(state.Tasks.Select(task => task.Id).Distinct().Count() == 3, "Seed task IDs must be unique.");
             Assert(
-                !state.OverlaySettings.CollapsedMode,
-                "Collapsed mode should be disabled for new state.");
-            Assert(
-                !state.OverlaySettings.PinnedActiveMode,
-                "Pinned active mode should be disabled for new state.");
+                state.OverlaySettings.OverlayMode == OverlayMode.AutoQuestTracker,
+                "New state should use AutoQuestTracker mode.");
         });
     }
 
@@ -109,13 +107,13 @@ internal static class Program
         });
     }
 
-    private static void CollapsedSettingPersistence()
+    private static void OverlayModeSerialization()
     {
         WithTemporaryDirectory(directory =>
         {
             var store = new AppStateStore(directory);
             var state = store.Load();
-            state.OverlaySettings.CollapsedMode = true;
+            state.OverlaySettings.OverlayMode = OverlayMode.PinnedExpanded;
 
             store.Save(state);
 
@@ -123,15 +121,96 @@ internal static class Program
             var loaded = new AppStateStore(directory).Load();
 
             Assert(
-                json.Contains("\"collapsedMode\": true"),
-                "Collapsed mode should be serialized in overlay settings.");
+                json.Contains("\"overlayMode\": \"pinnedExpanded\""),
+                "The unified overlay mode should be serialized.");
             Assert(
-                loaded.OverlaySettings.CollapsedMode,
-                "Collapsed mode should survive a save/load roundtrip.");
+                loaded.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded,
+                "Overlay mode should survive a save/load roundtrip.");
+            Assert(
+                !json.Contains("\"collapsedMode\"") &&
+                !json.Contains("\"pinnedActiveMode\""),
+                "Legacy mode flags should not be written after normalization.");
         });
     }
 
-    private static void OldStateCollapsedDefault()
+    private static void OldCollapsedModeMigration()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            const string oldStateJson =
+                """
+                {
+                  "schemaVersion": 1,
+                  "tasks": [],
+                  "overlaySettings": {
+                    "activeToPassiveDelayMilliseconds": 500,
+                    "alwaysOnTop": true,
+                    "collapsedMode": true,
+                    "pinnedActiveMode": false
+                  },
+                  "windowPlacement": {
+                    "left": null,
+                    "top": null
+                  },
+                  "createdAtUtc": "2026-06-11T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-11T08:30:00+00:00"
+                }
+                """;
+
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "state.json"), oldStateJson);
+
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle,
+                "Old collapsed state should migrate to CollapsedHandle.");
+            Assert(
+                Directory.GetFiles(directory, "state.corrupt.*.json").Length == 0,
+                "A missing collapsed setting should not mark old state as corrupted.");
+        });
+    }
+
+    private static void OldPinnedModeMigration()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            const string oldStateJson =
+                """
+                {
+                  "schemaVersion": 1,
+                  "tasks": [],
+                  "overlaySettings": {
+                    "activeToPassiveDelayMilliseconds": 500,
+                    "alwaysOnTop": true,
+                    "collapsedMode": true,
+                    "pinnedActiveMode": true
+                  },
+                  "windowPlacement": {
+                    "left": 100,
+                    "top": 100,
+                    "collapsedLeft": 1800,
+                    "collapsedTop": 200
+                  },
+                  "createdAtUtc": "2026-06-11T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-11T08:30:00+00:00"
+                }
+                """;
+
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "state.json"), oldStateJson);
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded,
+                "Legacy pinned state should take precedence and migrate to PinnedExpanded.");
+            Assert(
+                loaded.WindowPlacement.CollapsedLeft == 1800,
+                "Mode migration must preserve the collapsed anchor.");
+        });
+    }
+
+    private static void OldOverlayModeDefault()
     {
         WithTemporaryDirectory(directory =>
         {
@@ -159,69 +238,15 @@ internal static class Program
             var loaded = new AppStateStore(directory).Load();
 
             Assert(
-                !loaded.OverlaySettings.CollapsedMode,
-                "Old state files should default collapsed mode to false.");
-            Assert(
-                Directory.GetFiles(directory, "state.corrupt.*.json").Length == 0,
-                "A missing collapsed setting should not mark old state as corrupted.");
-        });
-    }
-
-    private static void PinnedActiveSettingPersistence()
-    {
-        WithTemporaryDirectory(directory =>
-        {
-            var store = new AppStateStore(directory);
-            var state = store.Load();
-            state.OverlaySettings.PinnedActiveMode = true;
-
-            store.Save(state);
-            var loaded = new AppStateStore(directory).Load();
-
-            Assert(
-                loaded.OverlaySettings.PinnedActiveMode,
-                "Pinned active mode should survive serialization.");
-        });
-    }
-
-    private static void OldStatePinnedActiveDefault()
-    {
-        WithTemporaryDirectory(directory =>
-        {
-            const string oldStateJson =
-                """
-                {
-                  "schemaVersion": 1,
-                  "tasks": [],
-                  "overlaySettings": {
-                    "activeToPassiveDelayMilliseconds": 500,
-                    "alwaysOnTop": true,
-                    "collapsedMode": true
-                  },
-                  "windowPlacement": {
-                    "left": null,
-                    "top": null
-                  },
-                  "createdAtUtc": "2026-06-11T08:30:00+00:00",
-                  "updatedAtUtc": "2026-06-11T08:30:00+00:00"
-                }
-                """;
-
-            Directory.CreateDirectory(directory);
-            File.WriteAllText(Path.Combine(directory, "state.json"), oldStateJson);
-
-            var loaded = new AppStateStore(directory).Load();
-
-            Assert(
-                !loaded.OverlaySettings.PinnedActiveMode,
-                "Old state files should default pinned active mode to false.");
+                loaded.OverlaySettings.OverlayMode == OverlayMode.AutoQuestTracker,
+                "Old state without mode flags should migrate to AutoQuestTracker.");
         });
     }
 
     private static void OverlayCollapseGuardBehavior()
     {
         var idle = new OverlayInteractionState(
-            PinnedActiveMode: false,
+            OverlayMode: OverlayMode.AutoQuestTracker,
             TaskDetailsOpen: false,
             ContextMenuOpen: false,
             SettingsOpen: false,
@@ -234,7 +259,7 @@ internal static class Program
 
         var blockers = new[]
         {
-            idle with { PinnedActiveMode = true },
+            idle with { OverlayMode = OverlayMode.PinnedExpanded },
             idle with { TaskDetailsOpen = true },
             idle with { ContextMenuOpen = true },
             idle with { SettingsOpen = true },
@@ -245,6 +270,19 @@ internal static class Program
         Assert(
             blockers.All(state => !OverlayCollapseGuard.CanCollapse(state)),
             "Every active interaction should prevent overlay collapse.");
+    }
+
+    private static void PointerClickVersusDragThreshold()
+    {
+        Assert(
+            !PointerDragGesture.HasExceededThreshold(10, 10, 13, 14),
+            "Movement below five DIPs should remain a click.");
+        Assert(
+            PointerDragGesture.HasExceededThreshold(10, 10, 15, 10),
+            "Horizontal movement at the threshold should start dragging.");
+        Assert(
+            PointerDragGesture.HasExceededThreshold(10, 10, 10, 4),
+            "Vertical movement beyond the threshold should start dragging.");
     }
 
     private static void WindowPlacementNegativeMonitorClamp()

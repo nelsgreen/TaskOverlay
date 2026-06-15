@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace TaskOverlay.Core;
 
@@ -70,13 +71,48 @@ public enum InWorkMode
     SingleTask
 }
 
+public enum OverlayMode
+{
+    AutoQuestTracker,
+    CollapsedHandle,
+    PinnedExpanded
+}
+
 public sealed class OverlaySettings
 {
     public int ActiveToPassiveDelayMilliseconds { get; set; } = 500;
     public bool AlwaysOnTop { get; set; } = true;
+
+    [JsonPropertyName("overlayMode")]
+    public OverlayMode? StoredOverlayMode { get; set; }
+
+    [JsonIgnore]
+    public OverlayMode OverlayMode
+    {
+        get => StoredOverlayMode ??
+               global::TaskOverlay.Core.OverlayMode.AutoQuestTracker;
+        set => StoredOverlayMode = value;
+    }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool CollapsedMode { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool PinnedActiveMode { get; set; }
+
     public InWorkMode InWorkMode { get; set; } = InWorkMode.MultipleTasks;
+
+    public void NormalizeOverlayMode()
+    {
+        OverlayMode = StoredOverlayMode ??
+                      (PinnedActiveMode
+                          ? global::TaskOverlay.Core.OverlayMode.PinnedExpanded
+                          : CollapsedMode
+                              ? global::TaskOverlay.Core.OverlayMode.CollapsedHandle
+                              : global::TaskOverlay.Core.OverlayMode.AutoQuestTracker);
+        CollapsedMode = false;
+        PinnedActiveMode = false;
+    }
 }
 
 public sealed class WindowPlacement

@@ -201,6 +201,8 @@ public sealed class AppStateStore
             throw new InvalidDataException("State file is missing required sections.");
         }
 
+        state.OverlaySettings.NormalizeOverlayMode();
+
         foreach (var task in state.Tasks)
         {
             if (task.Id == Guid.Empty || string.IsNullOrWhiteSpace(task.Title))

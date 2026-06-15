@@ -80,12 +80,8 @@
                            FontSize="16"
                            FontWeight="SemiBold"
                            Text="Overlay state" />
-                <TextBlock x:Name="CollapsedModeStatus"
+                <TextBlock x:Name="OverlayModeStatus"
                            Margin="0,12,0,0"
-                           Foreground="#FFD4D4D8"
-                           FontSize="14" />
-                <TextBlock x:Name="PinnedActiveModeStatus"
-                           Margin="0,7,0,0"
                            Foreground="#FFD4D4D8"
                            FontSize="14" />
             </StackPanel>

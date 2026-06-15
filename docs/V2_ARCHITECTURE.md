@@ -14,8 +14,8 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
   without turning the overlay into a full management window.
 - The tray and fixed global hotkeys provide three clipboard task intake modes
   and reveal created tasks immediately in the overlay.
-- Optional collapsed mode replaces the resting task list with a compact
-  activation strip and expands to active mode on pointer entry.
+- A single persisted overlay mode selects automatic passive tracking, a compact
+  collapsed handle, or pinned expansion.
 - Pointer entry enables a simple background panel; pointer exit returns to passive
   mode after 500 ms.
 - `SettingsWindow` owns the editable SingleTask/MultipleTasks selection.
@@ -48,49 +48,49 @@ presentation concerns out of the JSON model.
 The enum orders `MultipleTasks` as its default value, so schema v1 state files
 that omit the property load safely without migration.
 
-## Pinned active mode and interaction guards
+## Overlay modes and interaction guards
 
-`OverlaySettings.pinnedActiveMode` persists the **Keep expanded** state and
-defaults to `false` when omitted by existing schema v1 files. It can be toggled
-from the checked tray command or by clicking the persistent overlay handle.
-Pinned mode forces active presentation and suppresses the passive/collapsed
-timer until unpinned.
+`OverlaySettings.overlayMode` stores one of `autoQuestTracker`,
+`collapsedHandle`, or `pinnedExpanded`. The state loader migrates schema v1
+files without changing their schema version: old `pinnedActiveMode=true` maps
+to `pinnedExpanded`, otherwise old `collapsedMode=true` maps to
+`collapsedHandle`, and missing/false flags map to `autoQuestTracker`. Legacy
+flags are removed on the next save.
+
+The tray exposes these values as a radio-style **Overlay mode** submenu. The
+persistent handle opens the same choices on right-click. A handle left-click
+switches to `pinnedExpanded`, or returns a pinned overlay to
+`collapsedHandle`.
 
 `OverlayCollapseGuard` is the Core policy for automatic collapse. Collapse is
-allowed only when pinning is off and no task editor, task context menu, Settings
+allowed only when the mode is not pinned and no task editor, task context menu, Settings
 window, modal dialog, or drag interaction is active. WPF lifecycle callbacks
 update these flags and schedule the normal 500 ms timer when the final blocker
 closes. Task Details reports both delete confirmation and validation message
 boxes as modal interactions, so the overlay cannot collapse behind them.
 
-## Collapsed mode
-
-`OverlaySettings.collapsedMode` is persisted in the existing schema v1 JSON and
-defaults to `false`. Older state files omit the property and continue loading as
-non-collapsed without migration or recovery.
+## Collapsed handle
 
 The handle is always present as the first window row. When collapsed mode is
 resting, `OverlayPanel` and all task rows are collapsed, leaving only the handle.
 Because the window uses `SizeToContent`, its bounds shrink to that handle.
 Pointer entry reveals the full active panel below it. Pointer exit starts the
-existing 500 ms dispatcher timer, which returns to collapsed mode unless a
-collapse guard is active. With collapsed mode disabled, the same timer continues
-returning to the normal transparent passive task list while retaining the
-handle.
+existing 500 ms dispatcher timer, which returns to the handle unless a collapse
+guard is active. In `autoQuestTracker`, the same timer returns to the normal
+transparent passive task list while retaining the handle.
 
-The tray **Toggle collapsed mode** item reflects the persisted value with a
-checkmark. Settings displays collapsed and pinned status. The handle uses
-distinct collapsed, expanded, and pinned colors without icon glyphs.
+The handle uses distinct collapsed, expanded, and pinned colors without icon
+glyphs. Settings displays the current unified mode.
 `Ctrl+Alt+T` continues to show or hide the whole overlay and does not change
-either persisted mode.
+the persisted mode.
 
 ## Window placement and layout
 
-The active panel and collapsed activation strip share pointer-threshold drag
-handling. Marker and body controls remain click targets until pointer movement
-exceeds the standard Windows drag distance; after that, the gesture moves the
-window and suppresses both task actions. Collapsed hover expansion waits briefly
-so a drag can begin without expanding the strip.
+The active panel keeps its pointer-threshold drag handling. The handle has an
+independent gesture that captures the mouse on press and waits for five DIPs of
+movement before treating the action as a drag. Parent panel drag handlers ignore
+handle-originated events, preventing WPF button/capture conflicts. Collapsed
+hover expansion is disabled while the handle gesture is active.
 
 At drag completion, the window snaps within 16 DIPs of the left, right, top, or
 bottom edge of the current monitor work area. Normal overlay drags persist
@@ -210,9 +210,9 @@ or its architecture documentation changes.
 - tray Show, Hide, Settings, and Exit commands;
 - all three tray and global-hotkey clipboard creation modes;
 - global overlay show/hide hotkey and graceful registration collisions;
-- collapsed setting persistence and backward-compatible old-state loading;
+- unified overlay-mode persistence and backward-compatible legacy migration;
 - collapsed activation-strip expansion and 500 ms return behavior;
-- persisted pinned active mode, tray/handle toggles, and checked state;
+- exclusive tray/handle mode selection and checked state;
 - persistent handle styling in collapsed, expanded, and pinned states;
 - collapse guards for editor, context menu, Settings, modal dialogs, and drag;
 - marker-only completion and body-click in-work behavior;
@@ -254,26 +254,25 @@ or its architecture documentation changes.
 6. Exit both instances and confirm the hotkeys can be registered again on the
    next launch.
 
-## Manual collapsed-mode test
+## Manual overlay-mode test
 
-1. Enable **Toggle collapsed mode** in the tray and confirm the task rows are
-   replaced by a compact activation strip.
-2. Hover the strip and confirm the full active overlay appears.
-3. Enable **Keep expanded**, move the pointer away, and confirm the panel stays
-   expanded and the tray item remains checked.
-4. Disable **Keep expanded** and confirm the strip returns after about 500 ms.
+1. Select each **Overlay mode** tray item and confirm exactly one item is checked.
+2. In **Collapsed handle**, hover the handle and confirm the active overlay appears.
+3. Select **Pinned expanded**, move the pointer away, and confirm the panel stays
+   expanded.
+4. Select **Collapsed handle** and confirm the handle returns after about 500 ms.
 5. Confirm the handle remains visible and changes from collapsed yellow to
    expanded blue to pinned green.
-6. Hide and show the overlay with `Ctrl+Alt+T`; confirm both persisted modes
-   remain correct.
+6. Hide and show the overlay with `Ctrl+Alt+T`; confirm the selected mode remains
+   correct.
 7. Open Task Details and move the pointer away; confirm the overlay stays
    active. Click Delete and keep the confirmation open; confirm it still does
    not collapse.
 8. Repeat with a task context menu and Settings open, then close them and
    confirm normal delayed collapse resumes.
-9. Restart the app and confirm pinned active mode is restored.
+9. Restart the app and confirm the selected overlay mode is restored.
 10. Confirm clipboard hotkeys still create and reveal tasks.
-11. Disable collapsed mode and confirm the existing passive task list and hover
+11. Select **Auto quest tracker** and confirm the passive task list and hover
    behavior return.
 
 ## Manual placement test
@@ -282,8 +281,8 @@ or its architecture documentation changes.
 2. Drag from a marker or task body past the Windows drag threshold and confirm
    neither completion nor in-work state changes.
 3. Drag within about 16 DIPs of every work-area edge and confirm edge snapping.
-4. Enable collapsed mode, drag the activation strip, then leave and re-enter it;
-   confirm hover expansion still works.
+4. Select **Collapsed handle**, drag the handle freely beyond five DIPs, and
+   confirm it follows the pointer without changing mode.
 5. Put the strip at the right and bottom edges and confirm expansion shifts
    left/up without crossing the work area, then confirm the strip returns to
    its original right/bottom anchor after collapse.
@@ -313,10 +312,8 @@ or its architecture documentation changes.
 - There is no completed-task browser or restore action.
 - The task editor does not manage due time, priority, or subtasks yet.
 - Hotkey bindings are fixed and cannot yet be edited.
-- Collapsed mode is only toggled from the tray; Settings currently edits only
-  in-work mode.
-- Pinned mode is toggled from the tray or handle; Settings displays its status
-  but does not currently edit it.
+- Overlay mode is selected from the tray or handle context menu; Settings
+  displays its status but does not currently edit it.
 - Dragging uses WPF/WinForms DPI transforms and is designed for per-monitor
   safety, but mixed-DPI transitions should still be validated on physical
   multi-monitor hardware.

@@ -22,7 +22,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Button x:Name="CollapsedActivation"
+        <Border x:Name="CollapsedActivation"
                 Grid.Row="0"
                 Width="44"
                 Height="16"
@@ -30,29 +30,40 @@
                 HorizontalAlignment="Left"
                 Background="#CC272A32"
                 BorderBrush="#99FFE878"
-                Foreground="#FFFFE878"
                 BorderThickness="1"
+                CornerRadius="8"
                 Cursor="SizeAll"
-                FocusVisualStyle="{x:Null}"
-                ToolTip="Keep expanded"
-                Click="ActivationHandle_OnClick">
-            <Button.Template>
-                <ControlTemplate TargetType="Button">
-                    <Border Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="8">
-                        <Rectangle Width="18"
-                                   Height="2"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"
-                                   Fill="{TemplateBinding Foreground}"
-                                   RadiusX="1"
-                                   RadiusY="1" />
-                    </Border>
-                </ControlTemplate>
-            </Button.Template>
-        </Button>
+                ToolTip="Overlay mode"
+                PreviewMouseLeftButtonDown="ActivationHandle_OnPreviewMouseLeftButtonDown"
+                PreviewMouseMove="ActivationHandle_OnPreviewMouseMove"
+                PreviewMouseLeftButtonUp="ActivationHandle_OnPreviewMouseLeftButtonUp"
+                LostMouseCapture="ActivationHandle_OnLostMouseCapture">
+            <Border.ContextMenu>
+                <ContextMenu Opened="HandleModeContextMenu_OnOpened"
+                             Closed="HandleModeContextMenu_OnClosed">
+                    <MenuItem Header="Auto quest tracker"
+                              Tag="AutoQuestTracker"
+                              IsCheckable="True"
+                              Click="HandleModeMenuItem_OnClick" />
+                    <MenuItem Header="Collapsed handle"
+                              Tag="CollapsedHandle"
+                              IsCheckable="True"
+                              Click="HandleModeMenuItem_OnClick" />
+                    <MenuItem Header="Pinned expanded"
+                              Tag="PinnedExpanded"
+                              IsCheckable="True"
+                              Click="HandleModeMenuItem_OnClick" />
+                </ContextMenu>
+            </Border.ContextMenu>
+            <Rectangle x:Name="HandleIndicator"
+                       Width="18"
+                       Height="2"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Fill="#FFFFE878"
+                       RadiusX="1"
+                       RadiusY="1" />
+        </Border>
 
         <Border x:Name="OverlayPanel"
                 Grid.Row="1"
