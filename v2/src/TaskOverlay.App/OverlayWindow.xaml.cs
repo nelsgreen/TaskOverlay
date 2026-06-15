@@ -151,8 +151,7 @@ public partial class OverlayWindow : Window
 
         if (mode == OverlayMode.CollapsedHandle)
         {
-            if (previousMode == OverlayMode.AutoQuestTracker ||
-                _state.WindowPlacement.CollapsedLeft is null ||
+            if (_state.WindowPlacement.CollapsedLeft is null ||
                 _state.WindowPlacement.CollapsedTop is null)
             {
                 CaptureCollapsedAnchor();
@@ -170,9 +169,9 @@ public partial class OverlayWindow : Window
                 Top = anchorTop;
             }
 
-            SetActiveMode(true);
             _state.WindowPlacement.Left = Left;
             _state.WindowPlacement.Top = Top;
+            SetActiveMode(true);
         }
         else
         {
@@ -616,7 +615,7 @@ public partial class OverlayWindow : Window
         var screen = Forms.Screen.FromPoint(Forms.Cursor.Position);
         ConstrainToWorkArea(screen, snap: true);
 
-        if (startedCollapsed)
+        if (startedCollapsed || _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle)
         {
             _collapsedRestingLeft = Left;
             _collapsedRestingTop = Top;
@@ -807,10 +806,15 @@ public partial class OverlayWindow : Window
 
     private void ToggleModeFromHandle()
     {
-        var nextMode =
-            _state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded
-                ? OverlayMode.CollapsedHandle
-                : OverlayMode.PinnedExpanded;
+        var currentMode = _state.OverlaySettings.OverlayMode;
+        if (currentMode == OverlayMode.AutoQuestTracker)
+        {
+            return;
+        }
+
+        var nextMode = currentMode == OverlayMode.PinnedExpanded
+            ? OverlayMode.CollapsedHandle
+            : OverlayMode.PinnedExpanded;
         SetOverlayMode(nextMode);
     }
 
