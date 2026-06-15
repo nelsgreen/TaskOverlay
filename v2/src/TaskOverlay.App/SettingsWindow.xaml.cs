@@ -32,6 +32,8 @@ public partial class SettingsWindow : Window
         {
             CollapsedModeStatus.Text =
                 $"Collapsed mode: {(_state.OverlaySettings.CollapsedMode ? "enabled" : "disabled")}";
+            PinnedActiveModeStatus.Text =
+                $"Keep expanded: {(_state.OverlaySettings.PinnedActiveMode ? "enabled" : "disabled")}";
 
             foreach (var item in InWorkModeComboBox.Items)
             {

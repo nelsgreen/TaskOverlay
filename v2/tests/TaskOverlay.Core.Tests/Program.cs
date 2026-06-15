@@ -15,6 +15,9 @@ internal static class Program
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("collapsed setting persistence", CollapsedSettingPersistence),
             ("old state collapsed default", OldStateCollapsedDefault),
+            ("pinned active setting persistence", PinnedActiveSettingPersistence),
+            ("old state pinned active default", OldStatePinnedActiveDefault),
+            ("overlay collapse guard", OverlayCollapseGuardBehavior),
             ("single task in-work mode", SingleTaskInWorkMode),
             ("multiple tasks in-work mode", MultipleTasksInWorkMode),
             ("task edit values", TaskEditValuesUpdate),
@@ -67,6 +70,9 @@ internal static class Program
             Assert(
                 !state.OverlaySettings.CollapsedMode,
                 "Collapsed mode should be disabled for new state.");
+            Assert(
+                !state.OverlaySettings.PinnedActiveMode,
+                "Pinned active mode should be disabled for new state.");
         });
     }
 
@@ -159,6 +165,86 @@ internal static class Program
                 Directory.GetFiles(directory, "state.corrupt.*.json").Length == 0,
                 "A missing collapsed setting should not mark old state as corrupted.");
         });
+    }
+
+    private static void PinnedActiveSettingPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.OverlaySettings.PinnedActiveMode = true;
+
+            store.Save(state);
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.PinnedActiveMode,
+                "Pinned active mode should survive serialization.");
+        });
+    }
+
+    private static void OldStatePinnedActiveDefault()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            const string oldStateJson =
+                """
+                {
+                  "schemaVersion": 1,
+                  "tasks": [],
+                  "overlaySettings": {
+                    "activeToPassiveDelayMilliseconds": 500,
+                    "alwaysOnTop": true,
+                    "collapsedMode": true
+                  },
+                  "windowPlacement": {
+                    "left": null,
+                    "top": null
+                  },
+                  "createdAtUtc": "2026-06-11T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-11T08:30:00+00:00"
+                }
+                """;
+
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "state.json"), oldStateJson);
+
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                !loaded.OverlaySettings.PinnedActiveMode,
+                "Old state files should default pinned active mode to false.");
+        });
+    }
+
+    private static void OverlayCollapseGuardBehavior()
+    {
+        var idle = new OverlayInteractionState(
+            PinnedActiveMode: false,
+            TaskDetailsOpen: false,
+            ContextMenuOpen: false,
+            SettingsOpen: false,
+            ModalDialogOpen: false,
+            Dragging: false);
+
+        Assert(
+            OverlayCollapseGuard.CanCollapse(idle),
+            "Idle overlay should be allowed to collapse.");
+
+        var blockers = new[]
+        {
+            idle with { PinnedActiveMode = true },
+            idle with { TaskDetailsOpen = true },
+            idle with { ContextMenuOpen = true },
+            idle with { SettingsOpen = true },
+            idle with { ModalDialogOpen = true },
+            idle with { Dragging = true }
+        };
+
+        Assert(
+            blockers.All(state => !OverlayCollapseGuard.CanCollapse(state)),
+            "Every active interaction should prevent overlay collapse.");
     }
 
     private static void WindowPlacementNegativeMonitorClamp()

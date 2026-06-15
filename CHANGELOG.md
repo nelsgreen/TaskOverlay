@@ -1,5 +1,29 @@
 # Changelog
 
+## v2 pinned active mode and interaction-safe collapse
+
+### Added
+
+- Added persisted `OverlaySettings.pinnedActiveMode`, defaulting to `false` for
+  existing state files.
+- Added checked tray command **Keep expanded** and handle-click pin toggling.
+- Kept the activation handle visible with distinct collapsed, expanded, and
+  pinned styling.
+- Added a tested Core collapse policy covering pinning, task editor, context
+  menu, Settings, modal dialogs, and dragging.
+
+### Fixed
+
+- Prevented automatic collapse while Task Details or Settings is open.
+- Prevented collapse behind delete confirmations and validation dialogs.
+- Preserved normal 500 ms collapse after the final interaction closes.
+- Preserved pinned presentation across tray/hotkey hide and show cycles.
+
+### Preserved
+
+- Task interactions, collapsed anchors, snapping, clipboard hotkeys, JSON
+  recovery, both WPF artifacts, and Go v1 remain unchanged.
+
 ## v2 task interaction and independent collapsed anchor
 
 ### Added

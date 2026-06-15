@@ -15,6 +15,7 @@ public partial class App : System.Windows.Application
     private Forms.NotifyIcon? _trayIcon;
     private Forms.ContextMenuStrip? _trayMenu;
     private Forms.ToolStripMenuItem? _collapsedModeMenuItem;
+    private Forms.ToolStripMenuItem? _pinnedActiveModeMenuItem;
     private GlobalHotkeyManager? _hotkeyManager;
     private AppStateStore? _stateStore;
     private AppState? _state;
@@ -36,10 +37,7 @@ public partial class App : System.Windows.Application
                 (message, exception) => _diagnostics.Log(message, exception));
             _state = _stateStore.Load();
 
-            _overlayWindow = new OverlayWindow(
-                _state,
-                PersistState,
-                message => _diagnostics.Log(message));
+            _overlayWindow = CreateOverlayWindow();
             _overlayWindow.Show();
 
             CreateTrayIcon();
@@ -124,6 +122,12 @@ public partial class App : System.Windows.Application
         };
         _collapsedModeMenuItem.Click += CollapsedModeMenuItem_OnClick;
         _trayMenu.Items.Add(_collapsedModeMenuItem);
+        _pinnedActiveModeMenuItem = new Forms.ToolStripMenuItem("Keep expanded")
+        {
+            Checked = _state?.OverlaySettings.PinnedActiveMode ?? false
+        };
+        _pinnedActiveModeMenuItem.Click += PinnedActiveModeMenuItem_OnClick;
+        _trayMenu.Items.Add(_pinnedActiveModeMenuItem);
         _trayMenu.Items.Add("Settings", null, (_, _) => RunCommand("Tray", "Settings", ShowSettings));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("Exit", null, (_, _) => RunCommand("Tray", "Exit", () => BeginShutdown("Tray Exit command.")));
@@ -275,6 +279,11 @@ public partial class App : System.Windows.Application
         RunCommand("Tray", "Toggle collapsed mode", ToggleCollapsedMode);
     }
 
+    private void PinnedActiveModeMenuItem_OnClick(object? sender, EventArgs e)
+    {
+        RunCommand("Tray", "Keep expanded", TogglePinnedActiveMode);
+    }
+
     private void CreateTasksFromClipboardLines()
     {
         CreateTasksFromClipboard(
@@ -357,13 +366,16 @@ public partial class App : System.Windows.Application
 
         if (_overlayWindow is null || _overlayWindow.IsClosed)
         {
-            _overlayWindow = new OverlayWindow(
-                _state,
-                PersistState,
-                message => _diagnostics?.Log(message));
+            _overlayWindow = CreateOverlayWindow();
         }
 
         _overlayWindow.Show();
+        _overlayWindow.RestoreVisibleMode();
+        if (_settingsWindow?.IsVisible == true)
+        {
+            _overlayWindow.SetSettingsInteractionActive(true);
+        }
+
         _overlayWindow.Activate();
     }
 
@@ -412,6 +424,26 @@ public partial class App : System.Windows.Application
         _diagnostics?.Log($"Collapsed mode changed: enabled={enabled}.");
     }
 
+    private void TogglePinnedActiveMode()
+    {
+        if (_state is null)
+        {
+            return;
+        }
+
+        var enabled = !_state.OverlaySettings.PinnedActiveMode;
+        if (_overlayWindow is not null && !_overlayWindow.IsClosed)
+        {
+            _overlayWindow.SetPinnedActiveMode(enabled);
+        }
+        else
+        {
+            _state.OverlaySettings.PinnedActiveMode = enabled;
+            PersistState();
+            UpdatePinnedActiveModeUi(enabled);
+        }
+    }
+
     private void ShowSettings()
     {
         if (_isShuttingDown)
@@ -430,12 +462,54 @@ public partial class App : System.Windows.Application
                 _state,
                 PersistState,
                 () => _overlayWindow?.RefreshTaskPresentation());
-            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+            _settingsWindow.Closed += SettingsWindow_OnClosed;
         }
 
+        _overlayWindow?.SetSettingsInteractionActive(true);
         _settingsWindow.UpdateFromSettings();
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    private void SettingsWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (_settingsWindow is not null)
+        {
+            _settingsWindow.Closed -= SettingsWindow_OnClosed;
+            _settingsWindow = null;
+        }
+
+        _overlayWindow?.SetSettingsInteractionActive(false);
+    }
+
+    private OverlayWindow CreateOverlayWindow()
+    {
+        if (_state is null)
+        {
+            throw new InvalidOperationException("Cannot create overlay before state is loaded.");
+        }
+
+        var overlay = new OverlayWindow(
+            _state,
+            PersistState,
+            message => _diagnostics?.Log(message));
+        overlay.PinnedActiveModeChanged += OverlayWindow_OnPinnedActiveModeChanged;
+        return overlay;
+    }
+
+    private void OverlayWindow_OnPinnedActiveModeChanged(bool enabled)
+    {
+        UpdatePinnedActiveModeUi(enabled);
+    }
+
+    private void UpdatePinnedActiveModeUi(bool enabled)
+    {
+        if (_pinnedActiveModeMenuItem is not null)
+        {
+            _pinnedActiveModeMenuItem.Checked = enabled;
+        }
+
+        _settingsWindow?.UpdateFromSettings();
     }
 
     private void BeginShutdown(string reason)
@@ -456,6 +530,12 @@ public partial class App : System.Windows.Application
         {
             _settingsWindow?.Close();
             _settingsWindow = null;
+            if (_overlayWindow is not null)
+            {
+                _overlayWindow.PinnedActiveModeChanged -=
+                    OverlayWindow_OnPinnedActiveModeChanged;
+            }
+
             _overlayWindow?.CloseForExit();
             _overlayWindow = null;
         }
@@ -534,6 +614,13 @@ public partial class App : System.Windows.Application
                 {
                     _collapsedModeMenuItem.Click -= CollapsedModeMenuItem_OnClick;
                     _collapsedModeMenuItem = null;
+                }
+
+                if (_pinnedActiveModeMenuItem is not null)
+                {
+                    _pinnedActiveModeMenuItem.Click -=
+                        PinnedActiveModeMenuItem_OnClick;
+                    _pinnedActiveModeMenuItem = null;
                 }
 
                 _trayMenu.Dispose();

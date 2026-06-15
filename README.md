@@ -49,12 +49,21 @@ a small activation strip. Hovering the strip expands the active overlay; leaving
 the overlay returns it to the strip after 500 ms. The setting is stored in the
 v2 state file. `Ctrl+Alt+T` continues to show or hide the entire overlay.
 
+Use the checked tray item **Keep expanded**, or click the overlay handle, to
+toggle pinned active mode. Pinning is persisted and keeps the task panel open
+when the pointer leaves. The handle remains visible in collapsed, expanded, and
+pinned states, using yellow, blue, and green styling respectively.
+
 Drag the active panel or collapsed activation strip to move it. Moving beyond
 the normal Windows drag threshold suppresses marker/body clicks. The window
 snaps near any edge of the current monitor work area and keeps expanded content
 on-screen. The collapsed strip has its own saved anchor, so temporary left/up
 adjustment during expansion does not move a right/bottom snapped strip. Long
 task titles and visible descriptions wrap within the monitor-safe overlay width.
+
+The overlay stays expanded while Task Details, Settings, a task context menu, or
+a confirmation/message dialog is open, and while a drag is in progress. After
+the interaction closes, normal 500 ms collapse behavior resumes unless pinned.
 
 V2 runtime and crash logs are stored under
 `%APPDATA%\TaskOverlayV2\logs`. Unhandled exceptions create a dedicated

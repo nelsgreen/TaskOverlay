@@ -9,15 +9,18 @@ public partial class TaskDetailsWindow : Window
     private readonly TaskItem _task;
     private readonly Action<TaskItem, TaskEditValues> _saveTask;
     private readonly Action<TaskItem> _deleteTask;
+    private readonly Action<bool> _modalInteractionChanged;
 
     public TaskDetailsWindow(
         TaskItem task,
         Action<TaskItem, TaskEditValues> saveTask,
-        Action<TaskItem> deleteTask)
+        Action<TaskItem> deleteTask,
+        Action<bool> modalInteractionChanged)
     {
         _task = task;
         _saveTask = saveTask;
         _deleteTask = deleteTask;
+        _modalInteractionChanged = modalInteractionChanged;
 
         InitializeComponent();
         TitleTextBox.Text = task.Title;
@@ -30,12 +33,13 @@ public partial class TaskDetailsWindow : Window
     {
         if (string.IsNullOrWhiteSpace(TitleTextBox.Text))
         {
-            MessageBox.Show(
-                this,
-                "Task title cannot be empty.",
-                "TaskOverlay",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            ShowModalMessage(
+                () => MessageBox.Show(
+                    this,
+                    "Task title cannot be empty.",
+                    "TaskOverlay",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning));
             TitleTextBox.Focus();
             return;
         }
@@ -57,12 +61,13 @@ public partial class TaskDetailsWindow : Window
 
     private void DeleteButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var result = MessageBox.Show(
-            this,
-            $"Delete \"{_task.Title}\"?",
-            "Delete task",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
+        var result = ShowModalMessage(
+            () => MessageBox.Show(
+                this,
+                $"Delete \"{_task.Title}\"?",
+                "Delete task",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning));
 
         if (result != MessageBoxResult.Yes)
         {
@@ -71,5 +76,18 @@ public partial class TaskDetailsWindow : Window
 
         _deleteTask(_task);
         Close();
+    }
+
+    private T ShowModalMessage<T>(Func<T> showDialog)
+    {
+        _modalInteractionChanged(true);
+        try
+        {
+            return showDialog();
+        }
+        finally
+        {
+            _modalInteractionChanged(false);
+        }
     }
 }

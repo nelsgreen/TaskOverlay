@@ -17,25 +17,45 @@
           PreviewMouseMove="HoverSurface_OnPreviewMouseMove"
           PreviewMouseLeftButtonUp="HoverSurface_OnPreviewMouseLeftButtonUp"
           LostMouseCapture="HoverSurface_OnLostMouseCapture">
-        <Border x:Name="CollapsedActivation"
-                Width="42"
-                Height="14"
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Button x:Name="CollapsedActivation"
+                Grid.Row="0"
+                Width="44"
+                Height="16"
                 Margin="2"
+                HorizontalAlignment="Left"
                 Background="#CC272A32"
                 BorderBrush="#99FFE878"
+                Foreground="#FFFFE878"
                 BorderThickness="1"
-                CornerRadius="7"
-                Visibility="Collapsed">
-            <Rectangle Width="18"
-                       Height="2"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       Fill="#FFFFE878"
-                       RadiusX="1"
-                       RadiusY="1" />
-        </Border>
+                Cursor="SizeAll"
+                FocusVisualStyle="{x:Null}"
+                ToolTip="Keep expanded"
+                Click="ActivationHandle_OnClick">
+            <Button.Template>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8">
+                        <Rectangle Width="18"
+                                   Height="2"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Fill="{TemplateBinding Foreground}"
+                                   RadiusX="1"
+                                   RadiusY="1" />
+                    </Border>
+                </ControlTemplate>
+            </Button.Template>
+        </Button>
 
         <Border x:Name="OverlayPanel"
+                Grid.Row="1"
                 Padding="14"
                 Background="Transparent"
                 BorderBrush="Transparent"
@@ -52,7 +72,8 @@
                                FontSize="12"
                                FontWeight="SemiBold"
                                Text="TASKOVERLAY V2 PROTOTYPE" />
-                    <TextBlock DockPanel.Dock="Right"
+                    <TextBlock x:Name="ModeStatus"
+                               DockPanel.Dock="Right"
                                Foreground="#FFA1A1AA"
                                FontSize="11"
                                Text="ACTIVE" />
