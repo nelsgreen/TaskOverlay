@@ -113,8 +113,11 @@ dotnet run --project .\v2\tests\TaskOverlay.Core.Tests\TaskOverlay.Core.Tests.cs
 dotnet run --project .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj
 ```
 
-The v2 workflow is separate from the existing Go workflow and runs only when v2
-or its architecture documentation changes.
+**Build WPF v2** runs automatically for v2, documentation, README, changelog,
+and workflow changes. Automatic runs publish only the framework-dependent
+development artifact. The self-contained Windows x64 artifact is opt-in through
+the workflow's manual dispatch input. The legacy **Build Go v1 portable**
+workflow is manual-only.
 
 ## Validation targets
 

@@ -1,17 +1,27 @@
-name: Build Windows WPF v2 prototype
+name: Build WPF v2
 
 on:
   push:
     paths:
       - "v2/**"
-      - "docs/V2_ARCHITECTURE.md"
-      - ".github/workflows/build-v2.yml"
+      - "docs/**"
+      - "README.md"
+      - "CHANGELOG.md"
+      - ".github/workflows/**"
   pull_request:
     paths:
       - "v2/**"
-      - "docs/V2_ARCHITECTURE.md"
-      - ".github/workflows/build-v2.yml"
+      - "docs/**"
+      - "README.md"
+      - "CHANGELOG.md"
+      - ".github/workflows/**"
   workflow_dispatch:
+    inputs:
+      publish_self_contained:
+        description: Publish the larger self-contained Windows x64 artifact
+        required: true
+        default: true
+        type: boolean
 
 jobs:
   build-v2:
@@ -39,6 +49,7 @@ jobs:
         run: dotnet publish v2/src/TaskOverlay.App/TaskOverlay.App.csproj --configuration Release --no-restore --output v2/publish/framework-dependent
 
       - name: Publish self-contained app
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_self_contained }}
         run: dotnet publish v2/src/TaskOverlay.App/TaskOverlay.App.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false --source https://api.nuget.org/v3/index.json --output v2/publish/self-contained
 
       - name: Upload framework-dependent Windows app
@@ -49,6 +60,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload self-contained Windows app
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_self_contained }}
         uses: actions/upload-artifact@v4
         with:
           name: TaskOverlayV2_WPF_SelfContained

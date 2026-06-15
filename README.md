@@ -39,16 +39,18 @@ V2 runtime and crash logs are stored under
 `crash-<timestamp>.log` containing the exception chain, stack traces, state path,
 shutdown status, and current overlay mode.
 
-GitHub Actions publishes two Windows artifacts:
+GitHub Actions artifacts:
 
-- `TaskOverlayV2_WPF_FrameworkDependent` requires the .NET 8 Desktop Runtime.
-- `TaskOverlayV2_WPF_SelfContained` includes the Windows x64 runtime, so a
-  separate .NET installation is not required.
+| Artifact | Use | Runtime requirement |
+| --- | --- | --- |
+| `TaskOverlayV2_WPF_FrameworkDependent` | Recommended development build produced automatically by **Build WPF v2** | Requires the .NET 8 Desktop Runtime |
+| `TaskOverlayV2_WPF_SelfContained` | Larger build for sharing with users; produced by manually running **Build WPF v2** with self-contained publishing enabled | No separate .NET installation required |
+| `TaskOverlay_GoV1_Portable` | Legacy Go v1 prototype; produced only by manually running **Build Go v1 portable** | No .NET installation required |
 
-Open a successful **Build Windows WPF v2 prototype** workflow run and download
-one artifact from its **Artifacts** section. Extract the downloaded zip once;
-the app files are directly inside it, with no nested zip. Run
-`TaskOverlay.V2.exe`.
+During v2 development, download `TaskOverlayV2_WPF_FrameworkDependent`. Open a
+successful **Build WPF v2** workflow run and download it from the **Artifacts**
+section. Extract the downloaded zip once; the app files are directly inside it,
+with no nested zip. Run `TaskOverlay.V2.exe`.
 
 See `docs/V2_ARCHITECTURE.md` for scope and limitations.
 

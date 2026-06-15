@@ -1,12 +1,7 @@
-name: Build Windows portable
+name: Build Go v1 portable
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
   workflow_dispatch:
-  release:
-    types: [ published ]
 
 jobs:
   build-windows:
@@ -28,5 +23,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TaskOverlay_portable
+          name: TaskOverlay_GoV1_Portable
           path: build/dist/TaskOverlay_portable.zip
