@@ -37,13 +37,13 @@ jobs:
         run: |
           $publishDir = Join-Path $env:RUNNER_TEMP 'TaskOverlayV2_WPF_FrameworkDependent'
           $expectedExe = Join-Path $publishDir 'TaskOverlay.V2.exe'
-          $legacyExe = Join-Path $publishDir 'TaskOverlay.exe'
+          $legacyExe = Get-ChildItem -LiteralPath $publishDir -Filter 'TaskOverlay.exe' -File -Recurse
 
           if (-not (Test-Path -LiteralPath $expectedExe)) {
             throw "TaskOverlay.V2.exe is missing from publish output."
           }
 
-          if (Test-Path -LiteralPath $legacyExe) {
+          if ($legacyExe) {
             throw "TaskOverlay.exe must not be included in the WPF v2 artifact."
           }
 
