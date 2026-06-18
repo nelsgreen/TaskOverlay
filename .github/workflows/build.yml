@@ -1,27 +1,54 @@
-name: Build Go v1 portable
+name: Build WPF v2
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
   workflow_dispatch:
 
 jobs:
-  build-windows:
+  build-wpf-v2:
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
-          go-version: '1.23.x'
+          dotnet-version: '8.0.x'
 
-      - name: Build portable ZIP
+      - name: Restore WPF v2
+        run: dotnet restore .\v2\TaskOverlay.sln --configfile .\v2\NuGet.Config
+
+      - name: Build WPF v2
+        run: dotnet build .\v2\TaskOverlay.sln --configuration Release --no-restore
+
+      - name: Publish WPF v2 framework-dependent
         shell: pwsh
-        run: ./build/build_windows.ps1
+        run: |
+          $publishDir = Join-Path $env:RUNNER_TEMP 'TaskOverlayV2_WPF_FrameworkDependent'
+          dotnet publish .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj --configuration Release --no-build --self-contained false --output $publishDir
 
-      - name: Upload artifact
+      - name: Verify WPF v2 artifact contents
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path $env:RUNNER_TEMP 'TaskOverlayV2_WPF_FrameworkDependent'
+          $expectedExe = Join-Path $publishDir 'TaskOverlay.V2.exe'
+          $legacyExe = Join-Path $publishDir 'TaskOverlay.exe'
+
+          if (-not (Test-Path -LiteralPath $expectedExe)) {
+            throw "TaskOverlay.V2.exe is missing from publish output."
+          }
+
+          if (Test-Path -LiteralPath $legacyExe) {
+            throw "TaskOverlay.exe must not be included in the WPF v2 artifact."
+          }
+
+      - name: Upload WPF v2 framework-dependent artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TaskOverlay_GoV1_Portable
-          path: build/dist/TaskOverlay_portable.zip
+          name: TaskOverlayV2_WPF_FrameworkDependent
+          path: ${{ runner.temp }}\TaskOverlayV2_WPF_FrameworkDependent\
