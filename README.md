@@ -2,11 +2,18 @@
 
 Portable Windows 10/11 desktop overlay for editable tasks.
 
-## Windows WPF v2 prototype
+## Status
 
-A separate Windows-only WPF prototype lives in `v2/`. It validates transparent
+WPF v2 is the active product. All new development happens in `v2/`.
+
+Go v1 (`cmd/taskoverlay/`) is a legacy prototype. It is no longer built or distributed.
+Do not use Go v1 for testing or reporting issues.
+
+## Windows WPF v2
+
+A Windows-only WPF app lives in `v2/`. It validates transparent
 overlay rendering, hover activation, tray lifecycle, a separate settings window,
-and practical DPI-aware monitor placement without replacing the Go v1 app.
+and practical DPI-aware monitor placement.
 
 Build and run:
 
@@ -39,18 +46,22 @@ V2 runtime and crash logs are stored under
 `crash-<timestamp>.log` containing the exception chain, stack traces, state path,
 shutdown status, and current overlay mode.
 
-GitHub Actions artifacts:
+## Download and run
 
-| Artifact | Use | Runtime requirement |
-| --- | --- | --- |
-| `TaskOverlayV2_WPF_FrameworkDependent` | Recommended development build produced automatically by **Build WPF v2** | Requires the .NET 8 Desktop Runtime |
-| `TaskOverlayV2_WPF_SelfContained` | Larger build for sharing with users; produced by manually running **Build WPF v2** with self-contained publishing enabled | No separate .NET installation required |
-| `TaskOverlay_GoV1_Portable` | Legacy Go v1 prototype; produced only by manually running **Build Go v1 portable** | No .NET installation required |
+Go to the Actions tab and open the latest successful build.
+Download TaskOverlayV2_WPF_FrameworkDependent.
+Extract the archive.
+Run TaskOverlay.V2.exe.
 
-During v2 development, download `TaskOverlayV2_WPF_FrameworkDependent`. Open a
-successful **Build WPF v2** workflow run and download it from the **Artifacts**
-section. Extract the downloaded zip once; the app files are directly inside it,
-with no nested zip. Run `TaskOverlay.V2.exe`.
+Requirement: .NET Desktop Runtime 8.0 must be installed. If you are not sure whether it is installed, run:
+
+```powershell
+dotnet --list-runtimes
+```
+
+Look for Microsoft.WindowsDesktop.App 8.0.x in the output.
+
+Note: If you see TaskOverlay.exe instead of TaskOverlay.V2.exe, you downloaded the wrong artifact or an old release. Do not use it.
 
 See `docs/V2_ARCHITECTURE.md` for scope and limitations.
 
@@ -91,6 +102,8 @@ TaskOverlay/
 
 ## Build locally on Windows
 
+Legacy (Go v1 prototype - not maintained)
+
 Requirements:
 - Go 1.23 or newer;
 - Windows 10/11.
@@ -110,11 +123,15 @@ build\dist\TaskOverlay_portable.zip
 
 ## Cross-build from Linux/macOS
 
+Legacy (Go v1 prototype - not maintained)
+
 ```bash
 GOOS=windows GOARCH=amd64 go build -ldflags="-H windowsgui" -o build/TaskOverlay.exe ./cmd/taskoverlay
 ```
 
 ## Release policy
+
+Legacy (Go v1 prototype - not maintained)
 
 Use semantic tags:
 
