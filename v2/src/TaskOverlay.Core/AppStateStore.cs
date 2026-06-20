@@ -48,9 +48,22 @@ public sealed class AppStateStore
 
             var json = File.ReadAllText(StatePath);
             var state = JsonSerializer.Deserialize<AppState>(json, _jsonOptions);
+            if (state is null)
+            {
+                throw new InvalidDataException("State file is empty.");
+            }
+
+            var sourceSchemaVersion = state.SchemaVersion;
+            StateMigrator.Migrate(state);
             Validate(state);
-            Report($"State load succeeded with {state!.Tasks.Count} tasks.");
-            return state!;
+            if (sourceSchemaVersion != state.SchemaVersion)
+            {
+                Report($"Migrated state schema from {sourceSchemaVersion} to {state.SchemaVersion}.");
+                TrySave(state, "Migrated state save failed.");
+            }
+
+            Report($"State load succeeded with {state.Tasks.Count} tasks.");
+            return state;
         }
         catch (Exception ex) when (
             ex is JsonException or
@@ -133,7 +146,9 @@ public sealed class AppStateStore
         }
     }
 
-    private void TrySave(AppState state)
+    private void TrySave(
+        AppState state,
+        string failureMessage = "Seed/recovery state save failed.")
     {
         try
         {
@@ -141,7 +156,7 @@ public sealed class AppStateStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Report("Seed/recovery state save failed.", ex);
+            Report(failureMessage, ex);
             // The in-memory defaults still let the overlay start safely.
         }
     }
@@ -195,6 +210,8 @@ public sealed class AppStateStore
         }
 
         if (state.Tasks is null ||
+            state.Projects is null ||
+            state.Groups is null ||
             state.OverlaySettings is null ||
             state.WindowPlacement is null)
         {
@@ -202,6 +219,24 @@ public sealed class AppStateStore
         }
 
         state.OverlaySettings.NormalizeOverlayMode();
+
+        foreach (var project in state.Projects)
+        {
+            if (project.Id == Guid.Empty || string.IsNullOrWhiteSpace(project.Name))
+            {
+                throw new InvalidDataException("State file contains an invalid project.");
+            }
+        }
+
+        foreach (var group in state.Groups)
+        {
+            if (group.Id == Guid.Empty ||
+                group.ProjectId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(group.Name))
+            {
+                throw new InvalidDataException("State file contains an invalid group.");
+            }
+        }
 
         foreach (var task in state.Tasks)
         {

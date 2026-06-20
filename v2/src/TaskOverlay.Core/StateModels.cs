@@ -6,10 +6,12 @@ namespace TaskOverlay.Core;
 
 public sealed class AppState
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public List<TaskItem> Tasks { get; set; } = new();
+    public List<ProjectItem> Projects { get; set; } = new();
+    public List<GroupItem> Groups { get; set; } = new();
     public OverlaySettings OverlaySettings { get; set; } = new();
     public WindowPlacement WindowPlacement { get; set; } = new();
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
@@ -18,19 +20,46 @@ public sealed class AppState
     public static AppState CreateDefault(DateTimeOffset? now = null)
     {
         var timestamp = now ?? DateTimeOffset.UtcNow;
+        var defaultProject = ProjectItem.CreateDefault(timestamp);
 
         return new AppState
         {
             CreatedAtUtc = timestamp,
             UpdatedAtUtc = timestamp,
+            Projects = { defaultProject },
             Tasks =
             {
-                TaskItem.Create("Validate transparent overlay", timestamp),
-                TaskItem.Create("Test tray lifecycle", timestamp),
-                TaskItem.Create("Check DPI and hover behavior", timestamp)
+                TaskItem.Create("Validate transparent overlay", timestamp, defaultProject.Id),
+                TaskItem.Create("Test tray lifecycle", timestamp, defaultProject.Id),
+                TaskItem.Create("Check DPI and hover behavior", timestamp, defaultProject.Id)
             }
         };
     }
+}
+
+public sealed class ProjectItem
+{
+    public const string DefaultName = "Default";
+
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public static ProjectItem CreateDefault(DateTimeOffset? now = null) => new()
+    {
+        Name = DefaultName,
+        CreatedAtUtc = now ?? DateTimeOffset.UtcNow
+    };
+}
+
+public sealed class GroupItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProjectId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class TaskItem
@@ -45,14 +74,20 @@ public sealed class TaskItem
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAtUtc { get; set; }
     public DateTimeOffset? DueAtUtc { get; set; }
+    public Guid? ProjectId { get; set; }
+    public Guid? GroupId { get; set; }
 
-    public static TaskItem Create(string title, DateTimeOffset? now = null)
+    public static TaskItem Create(
+        string title,
+        DateTimeOffset? now = null,
+        Guid? projectId = null)
     {
         return new TaskItem
         {
             Id = Guid.NewGuid(),
             Title = title,
-            CreatedAtUtc = now ?? DateTimeOffset.UtcNow
+            CreatedAtUtc = now ?? DateTimeOffset.UtcNow,
+            ProjectId = projectId
         };
     }
 }
