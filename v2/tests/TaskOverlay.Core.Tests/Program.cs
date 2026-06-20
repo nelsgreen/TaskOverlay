@@ -12,6 +12,13 @@ internal static class Program
         var tests = new (string Name, Action Run)[]
         {
             ("default state creation", DefaultStateCreation),
+            ("project and group models", ProjectAndGroupModels),
+            ("v1 to v2 state migration", V1ToV2StateMigration),
+            ("state migration idempotence", StateMigrationIdempotence),
+            ("migration persisted on load", MigrationPersistedOnLoad),
+            ("v2 tree serialization roundtrip", V2TreeSerializationRoundtrip),
+            ("project agnostic task behavior", ProjectAgnosticTaskBehavior),
+            ("orphan project fallback", OrphanProjectFallback),
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
             ("old collapsed mode migration", OldCollapsedModeMigration),
@@ -69,11 +76,259 @@ internal static class Program
             Assert(File.Exists(store.StatePath), "Load should create state.json.");
             Assert(state.SchemaVersion == AppState.CurrentSchemaVersion, "Schema version mismatch.");
             Assert(state.Tasks.Count == 3, "Expected three seed tasks.");
+            Assert(state.Projects.Count == 1, "Fresh state should contain one Default project.");
+            Assert(state.Groups.Count == 0, "Fresh state should not contain groups.");
+            Assert(
+                state.Projects[0].Name == ProjectItem.DefaultName,
+                "Fresh state should create the Default project.");
+            Assert(
+                state.Tasks.All(task => task.ProjectId == state.Projects[0].Id),
+                "Seed tasks should belong to the Default project.");
             Assert(state.Tasks.All(task => task.Id != Guid.Empty), "Seed tasks need stable IDs.");
             Assert(state.Tasks.Select(task => task.Id).Distinct().Count() == 3, "Seed task IDs must be unique.");
             Assert(
                 state.OverlaySettings.OverlayMode == OverlayMode.AutoQuestTracker,
                 "New state should use AutoQuestTracker mode.");
+        });
+    }
+
+    private static void ProjectAndGroupModels()
+    {
+        var projectId = Guid.NewGuid();
+        var createdAtUtc = DateTimeOffset.Parse("2026-06-20T09:15:00Z");
+        var project = new ProjectItem
+        {
+            Id = projectId,
+            Name = "Project Alpha",
+            SortOrder = 7,
+            CreatedAtUtc = createdAtUtc
+        };
+        var group = new GroupItem
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = projectId,
+            Name = "Group One",
+            SortOrder = 3,
+            CreatedAtUtc = createdAtUtc
+        };
+        var task = new TaskItem();
+
+        Assert(project.Id == projectId, "Project ID should be assignable.");
+        Assert(project.Name == "Project Alpha", "Project name should be assignable.");
+        Assert(project.SortOrder == 7, "Project sort order should be assignable.");
+        Assert(project.CreatedAtUtc == createdAtUtc, "Project creation time should be assignable.");
+        Assert(group.ProjectId == project.Id, "Group should reference its project.");
+        Assert(task.ProjectId is null, "New task ProjectId should be nullable and unset.");
+        Assert(task.GroupId is null, "New task GroupId should be nullable and unset.");
+    }
+
+    private static void V1ToV2StateMigration()
+    {
+        var createdAtUtc = DateTimeOffset.Parse("2025-01-02T03:04:05Z");
+        var completedAtUtc = DateTimeOffset.Parse("2025-01-03T03:04:05Z");
+        var dueAtUtc = DateTimeOffset.Parse("2025-01-04T03:04:05Z");
+        var taskId = Guid.NewGuid();
+        var state = new AppState
+        {
+            SchemaVersion = 1,
+            CreatedAtUtc = createdAtUtc,
+            Tasks =
+            {
+                new TaskItem
+                {
+                    Id = taskId,
+                    Title = "Preserve me",
+                    Description = "Existing description",
+                    Completed = true,
+                    Priority = TaskPriority.Critical,
+                    InWork = true,
+                    DescriptionExpanded = true,
+                    CreatedAtUtc = createdAtUtc,
+                    CompletedAtUtc = completedAtUtc,
+                    DueAtUtc = dueAtUtc,
+                    ProjectId = Guid.NewGuid(),
+                    GroupId = Guid.NewGuid()
+                }
+            },
+            OverlaySettings = new OverlaySettings
+            {
+                ActiveToPassiveDelayMilliseconds = 875,
+                AlwaysOnTop = false,
+                OverlayMode = OverlayMode.PinnedExpanded,
+                InWorkMode = InWorkMode.SingleTask
+            },
+            WindowPlacement = new WindowPlacement
+            {
+                Left = -200,
+                Top = 42,
+                CollapsedLeft = 1800,
+                CollapsedTop = 12
+            }
+        };
+        var settings = state.OverlaySettings;
+        var placement = state.WindowPlacement;
+
+        var migrated = StateMigrator.Migrate(state);
+        var defaultProject = migrated.Projects.Single(project =>
+            project.Name == ProjectItem.DefaultName);
+        var task = migrated.Tasks.Single();
+
+        Assert(ReferenceEquals(migrated, state), "Migration should update the loaded state.");
+        Assert(migrated.SchemaVersion == 2, "Migration should advance schemaVersion to 2.");
+        Assert(migrated.Projects.Count == 1, "Migration should create exactly one Default project.");
+        Assert(task.ProjectId == defaultProject.Id, "Existing tasks should join the Default project.");
+        Assert(task.GroupId is null, "Migrated v1 tasks should not belong to a group.");
+        Assert(task.Id == taskId, "Migration should preserve task ID.");
+        Assert(task.Title == "Preserve me", "Migration should preserve task title.");
+        Assert(task.Description == "Existing description", "Migration should preserve description.");
+        Assert(task.Completed, "Migration should preserve completed state.");
+        Assert(task.Priority == TaskPriority.Critical, "Migration should preserve priority.");
+        Assert(task.InWork, "Migration should preserve in-work state.");
+        Assert(task.DescriptionExpanded, "Migration should preserve description expansion.");
+        Assert(task.CreatedAtUtc == createdAtUtc, "Migration should preserve creation time.");
+        Assert(task.CompletedAtUtc == completedAtUtc, "Migration should preserve completion time.");
+        Assert(task.DueAtUtc == dueAtUtc, "Migration should preserve due time.");
+        Assert(ReferenceEquals(migrated.OverlaySettings, settings), "Migration should preserve settings.");
+        Assert(ReferenceEquals(migrated.WindowPlacement, placement), "Migration should preserve placement.");
+        Assert(settings.ActiveToPassiveDelayMilliseconds == 875, "Migration should preserve delay.");
+        Assert(!settings.AlwaysOnTop, "Migration should preserve topmost setting.");
+        Assert(placement.Left == -200 && placement.CollapsedLeft == 1800, "Migration should preserve coordinates.");
+    }
+
+    private static void StateMigrationIdempotence()
+    {
+        var state = new AppState { SchemaVersion = 1 };
+        state.Tasks.Add(TaskItem.Create("Existing task"));
+
+        StateMigrator.Migrate(state);
+        var projectId = state.Projects.Single().Id;
+        StateMigrator.Migrate(state);
+
+        Assert(state.Projects.Count == 1, "Repeated migration must not duplicate Default.");
+        Assert(state.Projects[0].Id == projectId, "Repeated migration must preserve Default ID.");
+        Assert(state.Tasks[0].ProjectId == projectId, "Repeated migration must preserve assignment.");
+    }
+
+    private static void MigrationPersistedOnLoad()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            const string v1Json =
+                """
+                {
+                  "schemaVersion": 1,
+                  "tasks": [{
+                    "id": "a5bc557e-6f52-468c-b23c-86f2626a448e",
+                    "title": "Migrated task",
+                    "description": "unchanged",
+                    "completed": false,
+                    "priority": "high",
+                    "inWork": true,
+                    "descriptionExpanded": true,
+                    "createdAtUtc": "2026-06-01T08:30:00+00:00"
+                  }],
+                  "overlaySettings": { "alwaysOnTop": true },
+                  "windowPlacement": { "left": 100, "top": 200 },
+                  "createdAtUtc": "2026-06-01T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-01T08:30:00+00:00"
+                }
+                """;
+            Directory.CreateDirectory(directory);
+            var store = new AppStateStore(directory);
+            File.WriteAllText(store.StatePath, v1Json);
+
+            var loaded = store.Load();
+            var rewrittenJson = File.ReadAllText(store.StatePath);
+            var backupJson = File.ReadAllText(store.BackupPath);
+
+            Assert(loaded.SchemaVersion == 2, "Loaded v1 state should migrate to schemaVersion 2.");
+            Assert(loaded.Tasks[0].ProjectId == loaded.Projects.Single().Id, "Loaded task should be assigned.");
+            Assert(rewrittenJson.Contains("\"schemaVersion\": 2"), "Migrated state should be persisted.");
+            Assert(backupJson.Contains("\"schemaVersion\": 1"), "The original v1 state should be backed up.");
+        });
+    }
+
+    private static void V2TreeSerializationRoundtrip()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault();
+            var project = new ProjectItem
+            {
+                Name = "Release",
+                SortOrder = 2,
+                CreatedAtUtc = DateTimeOffset.Parse("2026-06-20T08:00:00Z")
+            };
+            var group = new GroupItem
+            {
+                ProjectId = project.Id,
+                Name = "QA",
+                SortOrder = 4,
+                CreatedAtUtc = project.CreatedAtUtc
+            };
+            var task = TaskItem.Create("Verify build", project.CreatedAtUtc, project.Id);
+            task.GroupId = group.Id;
+            state.Projects.Add(project);
+            state.Groups.Add(group);
+            state.Tasks.Add(task);
+
+            var store = new AppStateStore(directory);
+            store.Save(state);
+            var loaded = store.Load();
+
+            Assert(loaded.SchemaVersion == 2, "Roundtrip should retain schemaVersion 2.");
+            Assert(loaded.Projects.Single(item => item.Id == project.Id).Name == "Release", "Project should roundtrip.");
+            Assert(loaded.Groups.Single(item => item.Id == group.Id).ProjectId == project.Id, "Group should roundtrip.");
+            var loadedTask = loaded.Tasks.Single(item => item.Id == task.Id);
+            Assert(loadedTask.ProjectId == project.Id, "Task ProjectId should roundtrip.");
+            Assert(loadedTask.GroupId == group.Id, "Task GroupId should roundtrip.");
+        });
+    }
+
+    private static void ProjectAgnosticTaskBehavior()
+    {
+        var state = AppState.CreateDefault();
+        var secondProject = new ProjectItem { Name = "Second", SortOrder = 1 };
+        var crossProjectTask = TaskItem.Create("Cross-project", projectId: secondProject.Id);
+        state.Projects.Add(secondProject);
+        state.Tasks.Add(crossProjectTask);
+        state.Tasks[0].InWork = true;
+
+        TaskInteractionService.SetInWorkMode(state, InWorkMode.SingleTask);
+        TaskInteractionService.SetInWork(state, crossProjectTask, true);
+        var activeTasks = state.Tasks.Where(task => !task.Completed).ToList();
+
+        Assert(!state.Tasks[0].InWork, "Single-task mode should clear tasks in other projects.");
+        Assert(crossProjectTask.InWork, "Task activation should not be filtered by project.");
+        Assert(activeTasks.Contains(state.Tasks[0]), "Active subset should include Default tasks.");
+        Assert(activeTasks.Contains(crossProjectTask), "Active subset should include other projects.");
+    }
+
+    private static void OrphanProjectFallback()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault();
+            var orphanProjectId = Guid.NewGuid();
+            var orphanTask = TaskItem.Create("Orphan", projectId: orphanProjectId);
+            var nullProjectTask = TaskItem.Create("Unassigned");
+            state.Tasks.Add(orphanTask);
+            state.Tasks.Add(nullProjectTask);
+
+            var store = new AppStateStore(directory);
+            store.Save(state);
+            var loaded = store.Load();
+            var defaultProject = loaded.Projects.Single(project => project.Name == ProjectItem.DefaultName);
+            var loadedOrphan = loaded.Tasks.Single(task => task.Id == orphanTask.Id);
+            var loadedUnassigned = loaded.Tasks.Single(task => task.Id == nullProjectTask.Id);
+
+            Assert(loadedOrphan.ProjectId == orphanProjectId, "Load should preserve an orphan reference.");
+            Assert(
+                ProjectReferenceResolver.ResolveProject(loaded, loadedOrphan)?.Id == defaultProject.Id,
+                "Orphan references should safely resolve to Default.");
+            Assert(
+                ProjectReferenceResolver.ResolveProject(loaded, loadedUnassigned)?.Id == defaultProject.Id,
+                "Null references should safely resolve to Default.");
         });
     }
 
