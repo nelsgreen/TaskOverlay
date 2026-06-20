@@ -568,8 +568,7 @@ public partial class OverlayWindow : Window
         OverlayPanel.Background = active ? ActiveBackground : Brushes.Transparent;
         OverlayPanel.BorderBrush = active ? ActiveBorder : Brushes.Transparent;
         ActiveChrome.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        EnsurePanelShown();
-        PositionCollapsedPanel();
+        ShowPositionedHandlePanel();
         ModeStatus.Text = mode == OverlayMode.PinnedExpanded ? "PINNED" : "ACTIVE";
     }
 
@@ -1361,6 +1360,38 @@ public partial class OverlayWindow : Window
         if (_overlayVisible && !IsVisible)
         {
             Show();
+        }
+    }
+
+    private void ShowPositionedHandlePanel()
+    {
+        if (!_overlayVisible)
+        {
+            return;
+        }
+
+        var concealedForFirstLayout = !IsVisible;
+        var previousOpacity = Opacity;
+        if (concealedForFirstLayout)
+        {
+            Opacity = 0;
+        }
+
+        try
+        {
+            if (concealedForFirstLayout)
+            {
+                Show();
+            }
+
+            PositionCollapsedPanel();
+        }
+        finally
+        {
+            if (concealedForFirstLayout)
+            {
+                Opacity = previousOpacity;
+            }
         }
     }
 
