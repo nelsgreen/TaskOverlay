@@ -20,7 +20,7 @@ internal static class Program
             ("overlay collapse guard", OverlayCollapseGuardBehavior),
             ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
             ("overlay mode click cycle", OverlayModeClickCycle),
-            ("pinned handle surface policy", PinnedHandleSurfacePolicy),
+            ("handle surface ownership across modes", HandleSurfaceOwnershipAcrossModes),
             ("single task in-work mode", SingleTaskInWorkMode),
             ("multiple tasks in-work mode", MultipleTasksInWorkMode),
             ("task edit values", TaskEditValuesUpdate),
@@ -317,26 +317,40 @@ internal static class Program
             "Pinned expanded should cycle to auto quest tracker.");
     }
 
-    private static void PinnedHandleSurfacePolicy()
+    private static void HandleSurfaceOwnershipAcrossModes()
     {
+        var handle = new OverlayBounds(1872, 0, 48, 20);
+        var modes = new[]
+        {
+            OverlayMode.CollapsedHandle,
+            OverlayMode.PinnedExpanded,
+            OverlayMode.AutoQuestTracker,
+            OverlayMode.CollapsedHandle
+        };
+
+        foreach (var mode in modes)
+        {
+            Assert(
+                OverlaySurfacePolicy.UseHandleWindowForMode(
+                    mode,
+                    hasCollapsedAnchor: true),
+                $"{mode} should retain HandleWindow when an anchor exists.");
+
+            var panel = PanelLayoutService.PlacePanel(
+                handle,
+                panelWidth: 450,
+                panelHeight: 600,
+                new OverlayBounds(0, 0, 1920, 1080));
+            Assert(panel.Right == 1920, $"{mode} panel should open inward.");
+            Assert(handle.Left == 1872, $"{mode} must not mutate the handle anchor.");
+            Assert(handle.Top == 0, $"{mode} must not move the handle downward.");
+        }
+
         Assert(
-            OverlaySurfacePolicy.UseHandleWindowForPinned(
-                OverlayMode.CollapsedHandle,
-                OverlayMode.PinnedExpanded,
-                hasCollapsedAnchor: true),
-            "Pinned mode should retain HandleWindow when entered from a collapsed anchor.");
-        Assert(
-            !OverlaySurfacePolicy.UseHandleWindowForPinned(
+            !OverlaySurfacePolicy.UseHandleWindowForMode(
                 OverlayMode.AutoQuestTracker,
-                OverlayMode.PinnedExpanded,
-                hasCollapsedAnchor: true),
-            "Pinned mode entered from auto should use the normal fallback surface.");
-        Assert(
-            !OverlaySurfacePolicy.UseHandleWindowForPinned(
-                OverlayMode.CollapsedHandle,
-                OverlayMode.PinnedExpanded,
                 hasCollapsedAnchor: false),
-            "Pinned mode cannot retain a collapsed handle without an anchor.");
+            "Auto mode should retain its fallback surface before an anchor exists.");
     }
 
     private static void SingleTaskInWorkMode()

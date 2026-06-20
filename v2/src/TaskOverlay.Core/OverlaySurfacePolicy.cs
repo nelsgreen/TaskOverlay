@@ -2,13 +2,13 @@ namespace TaskOverlay.Core;
 
 public static class OverlaySurfacePolicy
 {
-    public static bool UseHandleWindowForPinned(
-        OverlayMode previousMode,
-        OverlayMode currentMode,
+    public static bool UseHandleWindowForMode(
+        OverlayMode mode,
         bool hasCollapsedAnchor)
     {
-        return previousMode == OverlayMode.CollapsedHandle &&
-               currentMode == OverlayMode.PinnedExpanded &&
-               hasCollapsedAnchor;
+        return hasCollapsedAnchor &&
+               mode is OverlayMode.AutoQuestTracker or
+                   OverlayMode.CollapsedHandle or
+                   OverlayMode.PinnedExpanded;
     }
 }
