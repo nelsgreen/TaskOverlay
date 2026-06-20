@@ -393,14 +393,21 @@ public partial class App : System.Windows.Application
             _overlayWindow = CreateOverlayWindow();
         }
 
-        _overlayWindow.Show();
+        if (!_overlayWindow.IsLoaded)
+        {
+            _overlayWindow.Show();
+        }
+
         _overlayWindow.RestoreVisibleMode();
         if (_settingsWindow?.IsVisible == true)
         {
             _overlayWindow.SetSettingsInteractionActive(true);
         }
 
-        _overlayWindow.Activate();
+        if (_overlayWindow.IsVisible)
+        {
+            _overlayWindow.Activate();
+        }
     }
 
     private void HideOverlay()
@@ -417,7 +424,7 @@ public partial class App : System.Windows.Application
     {
         if (_overlayWindow is null ||
             _overlayWindow.IsClosed ||
-            !_overlayWindow.IsVisible)
+            !_overlayWindow.IsOverlayVisible)
         {
             ShowOverlay();
         }

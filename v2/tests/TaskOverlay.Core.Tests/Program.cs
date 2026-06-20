@@ -19,6 +19,7 @@ internal static class Program
             ("old overlay mode default", OldOverlayModeDefault),
             ("overlay collapse guard", OverlayCollapseGuardBehavior),
             ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
+            ("overlay mode click cycle", OverlayModeClickCycle),
             ("single task in-work mode", SingleTaskInWorkMode),
             ("multiple tasks in-work mode", MultipleTasksInWorkMode),
             ("task edit values", TaskEditValuesUpdate),
@@ -29,6 +30,7 @@ internal static class Program
             ("window placement negative monitor clamp", WindowPlacementNegativeMonitorClamp),
             ("window placement edge snap", WindowPlacementEdgeSnap),
             ("window placement off-screen correction", WindowPlacementOffScreenCorrection),
+            ("collapsed panel opens inward", CollapsedPanelOpensInward),
             ("corrupted state backup", CorruptedStateBackup),
             ("crash log contents", CrashLogContents),
             ("diagnostic callback isolation", DiagnosticCallbackIsolation),
@@ -298,6 +300,22 @@ internal static class Program
         Assert(corrected.Bottom <= workArea.Bottom, "Window should remain inside the work area.");
     }
 
+    private static void OverlayModeClickCycle()
+    {
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.AutoQuestTracker) ==
+            OverlayMode.CollapsedHandle,
+            "Auto quest tracker should cycle to collapsed handle.");
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.CollapsedHandle) ==
+            OverlayMode.PinnedExpanded,
+            "Collapsed handle should cycle to pinned expanded.");
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.PinnedExpanded) ==
+            OverlayMode.AutoQuestTracker,
+            "Pinned expanded should cycle to auto quest tracker.");
+    }
+
     private static void SingleTaskInWorkMode()
     {
         var state = AppState.CreateDefault();
@@ -483,6 +501,23 @@ internal static class Program
         Assert(
             WindowPlacementGeometry.Intersects(corrected, workArea),
             "Corrected window should intersect the current monitor work area.");
+    }
+
+    private static void CollapsedPanelOpensInward()
+    {
+        var workArea = new OverlayBounds(0, 0, 1920, 1080);
+        var handle = new OverlayBounds(1872, 160, 48, 20);
+
+        var panel = PanelLayoutService.PlacePanel(
+            handle,
+            panelWidth: 450,
+            panelHeight: 600,
+            workArea);
+
+        Assert(panel.Right == workArea.Right, "Right-edge panel should open inward.");
+        Assert(panel.Left < handle.Left, "Panel should extend left of the handle.");
+        Assert(panel.Top == handle.Bottom, "Panel should open below the handle when it fits.");
+        Assert(handle.Left == 1872, "Panel placement must not mutate the handle anchor.");
     }
 
     private static void CorruptedStateBackup()

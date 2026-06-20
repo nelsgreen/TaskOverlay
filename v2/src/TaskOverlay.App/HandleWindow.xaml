@@ -1,0 +1,58 @@
+<Window x:Class="TaskOverlay.App.HandleWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TaskOverlay v2 handle"
+        Width="48"
+        Height="20"
+        AllowsTransparency="True"
+        Background="Transparent"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        MouseEnter="HandleSurface_OnMouseEnter"
+        MouseLeave="HandleSurface_OnMouseLeave">
+    <Grid Background="Transparent">
+        <Border x:Name="HandleSurface"
+                Width="44"
+                Height="16"
+                Margin="2"
+                Background="#CC272A32"
+                BorderBrush="#99FFE878"
+                BorderThickness="1"
+                CornerRadius="8"
+                Cursor="SizeAll"
+                ToolTip="Collapsed. Click to pin expanded."
+                PreviewMouseLeftButtonDown="HandleSurface_OnPreviewMouseLeftButtonDown"
+                PreviewMouseMove="HandleSurface_OnPreviewMouseMove"
+                PreviewMouseLeftButtonUp="HandleSurface_OnPreviewMouseLeftButtonUp"
+                LostMouseCapture="HandleSurface_OnLostMouseCapture">
+            <Border.ContextMenu>
+                <ContextMenu Opened="ModeContextMenu_OnOpened"
+                             Closed="ModeContextMenu_OnClosed">
+                    <MenuItem Header="Auto quest tracker"
+                              Tag="AutoQuestTracker"
+                              IsCheckable="True"
+                              Click="ModeMenuItem_OnClick" />
+                    <MenuItem Header="Collapsed handle"
+                              Tag="CollapsedHandle"
+                              IsCheckable="True"
+                              Click="ModeMenuItem_OnClick" />
+                    <MenuItem Header="Pinned expanded"
+                              Tag="PinnedExpanded"
+                              IsCheckable="True"
+                              Click="ModeMenuItem_OnClick" />
+                </ContextMenu>
+            </Border.ContextMenu>
+            <Rectangle x:Name="HandleIndicator"
+                       Width="18"
+                       Height="2"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Fill="#FFFFE878"
+                       RadiusX="1"
+                       RadiusY="1" />
+        </Border>
+    </Grid>
+</Window>
