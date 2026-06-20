@@ -13,6 +13,25 @@ internal static class Program
         {
             ("default state creation", DefaultStateCreation),
             ("save/load roundtrip", SaveLoadRoundtrip),
+            ("overlay mode serialization", OverlayModeSerialization),
+            ("old collapsed mode migration", OldCollapsedModeMigration),
+            ("old pinned mode migration", OldPinnedModeMigration),
+            ("old overlay mode default", OldOverlayModeDefault),
+            ("overlay collapse guard", OverlayCollapseGuardBehavior),
+            ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
+            ("overlay mode click cycle", OverlayModeClickCycle),
+            ("handle surface ownership across modes", HandleSurfaceOwnershipAcrossModes),
+            ("single task in-work mode", SingleTaskInWorkMode),
+            ("multiple tasks in-work mode", MultipleTasksInWorkMode),
+            ("task edit values", TaskEditValuesUpdate),
+            ("task delete", TaskDelete),
+            ("task completion", TaskCompletion),
+            ("in-work setting serialization", InWorkSettingSerialization),
+            ("old state in-work default", OldStateInWorkDefault),
+            ("window placement negative monitor clamp", WindowPlacementNegativeMonitorClamp),
+            ("window placement edge snap", WindowPlacementEdgeSnap),
+            ("window placement off-screen correction", WindowPlacementOffScreenCorrection),
+            ("collapsed panel opens inward", CollapsedPanelOpensInward),
             ("corrupted state backup", CorruptedStateBackup),
             ("crash log contents", CrashLogContents),
             ("diagnostic callback isolation", DiagnosticCallbackIsolation),
@@ -52,6 +71,9 @@ internal static class Program
             Assert(state.Tasks.Count == 3, "Expected three seed tasks.");
             Assert(state.Tasks.All(task => task.Id != Guid.Empty), "Seed tasks need stable IDs.");
             Assert(state.Tasks.Select(task => task.Id).Distinct().Count() == 3, "Seed task IDs must be unique.");
+            Assert(
+                state.OverlaySettings.OverlayMode == OverlayMode.AutoQuestTracker,
+                "New state should use AutoQuestTracker mode.");
         });
     }
 
@@ -86,6 +108,453 @@ internal static class Program
             Assert(loaded.WindowPlacement.Top == 456.5, "Window top did not roundtrip.");
             Assert(File.Exists(store.BackupPath), "Overwriting state should create a backup.");
         });
+    }
+
+    private static void OverlayModeSerialization()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.OverlaySettings.OverlayMode = OverlayMode.PinnedExpanded;
+
+            store.Save(state);
+
+            var json = File.ReadAllText(store.StatePath);
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                json.Contains("\"overlayMode\": \"pinnedExpanded\""),
+                "The unified overlay mode should be serialized.");
+            Assert(
+                loaded.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded,
+                "Overlay mode should survive a save/load roundtrip.");
+            Assert(
+                !json.Contains("\"collapsedMode\"") &&
+                !json.Contains("\"pinnedActiveMode\""),
+                "Legacy mode flags should not be written after normalization.");
+        });
+    }
+
+    private static void OldCollapsedModeMigration()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            const string oldStateJson =
+                """
+                {
+                  "schemaVersion": 1,
+                  "tasks": [],
+                  "overlaySettings": {
+                    "activeToPassiveDelayMilliseconds": 500,
+                    "alwaysOnTop": true,
+                    "collapsedMode": true,
+                    "pinnedActiveMode": false
+                  },
+                  "windowPlacement": {
+                    "left": null,
+                    "top": null
+                  },
+                  "createdAtUtc": "2026-06-11T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-11T08:30:00+00:00"
+                }
+                """;
+
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "state.json"), oldStateJson);
+
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle,
+                "Old collapsed state should migrate to CollapsedHandle.");
+            Assert(
+                Directory.GetFiles(directory, "state.corrupt.*.json").Length == 0,
+                "A missing collapsed setting should not mark old state as corrupted.");
+        });
+    }
+
+    private static void OldPinnedModeMigration()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            const string oldStateJson =
+                """
+                {
+                  "schemaVersion": 1,
+                  "tasks": [],
+                  "overlaySettings": {
+                    "activeToPassiveDelayMilliseconds": 500,
+                    "alwaysOnTop": true,
+                    "collapsedMode": true,
+                    "pinnedActiveMode": true
+                  },
+                  "windowPlacement": {
+                    "left": 100,
+                    "top": 100,
+                    "collapsedLeft": 1800,
+                    "collapsedTop": 200
+                  },
+                  "createdAtUtc": "2026-06-11T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-11T08:30:00+00:00"
+                }
+                """;
+
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "state.json"), oldStateJson);
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded,
+                "Legacy pinned state should take precedence and migrate to PinnedExpanded.");
+            Assert(
+                loaded.WindowPlacement.CollapsedLeft == 1800,
+                "Mode migration must preserve the collapsed anchor.");
+        });
+    }
+
+    private static void OldOverlayModeDefault()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            const string oldStateJson =
+                """
+                {
+                  "schemaVersion": 1,
+                  "tasks": [],
+                  "overlaySettings": {
+                    "activeToPassiveDelayMilliseconds": 500,
+                    "alwaysOnTop": true
+                  },
+                  "windowPlacement": {
+                    "left": null,
+                    "top": null
+                  },
+                  "createdAtUtc": "2026-06-11T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-11T08:30:00+00:00"
+                }
+                """;
+
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "state.json"), oldStateJson);
+
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.OverlayMode == OverlayMode.AutoQuestTracker,
+                "Old state without mode flags should migrate to AutoQuestTracker.");
+        });
+    }
+
+    private static void OverlayCollapseGuardBehavior()
+    {
+        var idle = new OverlayInteractionState(
+            OverlayMode: OverlayMode.AutoQuestTracker,
+            TaskDetailsOpen: false,
+            ContextMenuOpen: false,
+            SettingsOpen: false,
+            ModalDialogOpen: false,
+            Dragging: false);
+
+        Assert(
+            OverlayCollapseGuard.CanCollapse(idle),
+            "Idle overlay should be allowed to collapse.");
+
+        var blockers = new[]
+        {
+            idle with { OverlayMode = OverlayMode.PinnedExpanded },
+            idle with { TaskDetailsOpen = true },
+            idle with { ContextMenuOpen = true },
+            idle with { SettingsOpen = true },
+            idle with { ModalDialogOpen = true },
+            idle with { Dragging = true }
+        };
+
+        Assert(
+            blockers.All(state => !OverlayCollapseGuard.CanCollapse(state)),
+            "Every active interaction should prevent overlay collapse.");
+    }
+
+    private static void PointerClickVersusDragThreshold()
+    {
+        Assert(
+            !PointerDragGesture.HasExceededThreshold(10, 10, 13, 14),
+            "Movement below five DIPs should remain a click.");
+        Assert(
+            PointerDragGesture.HasExceededThreshold(10, 10, 15, 10),
+            "Horizontal movement at the threshold should start dragging.");
+        Assert(
+            PointerDragGesture.HasExceededThreshold(10, 10, 10, 4),
+            "Vertical movement beyond the threshold should start dragging.");
+    }
+
+    private static void WindowPlacementNegativeMonitorClamp()
+    {
+        var workArea = new OverlayBounds(-1920, -200, 1920, 1040);
+        var window = new OverlayBounds(-2200, -350, 520, 600);
+
+        var corrected = WindowPlacementGeometry.ClampToWorkArea(window, workArea);
+
+        Assert(corrected.Left == -1920, "Window should clamp to a negative left edge.");
+        Assert(corrected.Top == -200, "Window should clamp to a negative top edge.");
+        Assert(corrected.Right <= workArea.Right, "Window should remain inside the work area.");
+        Assert(corrected.Bottom <= workArea.Bottom, "Window should remain inside the work area.");
+    }
+
+    private static void OverlayModeClickCycle()
+    {
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.AutoQuestTracker) ==
+            OverlayMode.CollapsedHandle,
+            "Auto quest tracker should cycle to collapsed handle.");
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.CollapsedHandle) ==
+            OverlayMode.PinnedExpanded,
+            "Collapsed handle should cycle to pinned expanded.");
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.PinnedExpanded) ==
+            OverlayMode.AutoQuestTracker,
+            "Pinned expanded should cycle to auto quest tracker.");
+    }
+
+    private static void HandleSurfaceOwnershipAcrossModes()
+    {
+        var handle = new OverlayBounds(1872, 0, 48, 20);
+        var modes = new[]
+        {
+            OverlayMode.CollapsedHandle,
+            OverlayMode.PinnedExpanded,
+            OverlayMode.AutoQuestTracker,
+            OverlayMode.CollapsedHandle
+        };
+
+        foreach (var mode in modes)
+        {
+            Assert(
+                OverlaySurfacePolicy.UseHandleWindowForMode(
+                    mode,
+                    hasCollapsedAnchor: true),
+                $"{mode} should retain HandleWindow when an anchor exists.");
+
+            var panel = PanelLayoutService.PlacePanel(
+                handle,
+                panelWidth: 450,
+                panelHeight: 600,
+                new OverlayBounds(0, 0, 1920, 1080));
+            Assert(panel.Right == 1920, $"{mode} panel should open inward.");
+            Assert(handle.Left == 1872, $"{mode} must not mutate the handle anchor.");
+            Assert(handle.Top == 0, $"{mode} must not move the handle downward.");
+        }
+
+        Assert(
+            !OverlaySurfacePolicy.UseHandleWindowForMode(
+                OverlayMode.AutoQuestTracker,
+                hasCollapsedAnchor: false),
+            "Auto mode should retain its fallback surface before an anchor exists.");
+    }
+
+    private static void SingleTaskInWorkMode()
+    {
+        var state = AppState.CreateDefault();
+        state.Tasks[0].InWork = true;
+        state.Tasks[2].InWork = true;
+
+        TaskInteractionService.SetInWorkMode(state, InWorkMode.SingleTask);
+        TaskInteractionService.SetInWork(state, state.Tasks[1], true);
+        TaskInteractionService.ActivateFromClick(state, state.Tasks[1]);
+
+        Assert(!state.Tasks[0].InWork, "SingleTask mode should clear other tasks.");
+        Assert(state.Tasks[1].InWork, "Selected task should be marked in work.");
+        Assert(!state.Tasks[2].InWork, "Unselected tasks should remain clear.");
+    }
+
+    private static void MultipleTasksInWorkMode()
+    {
+        var state = AppState.CreateDefault();
+        state.OverlaySettings.InWorkMode = InWorkMode.MultipleTasks;
+
+        TaskInteractionService.ActivateFromClick(state, state.Tasks[0]);
+        TaskInteractionService.ActivateFromClick(state, state.Tasks[1]);
+
+        Assert(state.Tasks[0].InWork, "MultipleTasks mode should keep the first task focused.");
+        Assert(state.Tasks[1].InWork, "MultipleTasks mode should allow another focused task.");
+
+        TaskInteractionService.ActivateFromClick(state, state.Tasks[0]);
+        Assert(!state.Tasks[0].InWork, "Clicking a focused task should toggle it off.");
+        Assert(state.Tasks[1].InWork, "Toggling one task should not change another.");
+    }
+
+    private static void TaskEditValuesUpdate()
+    {
+        var state = AppState.CreateDefault();
+        var task = state.Tasks[0];
+
+        TaskInteractionService.Update(
+            state,
+            task,
+            new TaskEditValues(
+                "  Updated title  ",
+                "  Updated description  ",
+                InWork: true,
+                Completed: false));
+
+        Assert(task.Title == "Updated title", "Edited title should be trimmed and stored.");
+        Assert(
+            task.Description == "Updated description",
+            "Edited description should be trimmed and stored.");
+        Assert(task.InWork, "Editor should update in-work state.");
+        Assert(!task.Completed, "Editor should preserve active state.");
+    }
+
+    private static void TaskDelete()
+    {
+        var state = AppState.CreateDefault();
+        var task = state.Tasks[1];
+
+        var deleted = TaskInteractionService.Delete(state, task);
+
+        Assert(deleted, "Existing task should be deleted.");
+        Assert(state.Tasks.All(item => item.Id != task.Id), "Deleted task should leave state.");
+    }
+
+    private static void TaskCompletion()
+    {
+        var task = TaskItem.Create("Complete me");
+        task.InWork = true;
+        var completedAt = DateTimeOffset.Parse("2026-06-12T08:30:00Z");
+
+        var completed = TaskInteractionService.Complete(task, completedAt);
+
+        Assert(completed, "Active task should complete.");
+        Assert(task.Completed, "Completed flag should be set.");
+        Assert(!task.InWork, "Completed task should leave in-work state.");
+        Assert(task.CompletedAtUtc == completedAt, "Completion timestamp should be stored.");
+    }
+
+    private static void InWorkSettingSerialization()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.OverlaySettings.InWorkMode = InWorkMode.SingleTask;
+            state.Tasks[0].DescriptionExpanded = true;
+            state.WindowPlacement.CollapsedLeft = -42.5;
+            state.WindowPlacement.CollapsedTop = 18.25;
+
+            store.Save(state);
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.InWorkMode == InWorkMode.SingleTask,
+                "In-work mode should survive serialization.");
+            Assert(
+                loaded.Tasks[0].DescriptionExpanded,
+                "Description expansion should survive serialization.");
+            Assert(
+                loaded.WindowPlacement.CollapsedLeft == -42.5,
+                "Collapsed left anchor should survive serialization.");
+            Assert(
+                loaded.WindowPlacement.CollapsedTop == 18.25,
+                "Collapsed top anchor should survive serialization.");
+        });
+    }
+
+    private static void OldStateInWorkDefault()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            const string oldStateJson =
+                """
+                {
+                  "schemaVersion": 1,
+                  "tasks": [{
+                    "id": "e9718783-bc52-4c19-b39e-7a595d379ba8",
+                    "title": "Old task",
+                    "description": "",
+                    "completed": false,
+                    "priority": "normal",
+                    "inWork": false,
+                    "createdAtUtc": "2026-06-11T08:30:00+00:00",
+                    "completedAtUtc": null,
+                    "dueAtUtc": null
+                  }],
+                  "overlaySettings": {
+                    "activeToPassiveDelayMilliseconds": 500,
+                    "alwaysOnTop": true,
+                    "collapsedMode": false
+                  },
+                  "windowPlacement": {
+                    "left": 100,
+                    "top": 100
+                  },
+                  "createdAtUtc": "2026-06-11T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-11T08:30:00+00:00"
+                }
+                """;
+
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "state.json"), oldStateJson);
+
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.InWorkMode == InWorkMode.MultipleTasks,
+                "Old state should default to MultipleTasks mode.");
+            Assert(
+                !loaded.Tasks[0].DescriptionExpanded,
+                "Old tasks should default descriptions to collapsed.");
+            Assert(
+                loaded.WindowPlacement.CollapsedLeft is null,
+                "Old placement should leave collapsed anchor unset.");
+        });
+    }
+
+    private static void WindowPlacementEdgeSnap()
+    {
+        var workArea = new OverlayBounds(100, 50, 1200, 800);
+        var nearRightBottom = new OverlayBounds(887, 637, 400, 200);
+
+        var snapped = WindowPlacementGeometry.SnapToWorkArea(
+            nearRightBottom,
+            workArea,
+            threshold: 16);
+
+        Assert(snapped.Right == workArea.Right, "Window should snap to the right edge.");
+        Assert(snapped.Bottom == workArea.Bottom, "Window should snap to the bottom edge.");
+    }
+
+    private static void WindowPlacementOffScreenCorrection()
+    {
+        var workArea = new OverlayBounds(1920, 0, 1280, 720);
+        var offScreen = new OverlayBounds(5000, 2000, 1600, 900);
+
+        var corrected = WindowPlacementGeometry.ClampToWorkArea(offScreen, workArea);
+
+        Assert(corrected.Left == workArea.Left, "Oversized window should anchor to the work-area left.");
+        Assert(corrected.Top == workArea.Top, "Oversized window should anchor to the work-area top.");
+        Assert(corrected.Width == workArea.Width, "Oversized width should be constrained.");
+        Assert(corrected.Height == workArea.Height, "Oversized height should be constrained.");
+        Assert(
+            WindowPlacementGeometry.Intersects(corrected, workArea),
+            "Corrected window should intersect the current monitor work area.");
+    }
+
+    private static void CollapsedPanelOpensInward()
+    {
+        var workArea = new OverlayBounds(0, 0, 1920, 1080);
+        var handle = new OverlayBounds(1872, 160, 48, 20);
+
+        var panel = PanelLayoutService.PlacePanel(
+            handle,
+            panelWidth: 450,
+            panelHeight: 600,
+            workArea);
+
+        Assert(panel.Right == workArea.Right, "Right-edge panel should open inward.");
+        Assert(panel.Left < handle.Left, "Panel should extend left of the handle.");
+        Assert(panel.Top == handle.Bottom, "Panel should open below the handle when it fits.");
+        Assert(handle.Left == 1872, "Panel placement must not mutate the handle anchor.");
     }
 
     private static void CorruptedStateBackup()

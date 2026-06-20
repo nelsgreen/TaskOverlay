@@ -9,17 +9,103 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
 - `TaskOverlay.Core` owns the versioned state model and local JSON persistence.
 - `OverlayWindow` is a transparent, borderless, always-on-top WPF window.
 - Passive mode renders active, non-completed task marker/text rows.
-- Clicking a task row marks it completed, persists the change, and removes it
-  from the overlay.
+- Marker clicks complete tasks; body clicks apply the configured in-work mode.
+- Row context actions and `TaskDetailsWindow` provide focused task editing
+  without turning the overlay into a full management window.
 - The tray and fixed global hotkeys provide three clipboard task intake modes
   and reveal created tasks immediately in the overlay.
+- A single persisted overlay mode selects automatic passive tracking, a compact
+  collapsed handle, or pinned expansion.
 - Pointer entry enables a simple background panel; pointer exit returns to passive
   mode after 500 ms.
-- `SettingsWindow` validates independent settings-window lifecycle.
+- `SettingsWindow` owns the editable SingleTask/MultipleTasks selection.
 - The manifest requests Per-Monitor V2 DPI awareness.
 
-No v1 migration, full editing, editable hotkey bindings, network access, or
+No v1 migration, subtask editing, editable hotkey bindings, network access, or
 advanced themes are included.
+
+## Task interaction model
+
+`TaskInteractionService` owns task mutations independently of WPF. Marker clicks
+call `Complete`, clear in-work state, add the completion timestamp, save
+immediately, and remove the task from the active projection. Body clicks call
+`ActivateFromClick`: `MultipleTasks` toggles only that task, while `SingleTask`
+sets it in work and clears every other in-work task.
+
+The row context menu provides Edit, Show/Hide description, Mark as in work,
+Mark completed, and Delete. `TaskDetailsWindow` edits a copy of title,
+description, in-work, and completed values. Save applies the values through the
+Core service and persists; Cancel closes without mutation; Delete confirms and
+removes the task. The editor is owned by the overlay but has an independent
+lifecycle.
+
+`TaskItem.descriptionExpanded` is persisted. Passive projection never shows
+descriptions. Active projection shows a non-empty description when the task is
+expanded or in work. A lightweight `TaskRowViewModel` snapshot keeps WPF
+presentation concerns out of the JSON model.
+
+`OverlaySettings.inWorkMode` is serialized as `multipleTasks` or `singleTask`.
+The enum orders `MultipleTasks` as its default value, so schema v1 state files
+that omit the property load safely without migration.
+
+## Overlay modes and interaction guards
+
+`OverlaySettings.overlayMode` stores one of `autoQuestTracker`,
+`collapsedHandle`, or `pinnedExpanded`. The state loader migrates schema v1
+files without changing their schema version: old `pinnedActiveMode=true` maps
+to `pinnedExpanded`, otherwise old `collapsedMode=true` maps to
+`collapsedHandle`, and missing/false flags map to `autoQuestTracker`. Legacy
+flags are removed on the next save.
+
+The tray exposes these values as a radio-style **Overlay mode** submenu. The
+persistent handle opens the same choices on right-click. A handle left-click
+switches to `pinnedExpanded`, or returns a pinned overlay to
+`collapsedHandle`.
+
+`OverlayCollapseGuard` is the Core policy for automatic collapse. Collapse is
+allowed only when the mode is not pinned and no task editor, task context menu, Settings
+window, modal dialog, or drag interaction is active. WPF lifecycle callbacks
+update these flags and schedule the normal 500 ms timer when the final blocker
+closes. Task Details reports both delete confirmation and validation message
+boxes as modal interactions, so the overlay cannot collapse behind them.
+
+## Collapsed handle
+
+The handle is always present as the first window row. When collapsed mode is
+resting, `OverlayPanel` and all task rows are collapsed, leaving only the handle.
+Because the window uses `SizeToContent`, its bounds shrink to that handle.
+Pointer entry reveals the full active panel below it. Pointer exit starts the
+existing 500 ms dispatcher timer, which returns to the handle unless a collapse
+guard is active. In `autoQuestTracker`, the same timer returns to the normal
+transparent passive task list while retaining the handle.
+
+The handle uses distinct collapsed, expanded, and pinned colors without icon
+glyphs. Settings displays the current unified mode.
+`Ctrl+Alt+T` continues to show or hide the whole overlay and does not change
+the persisted mode.
+
+## Window placement and layout
+
+The active panel keeps its pointer-threshold drag handling. The handle has an
+independent gesture that captures the mouse on press and waits for five DIPs of
+movement before treating the action as a drag. Parent panel drag handlers ignore
+handle-originated events, preventing WPF button/capture conflicts. Collapsed
+hover expansion is disabled while the handle gesture is active.
+
+At drag completion, the window snaps within 16 DIPs of the left, right, top, or
+bottom edge of the current monitor work area. Normal overlay drags persist
+`WindowPlacement.left/top`; collapsed-strip drags persist the independent
+`collapsedLeft/collapsedTop` anchor. Work-area calculations preserve negative
+coordinates and account for taskbar space. Saved positions are clamped to a
+visible work area at startup.
+
+Collapsed expansion keeps the compact strip position as its resting anchor but
+shifts the larger active panel left or upward when necessary to remain inside
+the same monitor. This temporary expanded position is never written over the
+collapsed anchor. After the 500 ms return, the strip is restored to the original
+snapped edge. The task content width and scrollable height are bounded by that
+monitor work area. Titles and visible descriptions wrap inside a stretch layout
+instead of increasing the overlay width.
 
 ## Clipboard task creation
 
@@ -65,9 +151,9 @@ V2 never reads or writes the Go v1 state. Its state is stored at:
 ```
 
 `AppState` contains a schema version, tasks, overlay settings, window placement,
-and timestamps. `TaskItem` includes a stable ID, title, description, completion,
-priority, in-work state, creation/completion timestamps, and an optional due
-time.
+and timestamps. `TaskItem` includes a stable ID, title, description,
+description-expansion state, completion, priority, in-work state,
+creation/completion timestamps, and an optional due time.
 
 Writes use a temporary file in the same directory followed by an atomic replace
 or move. Replacing a valid state creates `state.backup.json`. Invalid JSON is
@@ -127,6 +213,18 @@ workflow is manual-only.
 - tray Show, Hide, Settings, and Exit commands;
 - all three tray and global-hotkey clipboard creation modes;
 - global overlay show/hide hotkey and graceful registration collisions;
+- unified overlay-mode persistence and backward-compatible legacy migration;
+- collapsed activation-strip expansion and 500 ms return behavior;
+- exclusive tray/handle mode selection and checked state;
+- persistent handle styling in collapsed, expanded, and pinned states;
+- collapse guards for editor, context menu, Settings, modal dialogs, and drag;
+- marker-only completion and body-click in-work behavior;
+- SingleTask/MultipleTasks settings and persistence;
+- task context actions and details editor Save/Cancel/Delete behavior;
+- active-only expanded/in-work descriptions;
+- active-panel and collapsed-strip dragging with edge snapping;
+- independent normal/collapsed placement restoration and off-screen correction;
+- long-title wrapping and monitor-bound expansion;
 - settings window recreation after close;
 - first-run seed state, save/load roundtrip, and corrupted-state recovery;
 - completed tasks disappearing immediately and remaining completed after restart;
@@ -159,10 +257,69 @@ workflow is manual-only.
 6. Exit both instances and confirm the hotkeys can be registered again on the
    next launch.
 
+## Manual overlay-mode test
+
+1. Select each **Overlay mode** tray item and confirm exactly one item is checked.
+2. In **Collapsed handle**, hover the handle and confirm the active overlay appears.
+3. Select **Pinned expanded**, move the pointer away, and confirm the panel stays
+   expanded.
+4. Select **Collapsed handle** and confirm the handle returns after about 500 ms.
+5. Confirm the handle remains visible and changes from collapsed yellow to
+   expanded blue to pinned green.
+6. Hide and show the overlay with `Ctrl+Alt+T`; confirm the selected mode remains
+   correct.
+7. Open Task Details and move the pointer away; confirm the overlay stays
+   active. Click Delete and keep the confirmation open; confirm it still does
+   not collapse.
+8. Repeat with a task context menu and Settings open, then close them and
+   confirm normal delayed collapse resumes.
+9. Restart the app and confirm the selected overlay mode is restored.
+10. Confirm clipboard hotkeys still create and reveal tasks.
+11. Select **Auto quest tracker** and confirm the passive task list and hover
+   behavior return.
+
+## Manual placement test
+
+1. Drag the active panel from its background and confirm it follows the pointer.
+2. Drag from a marker or task body past the Windows drag threshold and confirm
+   neither completion nor in-work state changes.
+3. Drag within about 16 DIPs of every work-area edge and confirm edge snapping.
+4. Select **Collapsed handle**, drag the handle freely beyond five DIPs, and
+   confirm it follows the pointer without changing mode.
+5. Put the strip at the right and bottom edges and confirm expansion shifts
+   left/up without crossing the work area, then confirm the strip returns to
+   its original right/bottom anchor after collapse.
+6. Repeat on a secondary monitor, including one arranged left or above the
+   primary monitor, then restart and confirm the position is restored.
+7. Create a task with a very long title and an unbroken string; confirm text
+   wraps or trims without extending the window past the work area.
+
+## Manual task interaction test
+
+1. Click only a task marker and confirm the task completes, disappears, and is
+   still completed after restart.
+2. Click task text in MultipleTasks mode and confirm each task toggles in-work
+   independently with a visible highlight.
+3. Select SingleTask in Settings, click several task bodies, and confirm only
+   the most recently clicked task remains in work after restart.
+4. Right-click a row and exercise Edit, Show/Hide description, Mark as in work,
+   Mark completed, and Delete.
+5. In Task details, edit title and description and click Save; reopen and
+   confirm persistence. Repeat with Cancel and confirm no change.
+6. Delete from Task details and confirm the task is removed after confirmation.
+7. Confirm passive mode shows titles only; in active mode, expand a description
+   and mark a described task in work to confirm wrapped description display.
+
 ## Known limitations
 
-- There is no full UI for editing, restoring, or viewing completed tasks.
+- There is no completed-task browser or restore action.
+- The task editor does not manage due time, priority, or subtasks yet.
 - Hotkey bindings are fixed and cannot yet be edited.
+- Overlay mode is selected from the tray or handle context menu; Settings
+  displays its status but does not currently edit it.
+- Dragging uses WPF/WinForms DPI transforms and is designed for per-monitor
+  safety, but mixed-DPI transitions should still be validated on physical
+  multi-monitor hardware.
 - A fixed hotkey that is already owned by Windows or another application remains
   unavailable until the conflict is removed; the other hotkeys continue working.
 - Passive hit testing covers the prototype window bounds.

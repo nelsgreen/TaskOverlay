@@ -14,6 +14,10 @@ public partial class App : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private Forms.NotifyIcon? _trayIcon;
     private Forms.ContextMenuStrip? _trayMenu;
+    private Forms.ToolStripMenuItem? _overlayModeMenuItem;
+    private Forms.ToolStripMenuItem? _autoQuestTrackerMenuItem;
+    private Forms.ToolStripMenuItem? _collapsedHandleMenuItem;
+    private Forms.ToolStripMenuItem? _pinnedExpandedMenuItem;
     private GlobalHotkeyManager? _hotkeyManager;
     private AppStateStore? _stateStore;
     private AppState? _state;
@@ -35,10 +39,7 @@ public partial class App : System.Windows.Application
                 (message, exception) => _diagnostics.Log(message, exception));
             _state = _stateStore.Load();
 
-            _overlayWindow = new OverlayWindow(
-                _state,
-                PersistState,
-                message => _diagnostics.Log(message));
+            _overlayWindow = CreateOverlayWindow();
             _overlayWindow.Show();
 
             CreateTrayIcon();
@@ -117,6 +118,26 @@ public partial class App : System.Windows.Application
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("Show overlay", null, (_, _) => RunCommand("Tray", "Show overlay", ShowOverlay));
         _trayMenu.Items.Add("Hide overlay", null, (_, _) => RunCommand("Tray", "Hide overlay", HideOverlay));
+        _overlayModeMenuItem = new Forms.ToolStripMenuItem("Overlay mode");
+        _autoQuestTrackerMenuItem = CreateOverlayModeMenuItem(
+            "Auto quest tracker",
+            OverlayMode.AutoQuestTracker);
+        _collapsedHandleMenuItem = CreateOverlayModeMenuItem(
+            "Collapsed handle",
+            OverlayMode.CollapsedHandle);
+        _pinnedExpandedMenuItem = CreateOverlayModeMenuItem(
+            "Pinned expanded",
+            OverlayMode.PinnedExpanded);
+        _overlayModeMenuItem.DropDownItems.AddRange(
+            new Forms.ToolStripItem[]
+            {
+                _autoQuestTrackerMenuItem,
+                _collapsedHandleMenuItem,
+                _pinnedExpandedMenuItem
+            });
+        _trayMenu.Items.Add(_overlayModeMenuItem);
+        UpdateOverlayModeUi(_state?.OverlaySettings.OverlayMode ??
+                            OverlayMode.AutoQuestTracker);
         _trayMenu.Items.Add("Settings", null, (_, _) => RunCommand("Tray", "Settings", ShowSettings));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("Exit", null, (_, _) => RunCommand("Tray", "Exit", () => BeginShutdown("Tray Exit command.")));
@@ -263,6 +284,30 @@ public partial class App : System.Windows.Application
         RunCommand("Tray", "Show overlay (double-click)", ShowOverlay);
     }
 
+    private Forms.ToolStripMenuItem CreateOverlayModeMenuItem(
+        string text,
+        OverlayMode mode)
+    {
+        var item = new Forms.ToolStripMenuItem(text)
+        {
+            Tag = mode,
+            CheckOnClick = false
+        };
+        item.Click += OverlayModeMenuItem_OnClick;
+        return item;
+    }
+
+    private void OverlayModeMenuItem_OnClick(object? sender, EventArgs e)
+    {
+        if (sender is Forms.ToolStripMenuItem { Tag: OverlayMode mode })
+        {
+            RunCommand(
+                "Tray",
+                $"Overlay mode - {mode}",
+                () => SetOverlayMode(mode));
+        }
+    }
+
     private void CreateTasksFromClipboardLines()
     {
         CreateTasksFromClipboard(
@@ -345,14 +390,24 @@ public partial class App : System.Windows.Application
 
         if (_overlayWindow is null || _overlayWindow.IsClosed)
         {
-            _overlayWindow = new OverlayWindow(
-                _state,
-                PersistState,
-                message => _diagnostics?.Log(message));
+            _overlayWindow = CreateOverlayWindow();
         }
 
-        _overlayWindow.Show();
-        _overlayWindow.Activate();
+        if (!_overlayWindow.IsLoaded)
+        {
+            _overlayWindow.Show();
+        }
+
+        _overlayWindow.RestoreVisibleMode();
+        if (_settingsWindow?.IsVisible == true)
+        {
+            _overlayWindow.SetSettingsInteractionActive(true);
+        }
+
+        if (_overlayWindow.IsVisible)
+        {
+            _overlayWindow.Activate();
+        }
     }
 
     private void HideOverlay()
@@ -369,13 +424,32 @@ public partial class App : System.Windows.Application
     {
         if (_overlayWindow is null ||
             _overlayWindow.IsClosed ||
-            !_overlayWindow.IsVisible)
+            !_overlayWindow.IsOverlayVisible)
         {
             ShowOverlay();
         }
         else
         {
             HideOverlay();
+        }
+    }
+
+    private void SetOverlayMode(OverlayMode mode)
+    {
+        if (_state is null || _state.OverlaySettings.OverlayMode == mode)
+        {
+            return;
+        }
+
+        if (_overlayWindow is not null && !_overlayWindow.IsClosed)
+        {
+            _overlayWindow.SetOverlayMode(mode);
+        }
+        else
+        {
+            _state.OverlaySettings.OverlayMode = mode;
+            PersistState();
+            UpdateOverlayModeUi(mode);
         }
     }
 
@@ -388,12 +462,73 @@ public partial class App : System.Windows.Application
 
         if (_settingsWindow is null)
         {
-            _settingsWindow = new SettingsWindow();
-            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+            if (_state is null)
+            {
+                return;
+            }
+
+            _settingsWindow = new SettingsWindow(
+                _state,
+                PersistState,
+                () => _overlayWindow?.RefreshTaskPresentation());
+            _settingsWindow.Closed += SettingsWindow_OnClosed;
         }
 
+        _overlayWindow?.SetSettingsInteractionActive(true);
+        _settingsWindow.UpdateFromSettings();
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    private void SettingsWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (_settingsWindow is not null)
+        {
+            _settingsWindow.Closed -= SettingsWindow_OnClosed;
+            _settingsWindow = null;
+        }
+
+        _overlayWindow?.SetSettingsInteractionActive(false);
+    }
+
+    private OverlayWindow CreateOverlayWindow()
+    {
+        if (_state is null)
+        {
+            throw new InvalidOperationException("Cannot create overlay before state is loaded.");
+        }
+
+        var overlay = new OverlayWindow(
+            _state,
+            PersistState,
+            message => _diagnostics?.Log(message));
+        overlay.OverlayModeChanged += OverlayWindow_OnOverlayModeChanged;
+        return overlay;
+    }
+
+    private void OverlayWindow_OnOverlayModeChanged(OverlayMode mode)
+    {
+        UpdateOverlayModeUi(mode);
+    }
+
+    private void UpdateOverlayModeUi(OverlayMode mode)
+    {
+        SetModeMenuCheck(_autoQuestTrackerMenuItem, mode, OverlayMode.AutoQuestTracker);
+        SetModeMenuCheck(_collapsedHandleMenuItem, mode, OverlayMode.CollapsedHandle);
+        SetModeMenuCheck(_pinnedExpandedMenuItem, mode, OverlayMode.PinnedExpanded);
+
+        _settingsWindow?.UpdateFromSettings();
+    }
+
+    private static void SetModeMenuCheck(
+        Forms.ToolStripMenuItem? item,
+        OverlayMode current,
+        OverlayMode expected)
+    {
+        if (item is not null)
+        {
+            item.Checked = current == expected;
+        }
     }
 
     private void BeginShutdown(string reason)
@@ -414,6 +549,12 @@ public partial class App : System.Windows.Application
         {
             _settingsWindow?.Close();
             _settingsWindow = null;
+            if (_overlayWindow is not null)
+            {
+                _overlayWindow.OverlayModeChanged -=
+                    OverlayWindow_OnOverlayModeChanged;
+            }
+
             _overlayWindow?.CloseForExit();
             _overlayWindow = null;
         }
@@ -488,6 +629,24 @@ public partial class App : System.Windows.Application
         {
             try
             {
+                foreach (var item in new[]
+                {
+                    _autoQuestTrackerMenuItem,
+                    _collapsedHandleMenuItem,
+                    _pinnedExpandedMenuItem
+                })
+                {
+                    if (item is not null)
+                    {
+                        item.Click -= OverlayModeMenuItem_OnClick;
+                    }
+                }
+
+                _autoQuestTrackerMenuItem = null;
+                _collapsedHandleMenuItem = null;
+                _pinnedExpandedMenuItem = null;
+                _overlayModeMenuItem = null;
+
                 _trayMenu.Dispose();
             }
             catch (Exception ex)

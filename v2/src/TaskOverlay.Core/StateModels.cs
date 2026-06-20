@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace TaskOverlay.Core;
 
@@ -40,6 +41,7 @@ public sealed class TaskItem
     public bool Completed { get; set; }
     public TaskPriority Priority { get; set; } = TaskPriority.Normal;
     public bool InWork { get; set; }
+    public bool DescriptionExpanded { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAtUtc { get; set; }
     public DateTimeOffset? DueAtUtc { get; set; }
@@ -63,14 +65,60 @@ public enum TaskPriority
     Critical
 }
 
+public enum InWorkMode
+{
+    MultipleTasks,
+    SingleTask
+}
+
+public enum OverlayMode
+{
+    AutoQuestTracker,
+    CollapsedHandle,
+    PinnedExpanded
+}
+
 public sealed class OverlaySettings
 {
     public int ActiveToPassiveDelayMilliseconds { get; set; } = 500;
     public bool AlwaysOnTop { get; set; } = true;
+
+    [JsonPropertyName("overlayMode")]
+    public OverlayMode? StoredOverlayMode { get; set; }
+
+    [JsonIgnore]
+    public OverlayMode OverlayMode
+    {
+        get => StoredOverlayMode ??
+               global::TaskOverlay.Core.OverlayMode.AutoQuestTracker;
+        set => StoredOverlayMode = value;
+    }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool CollapsedMode { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool PinnedActiveMode { get; set; }
+
+    public InWorkMode InWorkMode { get; set; } = InWorkMode.MultipleTasks;
+
+    public void NormalizeOverlayMode()
+    {
+        OverlayMode = StoredOverlayMode ??
+                      (PinnedActiveMode
+                          ? global::TaskOverlay.Core.OverlayMode.PinnedExpanded
+                          : CollapsedMode
+                              ? global::TaskOverlay.Core.OverlayMode.CollapsedHandle
+                              : global::TaskOverlay.Core.OverlayMode.AutoQuestTracker);
+        CollapsedMode = false;
+        PinnedActiveMode = false;
+    }
 }
 
 public sealed class WindowPlacement
 {
     public double? Left { get; set; }
     public double? Top { get; set; }
+    public double? CollapsedLeft { get; set; }
+    public double? CollapsedTop { get; set; }
 }

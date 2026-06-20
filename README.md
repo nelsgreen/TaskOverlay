@@ -26,8 +26,18 @@ dotnet run --project .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj
 
 V2 stores its independent local state at
 `%APPDATA%\TaskOverlayV2\state.json`. On first run, the three prototype tasks are
-created as seed data. Click a task marker or row to complete it; completed tasks
-are saved and removed from the overlay. The Go v1 state is not read or modified.
+created as seed data. Click the marker to complete a task. Click the task text
+to mark it in work, or right-click a row for Edit, description visibility,
+in-work, completion, and delete actions. Completed tasks are saved and removed
+from the overlay. The Go v1 state is not read or modified.
+
+The Settings window provides two in-work modes. **Multiple tasks** independently
+toggles focus on each text click and is the default. **Single task** focuses the
+clicked task and clears focus from the others. In-work rows are highlighted.
+Right-click **Edit** opens a separate details window for title, description,
+in-work, completion, and deletion. Save persists changes; Cancel discards them.
+Descriptions remain hidden in passive mode and may appear in active mode for
+expanded or in-work tasks.
 
 V2 provides three clipboard intake modes through the tray and fixed global
 hotkeys:
@@ -40,6 +50,28 @@ hotkeys:
 
 Created tasks are saved together in one atomic state update and the overlay is
 shown. Empty clipboard text is ignored and logged.
+
+Choose one persisted **Overlay mode** from the tray: **Auto quest tracker**
+shows the passive task list and expands on hover, **Collapsed handle** rests as
+only the compact handle, and **Pinned expanded** keeps the active panel open.
+Only one mode can be active. `Ctrl+Alt+T` still shows or hides the entire overlay.
+
+The handle remains visible in every mode. Left-clicking it switches between
+collapsed-handle and pinned-expanded behavior; right-clicking opens the same
+three mode choices. It uses yellow, blue, and green styling for collapsed,
+expanded, and pinned presentation.
+
+Drag the active panel or handle to move it. The handle captures the pointer and
+uses a five-DIP threshold, so dragging does not accidentally change mode. The window
+snaps near any edge of the current monitor work area and keeps expanded content
+on-screen. The collapsed strip has its own saved anchor, so temporary left/up
+adjustment during expansion does not move a right/bottom snapped strip. Long
+task titles and visible descriptions wrap within the monitor-safe overlay width.
+
+The overlay stays expanded while Task Details, Settings, a task context menu, or
+a confirmation/message dialog is open, and while a drag is in progress. After
+the interaction closes, normal 500 ms return behavior resumes unless the mode
+is **Pinned expanded**.
 
 V2 runtime and crash logs are stored under
 `%APPDATA%\TaskOverlayV2\logs`. Unhandled exceptions create a dedicated
