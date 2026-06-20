@@ -55,6 +55,7 @@ public partial class OverlayWindow : Window
     private bool _isClosed;
     private bool _overlayVisible = true;
     private bool _isActiveMode;
+    private bool _useHandleWindowForPinnedExpanded;
     private bool _dragCandidate;
     private bool _isDragging;
     private bool _handleDragCandidate;
@@ -147,6 +148,7 @@ public partial class OverlayWindow : Window
 
         if (mode == OverlayMode.CollapsedHandle)
         {
+            _useHandleWindowForPinnedExpanded = false;
             if (_state.WindowPlacement.CollapsedLeft is null ||
                 _state.WindowPlacement.CollapsedTop is null)
             {
@@ -158,20 +160,31 @@ public partial class OverlayWindow : Window
         }
         else if (mode == OverlayMode.PinnedExpanded)
         {
-            if (previousMode == OverlayMode.CollapsedHandle &&
+            _useHandleWindowForPinnedExpanded =
+                OverlaySurfacePolicy.UseHandleWindowForPinned(
+                    previousMode,
+                    mode,
+                    _state.WindowPlacement.CollapsedLeft is not null &&
+                    _state.WindowPlacement.CollapsedTop is not null);
+
+            if (_useHandleWindowForPinnedExpanded &&
                 _state.WindowPlacement.CollapsedLeft is double anchorLeft &&
                 _state.WindowPlacement.CollapsedTop is double anchorTop)
             {
                 PositionPanelFromCollapsedAnchor(anchorLeft, anchorTop);
             }
+            else
+            {
+                HideHandleWindow();
+                _state.WindowPlacement.Left = Left;
+                _state.WindowPlacement.Top = Top;
+            }
 
-            HideHandleWindow();
-            _state.WindowPlacement.Left = Left;
-            _state.WindowPlacement.Top = Top;
             SetActiveMode(true);
         }
         else
         {
+            _useHandleWindowForPinnedExpanded = false;
             HideHandleWindow();
             RestoreNormalPosition();
             SetActiveMode(IsMouseOver);
@@ -267,7 +280,9 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        if (_state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle)
+        if (_state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle ||
+            (_state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded &&
+             _useHandleWindowForPinnedExpanded))
         {
             return;
         }
@@ -511,6 +526,13 @@ public partial class OverlayWindow : Window
             return;
         }
 
+        if (_state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded &&
+            _useHandleWindowForPinnedExpanded)
+        {
+            ApplyPinnedHandleSurfaceState(active);
+            return;
+        }
+
         HideHandleWindow();
         CollapsedActivation.Visibility = Visibility.Visible;
         OverlayPanel.Visibility = Visibility.Visible;
@@ -523,6 +545,33 @@ public partial class OverlayWindow : Window
         UpdateLayout();
         ConstrainToWorkArea(anchorScreen, snap: false);
         UpdateHandleVisual();
+    }
+
+    private void ApplyPinnedHandleSurfaceState(bool panelVisible)
+    {
+        if (_handleWindow is null || !_handleWindow.IsVisible)
+        {
+            RestoreCollapsedHandle();
+        }
+
+        CollapsedActivation.Visibility = Visibility.Collapsed;
+        _handleWindow?.SetPanelVisible(panelVisible);
+
+        if (!panelVisible)
+        {
+            OverlayPanel.Visibility = Visibility.Collapsed;
+            ActiveChrome.Visibility = Visibility.Collapsed;
+            Hide();
+            return;
+        }
+
+        OverlayPanel.Visibility = Visibility.Visible;
+        OverlayPanel.Background = ActiveBackground;
+        OverlayPanel.BorderBrush = ActiveBorder;
+        ActiveChrome.Visibility = Visibility.Visible;
+        EnsurePanelShown();
+        PositionCollapsedPanel();
+        ModeStatus.Text = "PINNED";
     }
 
     private void ApplyCollapsedSurfaceState(bool panelVisible)
@@ -560,6 +609,7 @@ public partial class OverlayWindow : Window
             _isShuttingDown ||
             e.ChangedButton != MouseButton.Left ||
             _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle ||
+            _useHandleWindowForPinnedExpanded ||
             IsHandleEventSource(e.OriginalSource))
         {
             return;
@@ -1250,7 +1300,9 @@ public partial class OverlayWindow : Window
 
     private void KeepCurrentModeWithinWorkArea()
     {
-        if (_state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle)
+        if (_state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle ||
+            (_state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded &&
+             _useHandleWindowForPinnedExpanded))
         {
             if (_isActiveMode && IsVisible)
             {

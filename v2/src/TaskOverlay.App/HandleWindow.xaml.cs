@@ -28,6 +28,12 @@ public partial class HandleWindow : Window
         new SolidColorBrush(Color.FromArgb(190, 96, 165, 250));
     private static readonly Brush ExpandedForeground =
         new SolidColorBrush(Color.FromRgb(147, 197, 253));
+    private static readonly Brush PinnedBackground =
+        new SolidColorBrush(Color.FromArgb(230, 24, 61, 52));
+    private static readonly Brush PinnedBorder =
+        new SolidColorBrush(Color.FromArgb(220, 52, 211, 153));
+    private static readonly Brush PinnedForeground =
+        new SolidColorBrush(Color.FromRgb(110, 231, 183));
 
     private readonly AppState _state;
     private readonly Action _saveState;
@@ -340,6 +346,16 @@ public partial class HandleWindow : Window
 
     private void UpdateVisual(bool panelVisible)
     {
+        if (_state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded)
+        {
+            HandleSurface.Background = PinnedBackground;
+            HandleSurface.BorderBrush = PinnedBorder;
+            HandleIndicator.Fill = PinnedForeground;
+            HandleSurface.ToolTip =
+                "Pinned expanded. Click to return to auto quest tracker.";
+            return;
+        }
+
         HandleSurface.Background = panelVisible ? ExpandedBackground : CollapsedBackground;
         HandleSurface.BorderBrush = panelVisible ? ExpandedBorder : CollapsedBorder;
         HandleIndicator.Fill = panelVisible ? ExpandedForeground : CollapsedForeground;

@@ -20,6 +20,7 @@ internal static class Program
             ("overlay collapse guard", OverlayCollapseGuardBehavior),
             ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
             ("overlay mode click cycle", OverlayModeClickCycle),
+            ("pinned handle surface policy", PinnedHandleSurfacePolicy),
             ("single task in-work mode", SingleTaskInWorkMode),
             ("multiple tasks in-work mode", MultipleTasksInWorkMode),
             ("task edit values", TaskEditValuesUpdate),
@@ -314,6 +315,28 @@ internal static class Program
             OverlayModeCycle.Next(OverlayMode.PinnedExpanded) ==
             OverlayMode.AutoQuestTracker,
             "Pinned expanded should cycle to auto quest tracker.");
+    }
+
+    private static void PinnedHandleSurfacePolicy()
+    {
+        Assert(
+            OverlaySurfacePolicy.UseHandleWindowForPinned(
+                OverlayMode.CollapsedHandle,
+                OverlayMode.PinnedExpanded,
+                hasCollapsedAnchor: true),
+            "Pinned mode should retain HandleWindow when entered from a collapsed anchor.");
+        Assert(
+            !OverlaySurfacePolicy.UseHandleWindowForPinned(
+                OverlayMode.AutoQuestTracker,
+                OverlayMode.PinnedExpanded,
+                hasCollapsedAnchor: true),
+            "Pinned mode entered from auto should use the normal fallback surface.");
+        Assert(
+            !OverlaySurfacePolicy.UseHandleWindowForPinned(
+                OverlayMode.CollapsedHandle,
+                OverlayMode.PinnedExpanded,
+                hasCollapsedAnchor: false),
+            "Pinned mode cannot retain a collapsed handle without an anchor.");
     }
 
     private static void SingleTaskInWorkMode()
