@@ -1371,7 +1371,7 @@ public partial class OverlayWindow : Window
         }
 
         var concealedForFirstLayout = !IsVisible;
-        var previousOpacity = Opacity;
+        var previousOpacity = Opacity > 0 ? Opacity : 1;
         if (concealedForFirstLayout)
         {
             Opacity = 0;
@@ -1386,12 +1386,31 @@ public partial class OverlayWindow : Window
 
             PositionCollapsedPanel();
         }
-        finally
+        catch
         {
             if (concealedForFirstLayout)
             {
                 Opacity = previousOpacity;
             }
+
+            throw;
+        }
+
+        if (concealedForFirstLayout)
+        {
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Render,
+                new Action(() =>
+                {
+                    if (!_isClosed &&
+                        !_isShuttingDown &&
+                        _overlayVisible &&
+                        IsVisible)
+                    {
+                        PositionCollapsedPanel();
+                        Opacity = previousOpacity;
+                    }
+                }));
         }
     }
 
