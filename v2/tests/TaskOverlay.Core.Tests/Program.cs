@@ -27,6 +27,7 @@ internal static class Program
             ("project service group delete", ProjectServiceGroupDelete),
             ("project service task assignment", ProjectServiceTaskAssignment),
             ("project service orphan safety", ProjectServiceOrphanSafety),
+            ("tree service constructors are side effect free", TreeServiceConstructorsAreSideEffectFree),
             ("tree node creation", TreeNodeCreation),
             ("tree rename and safe delete", TreeRenameAndSafeDelete),
             ("tree delete atomic failure", TreeDeleteAtomicFailure),
@@ -34,6 +35,7 @@ internal static class Program
             ("tree orphan fallback", TreeOrphanFallback),
             ("tree missing default recovery", TreeMissingDefaultRecovery),
             ("tree cycle repair", TreeCycleRepair),
+            ("save repair diagnostics", SaveRepairDiagnostics),
             ("tree sibling ordering", TreeSiblingOrdering),
             ("tree active and status", TreeActiveAndStatus),
             ("tree navigation", TreeNavigation),
@@ -547,6 +549,7 @@ internal static class Program
         };
         state.Tasks.Add(task);
         state.Groups.Add(orphanGroup);
+        Assert(StateMigrator.RepairCurrentState(state), "Corrupt fixture should require explicit repair.");
         var service = new ProjectService(state);
 
         Assert(orphanGroup.ProjectId == defaultProject.Id, "Orphan group should repair to Default.");
@@ -560,6 +563,26 @@ internal static class Program
         Assert(service.AssignTaskToProject(task.Id, defaultProject.Id), "Orphan task should move to Default safely.");
         Assert(task.ProjectId == defaultProject.Id, "Safe assignment should repair orphan ProjectId.");
         Assert(task.GroupId is null, "Safe assignment should clear orphan GroupId.");
+    }
+
+    private static void TreeServiceConstructorsAreSideEffectFree()
+    {
+        var orphanProjectId = Guid.NewGuid();
+        var task = TaskItem.Create("Orphan", projectId: orphanProjectId);
+        var state = new AppState
+        {
+            Projects = new System.Collections.Generic.List<ProjectItem>(),
+            Tasks = { task }
+        };
+
+        _ = new ProjectService(state);
+        _ = new TreeStateService(state);
+
+        Assert(state.Projects.Count == 0, "Service construction must not create Default project.");
+        Assert(task.ProjectId == orphanProjectId, "Service construction must not rewrite task assignment.");
+        Assert(StateMigrator.RepairCurrentState(state), "Explicit boundary repair should normalize state.");
+        Assert(state.Projects.Single().Name == ProjectItem.DefaultName, "Explicit repair should create Default.");
+        Assert(task.ProjectId == state.Projects.Single().Id, "Explicit repair should reassign orphan task.");
     }
 
     private static void TreeNodeCreation()
@@ -681,6 +704,7 @@ internal static class Program
         orphanTask.GroupId = Guid.NewGuid();
         orphanTask.ParentTaskId = Guid.NewGuid();
         state.Tasks.Add(orphanTask);
+        Assert(StateMigrator.RepairCurrentState(state), "Orphan fixture should require explicit repair.");
         var service = new TreeStateService(state);
 
         Assert(service.GetNode(orphanTask.Id)?.ParentId == defaultProject.Id, "Orphan task should resolve under Default.");
@@ -777,6 +801,36 @@ internal static class Program
         var service = new TreeStateService(state);
         Assert(service.GetProjectRoot(first.Id)?.Id == project.Id, "First repaired task should remain reachable.");
         Assert(service.GetProjectRoot(second.Id)?.Id == project.Id, "Second repaired task should remain reachable.");
+    }
+
+    private static void SaveRepairDiagnostics()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var diagnostics = new System.Collections.Generic.List<string>();
+            var store = new AppStateStore(
+                directory,
+                (message, exception) => diagnostics.Add(message));
+            var state = AppState.CreateDefault();
+
+            store.Save(state);
+            Assert(
+                diagnostics.All(message => message != "State normalized before save."),
+                "Healthy save should not report normalization.");
+
+            state.Projects.Clear();
+            state.Tasks[0].ProjectId = Guid.NewGuid();
+            store.Save(state);
+            Assert(
+                diagnostics.Count(message => message == "State normalized before save.") == 1,
+                "Repairing save should report normalization once.");
+            Assert(state.Projects.Any(project => project.Name == ProjectItem.DefaultName), "Save repair should restore Default.");
+
+            store.Save(state);
+            Assert(
+                diagnostics.Count(message => message == "State normalized before save.") == 1,
+                "Subsequent healthy save should not repeat normalization log.");
+        });
     }
 
     private static void TreeSiblingOrdering()

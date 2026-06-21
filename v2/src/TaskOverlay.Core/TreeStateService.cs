@@ -10,6 +10,11 @@ public sealed class TreeStateService
     private readonly ProjectService _projectService;
 
     public TreeStateService(AppState state)
+        : this(state, projectService: null)
+    {
+    }
+
+    internal TreeStateService(AppState state, ProjectService? projectService)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -17,7 +22,7 @@ public sealed class TreeStateService
         state.Groups ??= new List<GroupItem>();
         state.Tasks ??= new List<TaskItem>();
         _state = state;
-        _projectService = new ProjectService(state);
+        _projectService = projectService ?? new ProjectService(state, this);
     }
 
     public TreeNode? CreateProject(string? title, DateTimeOffset? now = null)
