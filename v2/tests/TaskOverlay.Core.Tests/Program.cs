@@ -19,6 +19,14 @@ internal static class Program
             ("v2 tree serialization roundtrip", V2TreeSerializationRoundtrip),
             ("project agnostic task behavior", ProjectAgnosticTaskBehavior),
             ("orphan project fallback", OrphanProjectFallback),
+            ("project service create", ProjectServiceCreate),
+            ("project service rename", ProjectServiceRename),
+            ("project service delete", ProjectServiceDelete),
+            ("project service default safety", ProjectServiceDefaultSafety),
+            ("project service group create and rename", ProjectServiceGroupCreateAndRename),
+            ("project service group delete", ProjectServiceGroupDelete),
+            ("project service task assignment", ProjectServiceTaskAssignment),
+            ("project service orphan safety", ProjectServiceOrphanSafety),
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
             ("old collapsed mode migration", OldCollapsedModeMigration),
@@ -330,6 +338,189 @@ internal static class Program
                 ProjectReferenceResolver.ResolveProject(loaded, loadedUnassigned)?.Id == defaultProject.Id,
                 "Null references should safely resolve to Default.");
         });
+    }
+
+    private static void ProjectServiceCreate()
+    {
+        var state = AppState.CreateDefault();
+        state.Projects.Add(new ProjectItem { Name = "Existing", SortOrder = 4 });
+        var service = new ProjectService(state);
+        var createdAtUtc = DateTimeOffset.Parse("2026-06-20T10:30:00Z");
+
+        var project = service.CreateProject("  Project Alpha  ", createdAtUtc);
+        var projectCount = state.Projects.Count;
+
+        Assert(project is not null, "A valid project should be created.");
+        Assert(project!.Id != Guid.Empty, "Created project should have an ID.");
+        Assert(project.Name == "Project Alpha", "Created project name should be trimmed.");
+        Assert(project.SortOrder == 5, "Created project should use the next sort order.");
+        Assert(project.CreatedAtUtc == createdAtUtc, "Created project should use the supplied timestamp.");
+        Assert(service.CreateProject("   ") is null, "Whitespace project names should be rejected safely.");
+        Assert(service.CreateProject(ProjectItem.DefaultName) is null, "Duplicate Default should be rejected.");
+        Assert(state.Projects.Count == projectCount, "Rejected creates must not change project state.");
+    }
+
+    private static void ProjectServiceRename()
+    {
+        var state = AppState.CreateDefault();
+        var project = new ProjectItem { Name = "Before" };
+        state.Projects.Add(project);
+        var service = new ProjectService(state);
+
+        Assert(service.RenameProject(project.Id, "  After  "), "Existing project should be renamed.");
+        Assert(project.Name == "After", "Renamed project should use a trimmed name.");
+        Assert(!service.RenameProject(project.Id, "  "), "Empty project names should be rejected.");
+        Assert(project.Name == "After", "Rejected rename should preserve the existing name.");
+        Assert(!service.RenameProject(Guid.NewGuid(), "Missing"), "Missing project should fail safely.");
+    }
+
+    private static void ProjectServiceDelete()
+    {
+        var state = AppState.CreateDefault();
+        var defaultProject = state.Projects.Single();
+        var project = new ProjectItem { Name = "Delete me", SortOrder = 1 };
+        var group = new GroupItem { ProjectId = project.Id, Name = "Delete group" };
+        var assignedTask = TaskItem.Create("Assigned", projectId: project.Id);
+        assignedTask.GroupId = group.Id;
+        var crossReferencedTask = TaskItem.Create("Cross-reference", projectId: defaultProject.Id);
+        crossReferencedTask.GroupId = group.Id;
+        state.Projects.Add(project);
+        state.Groups.Add(group);
+        state.Tasks.Add(assignedTask);
+        state.Tasks.Add(crossReferencedTask);
+        var taskCount = state.Tasks.Count;
+        var service = new ProjectService(state);
+
+        Assert(service.DeleteProject(project.Id), "Existing project should be deleted.");
+        Assert(state.Tasks.Count == taskCount, "Deleting a project must not delete tasks.");
+        Assert(state.Projects.All(item => item.Id != project.Id), "Deleted project should be removed.");
+        Assert(state.Groups.All(item => item.ProjectId != project.Id), "Project groups should be removed.");
+        Assert(assignedTask.ProjectId == defaultProject.Id, "Project tasks should move to Default.");
+        Assert(assignedTask.GroupId is null, "Reassigned task group should be cleared.");
+        Assert(crossReferencedTask.ProjectId == defaultProject.Id, "Unrelated project assignment should remain.");
+        Assert(crossReferencedTask.GroupId is null, "References to deleted groups should be cleared.");
+        Assert(!service.DeleteProject(Guid.NewGuid()), "Missing project deletion should fail safely.");
+    }
+
+    private static void ProjectServiceDefaultSafety()
+    {
+        var state = AppState.CreateDefault();
+        var defaultProject = state.Projects.Single();
+        var service = new ProjectService(state);
+
+        Assert(!service.DeleteProject(defaultProject.Id), "The only Default project must not be deleted.");
+        Assert(!service.RenameProject(defaultProject.Id, "Renamed"), "The only Default must not be renamed away.");
+        Assert(state.Projects.Single().Id == defaultProject.Id, "Default safety should preserve the project.");
+
+        var alternateDefault = ProjectItem.CreateDefault();
+        state.Projects.Add(alternateDefault);
+        var task = TaskItem.Create("Legacy duplicate", projectId: defaultProject.Id);
+        state.Tasks.Add(task);
+
+        Assert(service.DeleteProject(defaultProject.Id), "A Default may be removed when another safe Default exists.");
+        Assert(task.ProjectId == alternateDefault.Id, "Tasks should move to the remaining Default.");
+        Assert(state.Projects.Count(item => item.Name == ProjectItem.DefaultName) == 1, "One Default should remain.");
+    }
+
+    private static void ProjectServiceGroupCreateAndRename()
+    {
+        var state = AppState.CreateDefault();
+        var project = state.Projects.Single();
+        state.Groups.Add(new GroupItem { ProjectId = project.Id, Name = "Existing", SortOrder = 3 });
+        state.Groups.Add(new GroupItem { ProjectId = Guid.NewGuid(), Name = "Other", SortOrder = 20 });
+        var service = new ProjectService(state);
+        var createdAtUtc = DateTimeOffset.Parse("2026-06-20T11:00:00Z");
+
+        var group = service.CreateGroup(project.Id, "  Planning  ", createdAtUtc);
+
+        Assert(group is not null, "Group should be created under an existing project.");
+        Assert(group!.Id != Guid.Empty, "Created group should have an ID.");
+        Assert(group.ProjectId == project.Id, "Created group should reference its project.");
+        Assert(group.Name == "Planning", "Created group name should be trimmed.");
+        Assert(group.SortOrder == 4, "Group sort order should be scoped to its project.");
+        Assert(group.CreatedAtUtc == createdAtUtc, "Created group should use the supplied timestamp.");
+        Assert(service.CreateGroup(Guid.NewGuid(), "Missing") is null, "Missing project should fail safely.");
+        Assert(service.CreateGroup(project.Id, "  ") is null, "Empty group name should be rejected.");
+        Assert(service.RenameGroup(group.Id, "  Ready  "), "Existing group should be renamed.");
+        Assert(group.Name == "Ready", "Renamed group should use a trimmed name.");
+        Assert(!service.RenameGroup(group.Id, " "), "Empty group rename should be rejected.");
+        Assert(!service.RenameGroup(Guid.NewGuid(), "Missing"), "Missing group should fail safely.");
+    }
+
+    private static void ProjectServiceGroupDelete()
+    {
+        var state = AppState.CreateDefault();
+        var project = state.Projects.Single();
+        var group = new GroupItem { ProjectId = project.Id, Name = "Group" };
+        var task = TaskItem.Create("Grouped", projectId: project.Id);
+        task.GroupId = group.Id;
+        state.Groups.Add(group);
+        state.Tasks.Add(task);
+        var service = new ProjectService(state);
+
+        Assert(service.DeleteGroup(group.Id), "Existing group should be deleted.");
+        Assert(state.Tasks.Contains(task), "Deleting a group must not delete its tasks.");
+        Assert(task.GroupId is null, "Deleting a group should clear task GroupId.");
+        Assert(task.ProjectId == project.Id, "Deleting a group should preserve task ProjectId.");
+        Assert(!service.DeleteGroup(Guid.NewGuid()), "Missing group deletion should fail safely.");
+    }
+
+    private static void ProjectServiceTaskAssignment()
+    {
+        var state = AppState.CreateDefault();
+        var firstProject = state.Projects.Single();
+        var secondProject = new ProjectItem { Name = "Second", SortOrder = 1 };
+        var firstGroup = new GroupItem { ProjectId = firstProject.Id, Name = "First group" };
+        var secondGroup = new GroupItem { ProjectId = secondProject.Id, Name = "Second group" };
+        var task = TaskItem.Create("Assign me", projectId: firstProject.Id);
+        task.GroupId = firstGroup.Id;
+        state.Projects.Add(secondProject);
+        state.Groups.Add(firstGroup);
+        state.Groups.Add(secondGroup);
+        state.Tasks.Add(task);
+        var service = new ProjectService(state);
+
+        Assert(service.AssignTaskToProject(task.Id, secondProject.Id), "Task should move to an existing project.");
+        Assert(task.ProjectId == secondProject.Id, "Project assignment should update ProjectId.");
+        Assert(task.GroupId is null, "Moving across projects should clear an invalid group.");
+        Assert(service.AssignTaskToGroup(task.Id, secondGroup.Id), "Task should join a group in its project.");
+        Assert(task.GroupId == secondGroup.Id, "Group assignment should set GroupId.");
+        Assert(service.AssignTaskToProject(task.Id, secondProject.Id), "Same-project assignment should succeed.");
+        Assert(task.GroupId == secondGroup.Id, "Same-project assignment should retain a valid group.");
+        Assert(service.AssignTaskToGroup(task.Id, firstGroup.Id), "Task should move to an existing group.");
+        Assert(task.GroupId == firstGroup.Id, "Group assignment should update GroupId.");
+        Assert(task.ProjectId == firstProject.Id, "Group assignment should also update ProjectId.");
+        Assert(service.ClearTaskGroup(task.Id), "Existing task group should clear.");
+        Assert(task.GroupId is null, "ClearTaskGroup should clear only GroupId.");
+        Assert(task.ProjectId == firstProject.Id, "ClearTaskGroup should preserve ProjectId.");
+        Assert(!service.AssignTaskToProject(Guid.NewGuid(), secondProject.Id), "Missing task should fail safely.");
+        Assert(!service.AssignTaskToProject(task.Id, Guid.NewGuid()), "Missing project should fail safely.");
+        Assert(!service.AssignTaskToGroup(task.Id, Guid.NewGuid()), "Missing group should fail safely.");
+        Assert(!service.ClearTaskGroup(Guid.NewGuid()), "Missing task clear should fail safely.");
+    }
+
+    private static void ProjectServiceOrphanSafety()
+    {
+        var state = AppState.CreateDefault();
+        var defaultProject = state.Projects.Single();
+        var task = TaskItem.Create("Orphan", projectId: Guid.NewGuid());
+        task.GroupId = Guid.NewGuid();
+        var orphanGroup = new GroupItem
+        {
+            ProjectId = Guid.NewGuid(),
+            Name = "Orphan group"
+        };
+        state.Tasks.Add(task);
+        state.Groups.Add(orphanGroup);
+        var service = new ProjectService(state);
+
+        Assert(
+            ProjectReferenceResolver.ResolveProject(state, task)?.Id == defaultProject.Id,
+            "Orphan project references should resolve to Default.");
+        Assert(!service.AssignTaskToGroup(task.Id, orphanGroup.Id), "Orphan group assignment should fail safely.");
+        Assert(service.AssignTaskToProject(task.Id, defaultProject.Id), "Orphan task should move to Default safely.");
+        Assert(task.ProjectId == defaultProject.Id, "Safe assignment should repair orphan ProjectId.");
+        Assert(task.GroupId is null, "Safe assignment should clear orphan GroupId.");
     }
 
     private static void SaveLoadRoundtrip()
