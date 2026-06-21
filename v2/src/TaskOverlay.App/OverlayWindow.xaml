@@ -205,6 +205,95 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+
+                <Border x:Name="TreeSection"
+                        Margin="0,10,0,0"
+                        Padding="10,8"
+                        Background="#661B1F27"
+                        BorderBrush="#33475569"
+                        BorderThickness="1"
+                        CornerRadius="7"
+                        Visibility="Collapsed">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,6"
+                                   LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Foreground="#FFA1A1AA"
+                                       FontSize="10"
+                                       FontWeight="SemiBold"
+                                       Text="PROJECT TREE" />
+                            <TextBlock x:Name="TreeProjectName"
+                                       DockPanel.Dock="Right"
+                                       MaxWidth="220"
+                                       Foreground="#FFD4D4D8"
+                                       FontSize="10"
+                                       TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+
+                        <ScrollViewer x:Name="TreeScroller"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      VerticalScrollBarVisibility="Auto">
+                            <ItemsControl x:Name="TreeRows">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid MinHeight="22">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="24" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <Border Grid.Column="0"
+                                                    Width="{Binding IndentWidth}" />
+                                            <TextBlock Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="#FF94A3B8"
+                                                       FontFamily="Consolas"
+                                                       FontSize="10"
+                                                       Text="{Binding KindMarker}" />
+                                            <TextBlock Grid.Column="2"
+                                                       VerticalAlignment="Center"
+                                                       FontSize="12"
+                                                       Text="{Binding Title}"
+                                                       TextTrimming="CharacterEllipsis">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground"
+                                                                Value="#FFE4E4E7" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsDone}"
+                                                                         Value="True">
+                                                                <Setter Property="Foreground"
+                                                                        Value="#FF71717A" />
+                                                                <Setter Property="TextDecorations"
+                                                                        Value="Strikethrough" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IsActive}"
+                                                                         Value="True">
+                                                                <Setter Property="Foreground"
+                                                                        Value="#FF6EE7B7" />
+                                                                <Setter Property="FontWeight"
+                                                                        Value="SemiBold" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Grid.Column="3"
+                                                       Margin="8,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="#FF6EE7B7"
+                                                       FontSize="9"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding StatusMarker}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </Border>
     </Grid>

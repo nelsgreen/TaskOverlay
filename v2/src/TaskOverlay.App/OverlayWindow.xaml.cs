@@ -47,6 +47,8 @@ public partial class OverlayWindow : Window
     private readonly Action _saveState;
     private readonly Action<string> _log;
     private readonly ObservableCollection<TaskRowViewModel> _activeTasks;
+    private readonly ObservableCollection<TreeRowViewModel> _treeRows;
+    private readonly TreeStateService _treeStateService;
     private readonly DispatcherTimer _passiveTimer;
     private readonly DispatcherTimer _collapsedExpandTimer;
 
@@ -83,9 +85,12 @@ public partial class OverlayWindow : Window
         _saveState = saveState;
         _log = log;
         _activeTasks = new ObservableCollection<TaskRowViewModel>();
+        _treeRows = new ObservableCollection<TreeRowViewModel>();
+        _treeStateService = new TreeStateService(state);
 
         InitializeComponent();
         ActiveTasks.ItemsSource = _activeTasks;
+        TreeRows.ItemsSource = _treeRows;
         RefreshTasks();
         Topmost = state.OverlaySettings.AlwaysOnTop;
 
@@ -533,6 +538,10 @@ public partial class OverlayWindow : Window
         if (modeChanged)
         {
             RefreshTasks();
+        }
+        else
+        {
+            RefreshTreePanel();
         }
 
         if (UsesHandleWindow)
@@ -1184,6 +1193,49 @@ public partial class OverlayWindow : Window
         {
             _activeTasks.Add(new TaskRowViewModel(task, _isActiveMode));
         }
+
+        RefreshTreePanel();
+    }
+
+    private void RefreshTreePanel()
+    {
+        var showTree = _state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded;
+        TreeSection.Visibility = showTree ? Visibility.Visible : Visibility.Collapsed;
+        _treeRows.Clear();
+
+        if (!showTree)
+        {
+            return;
+        }
+
+        var project = _state.Projects.FirstOrDefault(item =>
+                          string.Equals(
+                              item.Name,
+                              ProjectItem.DefaultName,
+                              StringComparison.OrdinalIgnoreCase)) ??
+                      _state.Projects
+                          .OrderBy(item => item.SortOrder)
+                          .ThenBy(item => item.CreatedAtUtc)
+                          .FirstOrDefault();
+        if (project is null)
+        {
+            TreeProjectName.Text = string.Empty;
+            return;
+        }
+
+        TreeProjectName.Text = project.Name;
+        var depths = new Dictionary<Guid, int>();
+        foreach (var node in _treeStateService.GetProjection(
+                     project.Id,
+                     TreeProjection.AllInProject))
+        {
+            var depth = node.ParentId.HasValue &&
+                        depths.TryGetValue(node.ParentId.Value, out var parentDepth)
+                ? parentDepth + 1
+                : 0;
+            depths[node.Id] = depth;
+            _treeRows.Add(new TreeRowViewModel(node, depth));
+        }
     }
 
     private void RestoreWindowPlacement()
@@ -1284,7 +1336,11 @@ public partial class OverlayWindow : Window
 
         ContentStack.Width = Math.Min(420, availableContentWidth);
         OverlayPanel.MaxWidth = availableWidth;
-        TasksScroller.MaxHeight = Math.Max(40, availableHeight - 80);
+        var treeHeight = TreeSection.Visibility == Visibility.Visible
+            ? Math.Min(180, Math.Max(96, availableHeight * 0.3))
+            : 0;
+        TreeScroller.MaxHeight = treeHeight;
+        TasksScroller.MaxHeight = Math.Max(40, availableHeight - 96 - treeHeight);
     }
 
     private void KeepCurrentModeWithinWorkArea()
