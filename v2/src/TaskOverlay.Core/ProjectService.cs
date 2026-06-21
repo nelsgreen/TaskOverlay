@@ -15,6 +15,7 @@ public sealed class ProjectService
         state.Projects ??= new List<ProjectItem>();
         state.Groups ??= new List<GroupItem>();
         state.Tasks ??= new List<TaskItem>();
+        StateMigrator.RepairCurrentState(state);
         _state = state;
     }
 
@@ -27,11 +28,13 @@ public sealed class ProjectService
             return null;
         }
 
+        var timestamp = now ?? DateTimeOffset.UtcNow;
         var project = new ProjectItem
         {
             Name = normalizedName,
             SortOrder = NextSortOrder(_state.Projects.Select(item => item.SortOrder)),
-            CreatedAtUtc = now ?? DateTimeOffset.UtcNow
+            CreatedAtUtc = timestamp,
+            UpdatedAtUtc = timestamp
         };
         _state.Projects.Add(project);
         return project;
@@ -112,14 +115,14 @@ public sealed class ProjectService
             return null;
         }
 
+        var timestamp = now ?? DateTimeOffset.UtcNow;
         var group = new GroupItem
         {
             ProjectId = projectId,
             Name = normalizedName,
-            SortOrder = NextSortOrder(_state.Groups
-                .Where(item => item.ProjectId == projectId)
-                .Select(item => item.SortOrder)),
-            CreatedAtUtc = now ?? DateTimeOffset.UtcNow
+            SortOrder = NextProjectChildSortOrder(projectId),
+            CreatedAtUtc = timestamp,
+            UpdatedAtUtc = timestamp
         };
         _state.Groups.Add(group);
         return group;
@@ -156,38 +159,12 @@ public sealed class ProjectService
 
     public bool AssignTaskToProject(Guid taskId, Guid projectId)
     {
-        var task = FindTask(taskId);
-        var project = FindProject(projectId);
-        if (task is null || project is null)
-        {
-            return false;
-        }
-
-        if (task.GroupId.HasValue)
-        {
-            var currentGroup = FindGroup(task.GroupId.Value);
-            if (currentGroup is null || currentGroup.ProjectId != project.Id)
-            {
-                task.GroupId = null;
-            }
-        }
-
-        task.ProjectId = project.Id;
-        return true;
+        return new TreeStateService(_state).MoveNode(taskId, projectId);
     }
 
     public bool AssignTaskToGroup(Guid taskId, Guid groupId)
     {
-        var task = FindTask(taskId);
-        var group = FindGroup(groupId);
-        if (task is null || group is null || FindProject(group.ProjectId) is null)
-        {
-            return false;
-        }
-
-        task.ProjectId = group.ProjectId;
-        task.GroupId = group.Id;
-        return true;
+        return new TreeStateService(_state).MoveNode(taskId, groupId);
     }
 
     public bool ClearTaskGroup(Guid taskId)
@@ -198,8 +175,9 @@ public sealed class ProjectService
             return false;
         }
 
-        task.GroupId = null;
-        return true;
+        var project = ProjectReferenceResolver.ResolveProject(_state, task);
+        return project is not null &&
+               new TreeStateService(_state).MoveNode(taskId, project.Id);
     }
 
     private ProjectItem GetOrCreateDefaultProject()
@@ -227,6 +205,23 @@ public sealed class ProjectService
 
     private TaskItem? FindTask(Guid taskId) =>
         _state.Tasks.FirstOrDefault(task => task.Id == taskId);
+
+    private int NextProjectChildSortOrder(Guid projectId)
+    {
+        var defaultProject = FindDefaultProject();
+        var groupSortOrders = _state.Groups
+            .Where(group => group.ProjectId == projectId)
+            .Select(group => group.SortOrder);
+        var taskSortOrders = _state.Tasks
+            .Where(task =>
+                task.ParentTaskId is null &&
+                task.GroupId is null &&
+                (task.ProjectId == projectId ||
+                 (defaultProject?.Id == projectId &&
+                  ProjectReferenceResolver.ResolveProject(_state, task)?.Id == projectId)))
+            .Select(task => task.SortOrder);
+        return NextSortOrder(groupSortOrders.Concat(taskSortOrders));
+    }
 
     private static bool IsDefaultName(string name) => string.Equals(
         name,

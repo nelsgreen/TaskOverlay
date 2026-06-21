@@ -51,4 +51,144 @@ public static class StateMigrator
         state.SchemaVersion = AppState.CurrentSchemaVersion;
         return state;
     }
+
+    public static bool RepairCurrentState(AppState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        var changed = false;
+        if (state.Projects is null)
+        {
+            state.Projects = new List<ProjectItem>();
+            changed = true;
+        }
+
+        if (state.Groups is null)
+        {
+            state.Groups = new List<GroupItem>();
+            changed = true;
+        }
+
+        if (state.Tasks is null)
+        {
+            state.Tasks = new List<TaskItem>();
+            changed = true;
+        }
+
+        var defaultProject = state.Projects.FirstOrDefault(project =>
+            string.Equals(project.Name, ProjectItem.DefaultName, StringComparison.OrdinalIgnoreCase));
+        if (defaultProject is null)
+        {
+            var timestamp = state.CreatedAtUtc == default
+                ? DateTimeOffset.UtcNow
+                : state.CreatedAtUtc;
+            defaultProject = ProjectItem.CreateDefault(timestamp);
+            defaultProject.SortOrder = state.Projects.Count == 0
+                ? 0
+                : state.Projects.Max(project => project.SortOrder) + 1;
+            state.Projects.Add(defaultProject);
+            changed = true;
+        }
+        else if (defaultProject.Id == Guid.Empty)
+        {
+            defaultProject.Id = Guid.NewGuid();
+            changed = true;
+        }
+
+        var projectIds = state.Projects.Select(project => project.Id).ToHashSet();
+        foreach (var group in state.Groups)
+        {
+            if (!projectIds.Contains(group.ProjectId))
+            {
+                group.ProjectId = defaultProject.Id;
+                changed = true;
+            }
+        }
+
+        var groupsById = state.Groups
+            .GroupBy(group => group.Id)
+            .ToDictionary(group => group.Key, group => group.First());
+        var tasksById = state.Tasks
+            .GroupBy(task => task.Id)
+            .ToDictionary(group => group.Key, group => group.First());
+        foreach (var task in state.Tasks)
+        {
+            if (task.ParentTaskId == task.Id ||
+                task.ParentTaskId.HasValue && !tasksById.ContainsKey(task.ParentTaskId.Value))
+            {
+                task.ParentTaskId = null;
+                changed = true;
+            }
+        }
+
+        var visitState = new Dictionary<Guid, int>();
+        foreach (var task in state.Tasks)
+        {
+            RepairTask(task);
+        }
+
+        return changed;
+
+        void RepairTask(TaskItem task)
+        {
+            if (visitState.TryGetValue(task.Id, out var currentState))
+            {
+                if (currentState == 1)
+                {
+                    task.ParentTaskId = null;
+                    changed = true;
+                    RepairDirectAssignment(task);
+                    visitState[task.Id] = 2;
+                }
+
+                return;
+            }
+
+            visitState[task.Id] = 1;
+            if (task.ParentTaskId.HasValue &&
+                tasksById.TryGetValue(task.ParentTaskId.Value, out var parentTask))
+            {
+                RepairTask(parentTask);
+                if (task.ProjectId != parentTask.ProjectId || task.GroupId != parentTask.GroupId)
+                {
+                    task.ProjectId = parentTask.ProjectId;
+                    task.GroupId = parentTask.GroupId;
+                    changed = true;
+                }
+            }
+            else
+            {
+                RepairDirectAssignment(task);
+            }
+
+            visitState[task.Id] = 2;
+        }
+
+        void RepairDirectAssignment(TaskItem task)
+        {
+            if (task.GroupId.HasValue &&
+                groupsById.TryGetValue(task.GroupId.Value, out var group))
+            {
+                if (task.ProjectId != group.ProjectId)
+                {
+                    task.ProjectId = group.ProjectId;
+                    changed = true;
+                }
+
+                return;
+            }
+
+            if (task.GroupId.HasValue)
+            {
+                task.GroupId = null;
+                changed = true;
+            }
+
+            if (!task.ProjectId.HasValue || !projectIds.Contains(task.ProjectId.Value))
+            {
+                task.ProjectId = defaultProject.Id;
+                changed = true;
+            }
+        }
+    }
 }

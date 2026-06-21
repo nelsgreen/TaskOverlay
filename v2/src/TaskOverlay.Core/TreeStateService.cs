@@ -29,14 +29,12 @@ public sealed class TreeStateService
         }
 
         var timestamp = now ?? DateTimeOffset.UtcNow;
-        var sortOrder = NextSortOrder(parentId: null);
         var project = _projectService.CreateProject(normalizedTitle, timestamp);
         if (project is null)
         {
             return null;
         }
 
-        project.SortOrder = sortOrder;
         project.UpdatedAtUtc = timestamp;
         return ToNode(new NodeEntry(TreeNodeKind.Project, project));
     }
@@ -53,14 +51,12 @@ public sealed class TreeStateService
         }
 
         var timestamp = now ?? DateTimeOffset.UtcNow;
-        var sortOrder = NextSortOrder(projectId);
         var group = _projectService.CreateGroup(projectId, normalizedTitle, timestamp);
         if (group is null)
         {
             return null;
         }
 
-        group.SortOrder = sortOrder;
         group.UpdatedAtUtc = timestamp;
         return ToNode(new NodeEntry(TreeNodeKind.Group, group));
     }
@@ -158,15 +154,25 @@ public sealed class TreeStateService
                 var replacementParent = oldParentId.HasValue
                     ? FindNode(oldParentId.Value)
                     : null;
-                foreach (var child in _state.Tasks.Where(item => item.ParentTaskId == task.Id))
+                var children = _state.Tasks
+                    .Where(item => item.ParentTaskId == task.Id)
+                    .ToList();
+                var assignmentPlans = new List<(TaskItem Task, TaskParentAssignment Assignment)>();
+                foreach (var child in children)
                 {
                     if (replacementParent is null ||
-                        !AssignTaskParent(child, replacementParent.Value))
+                        !TryPlanTaskParent(replacementParent.Value, out var assignment))
                     {
                         return false;
                     }
 
-                    child.UpdatedAtUtc = timestamp;
+                    assignmentPlans.Add((child, assignment));
+                }
+
+                foreach (var plan in assignmentPlans)
+                {
+                    ApplyTaskParent(plan.Task, plan.Assignment);
+                    plan.Task.UpdatedAtUtc = timestamp;
                 }
 
                 if (!_state.Tasks.Remove(task))
@@ -201,6 +207,11 @@ public sealed class TreeStateService
         }
 
         var oldParentId = ResolveParentId(node.Value);
+        if (oldParentId == newParentId)
+        {
+            return true;
+        }
+
         var timestamp = now ?? DateTimeOffset.UtcNow;
         switch (node.Value.Kind)
         {
@@ -295,12 +306,6 @@ public sealed class TreeStateService
         var timestamp = now ?? DateTimeOffset.UtcNow;
         switch (node.Value.Kind)
         {
-            case TreeNodeKind.Project:
-                ((ProjectItem)node.Value.Value).Active = active;
-                break;
-            case TreeNodeKind.Group:
-                ((GroupItem)node.Value.Value).Active = active;
-                break;
             case TreeNodeKind.Task:
             {
                 var task = (TaskItem)node.Value.Value;
@@ -321,9 +326,6 @@ public sealed class TreeStateService
             default:
                 return false;
         }
-
-        Touch(node.Value, timestamp);
-        return true;
     }
 
     public bool MarkStatus(
@@ -523,12 +525,27 @@ public sealed class TreeStateService
 
     private bool AssignTaskParent(TaskItem task, NodeEntry parent)
     {
+        if (!TryPlanTaskParent(parent, out var assignment))
+        {
+            return false;
+        }
+
+        ApplyTaskParent(task, assignment);
+        return true;
+    }
+
+    private bool TryPlanTaskParent(
+        NodeEntry parent,
+        out TaskParentAssignment assignment)
+    {
+        assignment = default;
         switch (parent.Kind)
         {
             case TreeNodeKind.Project:
-                task.ProjectId = ((ProjectItem)parent.Value).Id;
-                task.GroupId = null;
-                task.ParentTaskId = null;
+                assignment = new TaskParentAssignment(
+                    ((ProjectItem)parent.Value).Id,
+                    GroupId: null,
+                    ParentTaskId: null);
                 return true;
             case TreeNodeKind.Group:
             {
@@ -538,9 +555,10 @@ public sealed class TreeStateService
                     return false;
                 }
 
-                task.ProjectId = group.ProjectId;
-                task.GroupId = group.Id;
-                task.ParentTaskId = null;
+                assignment = new TaskParentAssignment(
+                    group.ProjectId,
+                    group.Id,
+                    ParentTaskId: null);
                 return true;
             }
             case TreeNodeKind.Task:
@@ -552,17 +570,28 @@ public sealed class TreeStateService
                     return false;
                 }
 
-                task.ProjectId = projectRoot.Id;
-                task.GroupId = parentTask.GroupId.HasValue &&
-                               FindGroup(parentTask.GroupId.Value) is not null
+                var groupId = parentTask.GroupId.HasValue &&
+                              FindGroup(parentTask.GroupId.Value) is not null
                     ? parentTask.GroupId
                     : null;
-                task.ParentTaskId = parentTask.Id;
+                assignment = new TaskParentAssignment(
+                    projectRoot.Id,
+                    groupId,
+                    parentTask.Id);
                 return true;
             }
             default:
                 return false;
         }
+    }
+
+    private static void ApplyTaskParent(
+        TaskItem task,
+        TaskParentAssignment assignment)
+    {
+        task.ProjectId = assignment.ProjectId;
+        task.GroupId = assignment.GroupId;
+        task.ParentTaskId = assignment.ParentTaskId;
     }
 
     private Guid? ResolveParentId(NodeEntry node)
@@ -616,7 +645,7 @@ public sealed class TreeStateService
         TreeNodeKind.Project,
         project.Name,
         TreeNodeStatus.Todo,
-        project.Active,
+        Active: false,
         project.CreatedAtUtc,
         project.UpdatedAtUtc);
 
@@ -627,7 +656,7 @@ public sealed class TreeStateService
         TreeNodeKind.Group,
         group.Name,
         TreeNodeStatus.Todo,
-        group.Active,
+        Active: false,
         group.CreatedAtUtc,
         group.UpdatedAtUtc);
 
@@ -796,4 +825,9 @@ public sealed class TreeStateService
     }
 
     private readonly record struct NodeEntry(TreeNodeKind Kind, object Value);
+
+    private readonly record struct TaskParentAssignment(
+        Guid ProjectId,
+        Guid? GroupId,
+        Guid? ParentTaskId);
 }

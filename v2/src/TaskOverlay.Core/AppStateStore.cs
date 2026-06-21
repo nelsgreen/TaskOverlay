@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -55,11 +56,14 @@ public sealed class AppStateStore
 
             var sourceSchemaVersion = state.SchemaVersion;
             StateMigrator.Migrate(state);
+            var stateRepaired = StateMigrator.RepairCurrentState(state);
             Validate(state);
-            if (sourceSchemaVersion != state.SchemaVersion)
+            if (sourceSchemaVersion != state.SchemaVersion || stateRepaired)
             {
-                Report($"Migrated state schema from {sourceSchemaVersion} to {state.SchemaVersion}.");
-                TrySave(state, "Migrated state save failed.");
+                Report(
+                    $"Normalized state after load: schema {sourceSchemaVersion} to {state.SchemaVersion}; " +
+                    $"repaired={stateRepaired}.");
+                TrySave(state, "Normalized state save failed.");
             }
 
             Report($"State load succeeded with {state.Tasks.Count} tasks.");
@@ -82,6 +86,7 @@ public sealed class AppStateStore
     public void Save(AppState state)
     {
         ArgumentNullException.ThrowIfNull(state);
+        StateMigrator.RepairCurrentState(state);
         Validate(state);
 
         Directory.CreateDirectory(StateDirectory);
@@ -220,6 +225,23 @@ public sealed class AppStateStore
 
         state.OverlaySettings.NormalizeOverlayMode();
 
+        var defaultProject = state.Projects.FirstOrDefault(project =>
+            string.Equals(project.Name, ProjectItem.DefaultName, StringComparison.OrdinalIgnoreCase));
+        if (defaultProject is null)
+        {
+            throw new InvalidDataException("State file is missing the Default project.");
+        }
+
+        var projectIds = state.Projects.Select(project => project.Id).ToHashSet();
+        var groupIds = state.Groups.Select(group => group.Id).ToHashSet();
+        var taskIds = state.Tasks.Select(task => task.Id).ToHashSet();
+        if (projectIds.Count != state.Projects.Count ||
+            groupIds.Count != state.Groups.Count ||
+            taskIds.Count != state.Tasks.Count)
+        {
+            throw new InvalidDataException("State file contains duplicate node IDs.");
+        }
+
         foreach (var project in state.Projects)
         {
             if (project.Id == Guid.Empty || string.IsNullOrWhiteSpace(project.Name))
@@ -232,6 +254,7 @@ public sealed class AppStateStore
         {
             if (group.Id == Guid.Empty ||
                 group.ProjectId == Guid.Empty ||
+                !projectIds.Contains(group.ProjectId) ||
                 string.IsNullOrWhiteSpace(group.Name))
             {
                 throw new InvalidDataException("State file contains an invalid group.");
@@ -240,7 +263,13 @@ public sealed class AppStateStore
 
         foreach (var task in state.Tasks)
         {
-            if (task.Id == Guid.Empty || string.IsNullOrWhiteSpace(task.Title))
+            if (task.Id == Guid.Empty ||
+                string.IsNullOrWhiteSpace(task.Title) ||
+                !task.ProjectId.HasValue ||
+                !projectIds.Contains(task.ProjectId.Value) ||
+                (task.GroupId.HasValue && !groupIds.Contains(task.GroupId.Value)) ||
+                (task.ParentTaskId.HasValue &&
+                 (!taskIds.Contains(task.ParentTaskId.Value) || task.ParentTaskId == task.Id)))
             {
                 throw new InvalidDataException("State file contains an invalid task.");
             }
