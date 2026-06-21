@@ -44,13 +44,20 @@ public sealed class ProjectItem
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
     public int SortOrder { get; set; }
+    public bool Active { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
-    public static ProjectItem CreateDefault(DateTimeOffset? now = null) => new()
+    public static ProjectItem CreateDefault(DateTimeOffset? now = null)
     {
-        Name = DefaultName,
-        CreatedAtUtc = now ?? DateTimeOffset.UtcNow
-    };
+        var timestamp = now ?? DateTimeOffset.UtcNow;
+        return new ProjectItem
+        {
+            Name = DefaultName,
+            CreatedAtUtc = timestamp,
+            UpdatedAtUtc = timestamp
+        };
+    }
 }
 
 public sealed class GroupItem
@@ -59,7 +66,9 @@ public sealed class GroupItem
     public Guid ProjectId { get; set; }
     public string Name { get; set; } = string.Empty;
     public int SortOrder { get; set; }
+    public bool Active { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class TaskItem
@@ -76,17 +85,22 @@ public sealed class TaskItem
     public DateTimeOffset? DueAtUtc { get; set; }
     public Guid? ProjectId { get; set; }
     public Guid? GroupId { get; set; }
+    public Guid? ParentTaskId { get; set; }
+    public int SortOrder { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public static TaskItem Create(
         string title,
         DateTimeOffset? now = null,
         Guid? projectId = null)
     {
+        var timestamp = now ?? DateTimeOffset.UtcNow;
         return new TaskItem
         {
             Id = Guid.NewGuid(),
             Title = title,
-            CreatedAtUtc = now ?? DateTimeOffset.UtcNow,
+            CreatedAtUtc = timestamp,
+            UpdatedAtUtc = timestamp,
             ProjectId = projectId
         };
     }
