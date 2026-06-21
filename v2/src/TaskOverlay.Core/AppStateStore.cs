@@ -86,7 +86,12 @@ public sealed class AppStateStore
     public void Save(AppState state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        StateMigrator.RepairCurrentState(state);
+        var stateRepaired = StateMigrator.RepairCurrentState(state);
+        if (stateRepaired)
+        {
+            Report("State normalized before save.");
+        }
+
         Validate(state);
 
         Directory.CreateDirectory(StateDirectory);

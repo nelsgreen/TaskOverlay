@@ -7,16 +7,22 @@ namespace TaskOverlay.Core;
 public sealed class ProjectService
 {
     private readonly AppState _state;
+    private TreeStateService? _treeStateService;
 
     public ProjectService(AppState state)
+        : this(state, treeStateService: null)
+    {
+    }
+
+    internal ProjectService(AppState state, TreeStateService? treeStateService)
     {
         ArgumentNullException.ThrowIfNull(state);
 
         state.Projects ??= new List<ProjectItem>();
         state.Groups ??= new List<GroupItem>();
         state.Tasks ??= new List<TaskItem>();
-        StateMigrator.RepairCurrentState(state);
         _state = state;
+        _treeStateService = treeStateService;
     }
 
     public ProjectItem? CreateProject(string? name, DateTimeOffset? now = null)
@@ -157,16 +163,28 @@ public sealed class ProjectService
         return _state.Groups.Remove(group);
     }
 
+    /// <summary>
+    /// Moves a task branch to the project root, detaching its group/task parent
+    /// and cascading project/group assignment to descendants.
+    /// </summary>
     public bool AssignTaskToProject(Guid taskId, Guid projectId)
     {
-        return new TreeStateService(_state).MoveNode(taskId, projectId);
+        return TreeService.MoveNode(taskId, projectId);
     }
 
+    /// <summary>
+    /// Moves a task branch directly under a group and cascades the group's
+    /// project/group assignment to descendants.
+    /// </summary>
     public bool AssignTaskToGroup(Guid taskId, Guid groupId)
     {
-        return new TreeStateService(_state).MoveNode(taskId, groupId);
+        return TreeService.MoveNode(taskId, groupId);
     }
 
+    /// <summary>
+    /// Moves a task branch to its resolved project root, clearing both group
+    /// and task-parent relationships while preserving the project.
+    /// </summary>
     public bool ClearTaskGroup(Guid taskId)
     {
         var task = FindTask(taskId);
@@ -177,7 +195,7 @@ public sealed class ProjectService
 
         var project = ProjectReferenceResolver.ResolveProject(_state, task);
         return project is not null &&
-               new TreeStateService(_state).MoveNode(taskId, project.Id);
+               TreeService.MoveNode(taskId, project.Id);
     }
 
     private ProjectItem GetOrCreateDefaultProject()
@@ -205,6 +223,9 @@ public sealed class ProjectService
 
     private TaskItem? FindTask(Guid taskId) =>
         _state.Tasks.FirstOrDefault(task => task.Id == taskId);
+
+    private TreeStateService TreeService =>
+        _treeStateService ??= new TreeStateService(_state, this);
 
     private int NextProjectChildSortOrder(Guid projectId)
     {
