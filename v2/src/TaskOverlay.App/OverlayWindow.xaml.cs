@@ -62,9 +62,12 @@ public partial class OverlayWindow : Window
     private bool _finishingHandleDrag;
     private bool _suppressTaskClick;
     private bool _adjustingBounds;
-    private bool _contextInteractionActive;
+    private bool _handleContextInteractionActive;
+    private bool _handlePanelRevealInProgress;
     private bool _settingsInteractionActive;
     private int _modalInteractionCount;
+    private int _handlePanelRevealGeneration;
+    private readonly HashSet<ContextMenu> _openContextMenus = new();
     private DrawingPoint _dragStartCursorPixels;
     private double _dragStartLeft;
     private double _dragStartTop;
@@ -130,6 +133,7 @@ public partial class OverlayWindow : Window
             return;
         }
 
+        ResetStaleInputState(closeContextMenus: false);
         _overlayVisible = true;
         var shouldExpand =
             _state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded ||
@@ -238,6 +242,9 @@ public partial class OverlayWindow : Window
 
         StopModeTimers();
         _overlayVisible = false;
+        CancelPendingHandlePanelReveal();
+        ResetStaleInputState(closeContextMenus: true);
+        StopModeTimers();
         if (_state.OverlaySettings.OverlayMode != OverlayMode.PinnedExpanded)
         {
             SetActiveMode(false, force: true);
@@ -303,6 +310,9 @@ public partial class OverlayWindow : Window
             }
 
             _overlayVisible = false;
+            CancelPendingHandlePanelReveal();
+            ResetStaleInputState(closeContextMenus: true);
+            StopModeTimers();
             _handleWindow?.HideSafely();
             Hide();
             return;
@@ -349,7 +359,11 @@ public partial class OverlayWindow : Window
 
     private void OverlayWindow_OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (_isClosed || _isShuttingDown || _adjustingBounds || !IsLoaded)
+        if (_isClosed ||
+            _isShuttingDown ||
+            _adjustingBounds ||
+            _handlePanelRevealInProgress ||
+            !IsLoaded)
         {
             return;
         }
@@ -358,7 +372,9 @@ public partial class OverlayWindow : Window
             DispatcherPriority.Loaded,
             new Action(() =>
             {
-                if (!_isClosed && !_isShuttingDown)
+                if (!_isClosed &&
+                    !_isShuttingDown &&
+                    !_handlePanelRevealInProgress)
                 {
                     KeepCurrentModeWithinWorkArea();
                 }
@@ -470,7 +486,7 @@ public partial class OverlayWindow : Window
 
     private void HandleWindow_OnContextInteractionChanged(bool active)
     {
-        _contextInteractionActive = active;
+        _handleContextInteractionActive = active;
         if (active)
         {
             StopModeTimers();
@@ -558,6 +574,7 @@ public partial class OverlayWindow : Window
 
         if (!panelVisible)
         {
+            CancelPendingHandlePanelReveal();
             OverlayPanel.Visibility = Visibility.Collapsed;
             ActiveChrome.Visibility = Visibility.Collapsed;
             Hide();
@@ -861,7 +878,7 @@ public partial class OverlayWindow : Window
 
     private void HandleModeContextMenu_OnOpened(object sender, RoutedEventArgs e)
     {
-        _contextInteractionActive = true;
+        TrackContextMenu(sender, isOpen: true);
         StopModeTimers();
 
         if (sender is not ContextMenu menu)
@@ -879,7 +896,7 @@ public partial class OverlayWindow : Window
 
     private void HandleModeContextMenu_OnClosed(object sender, RoutedEventArgs e)
     {
-        _contextInteractionActive = false;
+        TrackContextMenu(sender, isOpen: false);
         ScheduleCollapse();
     }
 
@@ -998,13 +1015,13 @@ public partial class OverlayWindow : Window
 
     private void TaskContextMenu_OnOpened(object sender, RoutedEventArgs e)
     {
-        _contextInteractionActive = true;
+        TrackContextMenu(sender, isOpen: true);
         StopModeTimers();
     }
 
     private void TaskContextMenu_OnClosed(object sender, RoutedEventArgs e)
     {
-        _contextInteractionActive = false;
+        TrackContextMenu(sender, isOpen: false);
         ScheduleCollapse();
     }
 
@@ -1293,27 +1310,54 @@ public partial class OverlayWindow : Window
         ConstrainToWorkArea(screen, snap: false);
     }
 
-    private void PositionCollapsedPanel()
+    private bool PositionCollapsedPanel(bool measureBeforeReveal = false)
     {
         if (_handleWindow is null || !_handleWindow.IsVisible)
         {
-            return;
+            return false;
         }
 
-        ConfigureExpandedLayout(_handleWindow.CurrentWorkArea);
-        UpdateLayout();
-        if (ActualWidth <= 0 || ActualHeight <= 0)
+        var workArea = _handleWindow.CurrentWorkArea;
+        ConfigureExpandedLayout(workArea);
+
+        double panelWidth;
+        double panelHeight;
+        if (measureBeforeReveal)
         {
-            return;
+            HoverSurface.Measure(new Size(workArea.Width, workArea.Height));
+            panelWidth = HoverSurface.DesiredSize.Width;
+            panelHeight = HoverSurface.DesiredSize.Height;
+        }
+        else
+        {
+            UpdateLayout();
+            panelWidth = ActualWidth;
+            panelHeight = ActualHeight;
+        }
+
+        if (panelWidth <= 0 || panelHeight <= 0)
+        {
+            return false;
         }
 
         var placement = PanelLayoutService.PlacePanel(
             _handleWindow.HandleBounds,
-            ActualWidth,
-            ActualHeight,
-            _handleWindow.CurrentWorkArea);
-        Left = placement.Left;
-        Top = placement.Top;
+            panelWidth,
+            panelHeight,
+            workArea);
+
+        _adjustingBounds = true;
+        try
+        {
+            Left = placement.Left;
+            Top = placement.Top;
+        }
+        finally
+        {
+            _adjustingBounds = false;
+        }
+
+        return true;
     }
 
     private HandleWindow EnsureHandleWindow()
@@ -1365,52 +1409,77 @@ public partial class OverlayWindow : Window
 
     private void ShowPositionedHandlePanel()
     {
-        if (!_overlayVisible)
+        if (!_overlayVisible || _handlePanelRevealInProgress)
         {
             return;
         }
 
         var concealedForFirstLayout = !IsVisible;
-        var previousOpacity = Opacity > 0 ? Opacity : 1;
-        if (concealedForFirstLayout)
+        if (!concealedForFirstLayout)
         {
-            Opacity = 0;
+            PositionCollapsedPanel();
+            return;
         }
+
+        var previousOpacity = Opacity > 0 ? Opacity : 1;
+        var revealGeneration = ++_handlePanelRevealGeneration;
+        _handlePanelRevealInProgress = true;
+        Opacity = 0;
 
         try
         {
-            if (concealedForFirstLayout)
+            if (!PositionCollapsedPanel(measureBeforeReveal: true))
             {
-                Show();
+                throw new InvalidOperationException(
+                    "Could not measure the handle-owned panel before reveal.");
             }
 
-            PositionCollapsedPanel();
+            Show();
+            UpdateLayout();
         }
         catch
         {
-            if (concealedForFirstLayout)
-            {
-                Opacity = previousOpacity;
-            }
-
+            _handlePanelRevealInProgress = false;
+            Opacity = previousOpacity;
             throw;
         }
 
-        if (concealedForFirstLayout)
-        {
-            Dispatcher.BeginInvoke(
-                DispatcherPriority.Render,
-                new Action(() =>
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Render,
+            new Action(() =>
+            {
+                if (revealGeneration != _handlePanelRevealGeneration)
                 {
-                    if (!_isClosed &&
-                        !_isShuttingDown &&
-                        _overlayVisible &&
-                        IsVisible)
+                    return;
+                }
+
+                if (!_isClosed &&
+                    !_isShuttingDown &&
+                    _overlayVisible &&
+                    IsVisible)
+                {
+                    Opacity = previousOpacity;
+                }
+
+                Dispatcher.BeginInvoke(
+                    DispatcherPriority.ContextIdle,
+                    new Action(() =>
                     {
-                        PositionCollapsedPanel();
-                        Opacity = previousOpacity;
-                    }
-                }));
+                        if (revealGeneration == _handlePanelRevealGeneration)
+                        {
+                            _handlePanelRevealInProgress = false;
+                        }
+                    }));
+            }));
+    }
+
+    private void CancelPendingHandlePanelReveal()
+    {
+        _handlePanelRevealGeneration++;
+        _handlePanelRevealInProgress = false;
+        if (Opacity <= 0)
+        {
+            Opacity = 1;
         }
     }
 
@@ -1475,15 +1544,109 @@ public partial class OverlayWindow : Window
         return OverlayCollapseGuard.CanCollapse(
             new OverlayInteractionState(
                 OverlayMode: _state.OverlaySettings.OverlayMode,
-                TaskDetailsOpen: _taskDetailsWindow is not null,
-                ContextMenuOpen: _contextInteractionActive,
+                TaskDetailsOpen: _taskDetailsWindow?.IsVisible == true,
+                ContextMenuOpen: IsContextMenuOpen(),
                 SettingsOpen: _settingsInteractionActive,
                 ModalDialogOpen: _modalInteractionCount > 0,
-                Dragging: _dragCandidate ||
-                          _isDragging ||
-                          _handleDragCandidate ||
-                          _isHandleDragging ||
-                          _handleWindow?.IsDragging == true));
+                Dragging: IsDragInteractionActive()));
+    }
+
+    private bool IsContextMenuOpen()
+    {
+        _openContextMenus.RemoveWhere(menu => !menu.IsOpen);
+        var contextMenuOpen =
+            _openContextMenus.Count > 0 ||
+            HasOpenContextMenu(this) ||
+            (_handleWindow is not null && HasOpenContextMenu(_handleWindow));
+
+        if (!contextMenuOpen)
+        {
+            _handleContextInteractionActive = false;
+        }
+
+        return contextMenuOpen || _handleContextInteractionActive;
+    }
+
+    private static bool HasOpenContextMenu(DependencyObject root)
+    {
+        if (root is FrameworkElement { ContextMenu.IsOpen: true })
+        {
+            return true;
+        }
+
+        var childCount = VisualTreeHelper.GetChildrenCount(root);
+        for (var index = 0; index < childCount; index++)
+        {
+            if (HasOpenContextMenu(VisualTreeHelper.GetChild(root, index)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void TrackContextMenu(object sender, bool isOpen)
+    {
+        if (sender is not ContextMenu contextMenu)
+        {
+            return;
+        }
+
+        if (isOpen)
+        {
+            _openContextMenus.Add(contextMenu);
+        }
+        else
+        {
+            _openContextMenus.Remove(contextMenu);
+        }
+    }
+
+    private bool IsDragInteractionActive()
+    {
+        if (Mouse.LeftButton == MouseButtonState.Released)
+        {
+            if (_dragCandidate || _isDragging)
+            {
+                ResetDragState();
+                if (HoverSurface.IsMouseCaptured)
+                {
+                    HoverSurface.ReleaseMouseCapture();
+                }
+            }
+
+            if (_handleDragCandidate || _isHandleDragging)
+            {
+                ResetHandleDragState(releaseCapture: true);
+            }
+        }
+
+        return _dragCandidate ||
+               _isDragging ||
+               _handleDragCandidate ||
+               _isHandleDragging ||
+               _handleWindow?.IsDragging == true;
+    }
+
+    private void ResetStaleInputState(bool closeContextMenus)
+    {
+        if (closeContextMenus)
+        {
+            foreach (var contextMenu in _openContextMenus.ToArray())
+            {
+                contextMenu.IsOpen = false;
+            }
+
+            _openContextMenus.Clear();
+            _handleContextInteractionActive = false;
+        }
+        else
+        {
+            IsContextMenuOpen();
+        }
+
+        IsDragInteractionActive();
     }
 
     private void ScheduleCollapse()
