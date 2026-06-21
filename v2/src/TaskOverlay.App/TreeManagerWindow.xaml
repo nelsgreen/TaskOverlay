@@ -1,0 +1,172 @@
+<Window x:Class="TaskOverlay.App.TreeManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tree Manager"
+        Width="760"
+        Height="680"
+        MinWidth="560"
+        MinHeight="420"
+        WindowStartupLocation="CenterScreen">
+    <Grid Background="#FF181B22">
+        <Grid Margin="28">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <DockPanel Grid.Row="0"
+                       LastChildFill="False">
+                <StackPanel DockPanel.Dock="Left">
+                    <TextBlock Foreground="#FFF4F4F5"
+                               FontSize="24"
+                               FontWeight="SemiBold"
+                               Text="Task Tree" />
+                    <TextBlock Margin="0,7,0,0"
+                               Foreground="#FFA1A1AA"
+                               FontSize="13"
+                               Text="Master project structure" />
+                </StackPanel>
+                <Button DockPanel.Dock="Right"
+                        MinWidth="84"
+                        Padding="12,7"
+                        Content="Refresh"
+                        Click="RefreshButton_OnClick" />
+            </DockPanel>
+
+            <Border Grid.Row="1"
+                    Margin="0,20,0,18"
+                    Height="1"
+                    Background="#FF3F3F46" />
+
+            <ScrollViewer Grid.Row="2"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="TreeCards">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0"
+                                        Width="{Binding IndentWidth}" />
+                                <Border Grid.Column="1"
+                                        Padding="14,11"
+                                        BorderThickness="1"
+                                        CornerRadius="8">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background"
+                                                    Value="#FF232731" />
+                                            <Setter Property="BorderBrush"
+                                                    Value="#FF3F4654" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsProject}"
+                                                             Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="#FF253047" />
+                                                    <Setter Property="BorderBrush"
+                                                            Value="#FF475E86" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsGroup}"
+                                                             Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="#FF202B32" />
+                                                    <Setter Property="BorderBrush"
+                                                            Value="#FF3E5963" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsActive}"
+                                                             Value="True">
+                                                    <Setter Property="BorderBrush"
+                                                            Value="#FF34D399" />
+                                                    <Setter Property="Background"
+                                                            Value="#FF18352F" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsDone}"
+                                                             Value="True">
+                                                    <Setter Property="Opacity"
+                                                            Value="0.68" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+
+                                    <DockPanel LastChildFill="True">
+                                        <StackPanel DockPanel.Dock="Right"
+                                                    Margin="16,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    Orientation="Horizontal">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Setter Property="Visibility"
+                                                            Value="Collapsed" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsTask}"
+                                                                     Value="True">
+                                                            <Setter Property="Visibility"
+                                                                    Value="Visible" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
+                                            <Button MinWidth="82"
+                                                    Padding="10,6"
+                                                    Content="Set active"
+                                                    IsEnabled="{Binding CanActivate}"
+                                                    Click="ActivateButton_OnClick" />
+                                            <Button MinWidth="78"
+                                                    Margin="8,0,0,0"
+                                                    Padding="10,6"
+                                                    Content="{Binding CompletionAction}"
+                                                    Click="CompletionButton_OnClick" />
+                                        </StackPanel>
+
+                                        <StackPanel>
+                                            <DockPanel LastChildFill="False">
+                                                <TextBlock DockPanel.Dock="Left"
+                                                           Foreground="#FF94A3B8"
+                                                           FontSize="10"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding KindLabel}" />
+                                                <TextBlock DockPanel.Dock="Right"
+                                                           Margin="12,0,0,0"
+                                                           Foreground="#FF6EE7B7"
+                                                           FontSize="10"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding StatusLabel}" />
+                                            </DockPanel>
+                                            <TextBlock Margin="0,4,0,0"
+                                                       FontSize="15"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding Title}"
+                                                       TextTrimming="CharacterEllipsis">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground"
+                                                                Value="#FFF4F4F5" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsDone}"
+                                                                         Value="True">
+                                                                <Setter Property="Foreground"
+                                                                        Value="#FFA1A1AA" />
+                                                                <Setter Property="TextDecorations"
+                                                                        Value="Strikethrough" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>
