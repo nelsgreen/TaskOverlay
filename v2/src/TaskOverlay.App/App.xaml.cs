@@ -12,6 +12,7 @@ public partial class App : System.Windows.Application
 {
     private OverlayWindow? _overlayWindow;
     private SettingsWindow? _settingsWindow;
+    private TreeManagerWindow? _treeManagerWindow;
     private Forms.NotifyIcon? _trayIcon;
     private Forms.ContextMenuStrip? _trayMenu;
     private Forms.ToolStripMenuItem? _overlayModeMenuItem;
@@ -138,6 +139,10 @@ public partial class App : System.Windows.Application
         _trayMenu.Items.Add(_overlayModeMenuItem);
         UpdateOverlayModeUi(_state?.OverlaySettings.OverlayMode ??
                             OverlayMode.AutoQuestTracker);
+        _trayMenu.Items.Add(
+            "Open Tree Manager",
+            null,
+            (_, _) => RunCommand("Tray", "Open Tree Manager", ShowTreeManager));
         _trayMenu.Items.Add("Settings", null, (_, _) => RunCommand("Tray", "Settings", ShowSettings));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("Exit", null, (_, _) => RunCommand("Tray", "Exit", () => BeginShutdown("Tray Exit command.")));
@@ -353,6 +358,7 @@ public partial class App : System.Windows.Application
 
         _state.Tasks.AddRange(tasks);
         PersistState();
+        _treeManagerWindow?.Refresh();
         ShowOverlay();
         _overlayWindow?.RevealTasks(tasks);
         _diagnostics?.Log(
@@ -470,7 +476,7 @@ public partial class App : System.Windows.Application
             _settingsWindow = new SettingsWindow(
                 _state,
                 PersistState,
-                () => _overlayWindow?.RefreshTaskPresentation());
+                RefreshTaskPresentations);
             _settingsWindow.Closed += SettingsWindow_OnClosed;
         }
 
@@ -478,6 +484,38 @@ public partial class App : System.Windows.Application
         _settingsWindow.UpdateFromSettings();
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    private void ShowTreeManager()
+    {
+        if (_isShuttingDown || _state is null)
+        {
+            return;
+        }
+
+        if (_treeManagerWindow is null)
+        {
+            _treeManagerWindow = new TreeManagerWindow(
+                _state,
+                PersistState,
+                () => _overlayWindow?.RefreshTaskPresentation());
+            _treeManagerWindow.Closed += TreeManagerWindow_OnClosed;
+        }
+
+        _treeManagerWindow.Refresh();
+        _treeManagerWindow.Show();
+        _treeManagerWindow.Activate();
+    }
+
+    private void TreeManagerWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (_treeManagerWindow is null)
+        {
+            return;
+        }
+
+        _treeManagerWindow.Closed -= TreeManagerWindow_OnClosed;
+        _treeManagerWindow = null;
     }
 
     private void SettingsWindow_OnClosed(object? sender, EventArgs e)
@@ -500,10 +538,22 @@ public partial class App : System.Windows.Application
 
         var overlay = new OverlayWindow(
             _state,
-            PersistState,
+            PersistOverlayState,
             message => _diagnostics?.Log(message));
         overlay.OverlayModeChanged += OverlayWindow_OnOverlayModeChanged;
         return overlay;
+    }
+
+    private void PersistOverlayState()
+    {
+        PersistState();
+        _treeManagerWindow?.Refresh();
+    }
+
+    private void RefreshTaskPresentations()
+    {
+        _overlayWindow?.RefreshTaskPresentation();
+        _treeManagerWindow?.Refresh();
     }
 
     private void OverlayWindow_OnOverlayModeChanged(OverlayMode mode)
@@ -547,6 +597,8 @@ public partial class App : System.Windows.Application
 
         try
         {
+            _treeManagerWindow?.Close();
+            _treeManagerWindow = null;
             _settingsWindow?.Close();
             _settingsWindow = null;
             if (_overlayWindow is not null)
