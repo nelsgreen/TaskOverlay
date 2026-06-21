@@ -29,8 +29,11 @@ internal static class Program
             ("project service orphan safety", ProjectServiceOrphanSafety),
             ("tree node creation", TreeNodeCreation),
             ("tree rename and safe delete", TreeRenameAndSafeDelete),
+            ("tree delete atomic failure", TreeDeleteAtomicFailure),
             ("tree move and cycle guards", TreeMoveAndCycleGuards),
             ("tree orphan fallback", TreeOrphanFallback),
+            ("tree missing default recovery", TreeMissingDefaultRecovery),
+            ("tree cycle repair", TreeCycleRepair),
             ("tree sibling ordering", TreeSiblingOrdering),
             ("tree active and status", TreeActiveAndStatus),
             ("tree navigation", TreeNavigation),
@@ -339,7 +342,8 @@ internal static class Program
             var loadedOrphan = loaded.Tasks.Single(task => task.Id == orphanTask.Id);
             var loadedUnassigned = loaded.Tasks.Single(task => task.Id == nullProjectTask.Id);
 
-            Assert(loadedOrphan.ProjectId == orphanProjectId, "Load should preserve an orphan reference.");
+            Assert(loadedOrphan.ProjectId == defaultProject.Id, "Load should repair an orphan reference.");
+            Assert(loadedUnassigned.ProjectId == defaultProject.Id, "Load should assign null reference to Default.");
             Assert(
                 ProjectReferenceResolver.ResolveProject(loaded, loadedOrphan)?.Id == defaultProject.Id,
                 "Orphan references should safely resolve to Default.");
@@ -435,8 +439,10 @@ internal static class Program
     {
         var state = AppState.CreateDefault();
         var project = state.Projects.Single();
+        var otherProject = new ProjectItem { Name = "Other", SortOrder = 1 };
+        state.Projects.Add(otherProject);
         state.Groups.Add(new GroupItem { ProjectId = project.Id, Name = "Existing", SortOrder = 3 });
-        state.Groups.Add(new GroupItem { ProjectId = Guid.NewGuid(), Name = "Other", SortOrder = 20 });
+        state.Groups.Add(new GroupItem { ProjectId = otherProject.Id, Name = "Other", SortOrder = 20 });
         var service = new ProjectService(state);
         var createdAtUtc = DateTimeOffset.Parse("2026-06-20T11:00:00Z");
 
@@ -483,10 +489,21 @@ internal static class Program
         var secondGroup = new GroupItem { ProjectId = secondProject.Id, Name = "Second group" };
         var task = TaskItem.Create("Assign me", projectId: firstProject.Id);
         task.GroupId = firstGroup.Id;
+        var ancestor = TaskItem.Create("Ancestor", projectId: firstProject.Id);
+        ancestor.GroupId = firstGroup.Id;
+        var parent = TaskItem.Create("Parent", projectId: firstProject.Id);
+        parent.GroupId = firstGroup.Id;
+        parent.ParentTaskId = ancestor.Id;
+        var child = TaskItem.Create("Child", projectId: firstProject.Id);
+        child.GroupId = firstGroup.Id;
+        child.ParentTaskId = parent.Id;
         state.Projects.Add(secondProject);
         state.Groups.Add(firstGroup);
         state.Groups.Add(secondGroup);
         state.Tasks.Add(task);
+        state.Tasks.Add(ancestor);
+        state.Tasks.Add(parent);
+        state.Tasks.Add(child);
         var service = new ProjectService(state);
 
         Assert(service.AssignTaskToProject(task.Id, secondProject.Id), "Task should move to an existing project.");
@@ -495,17 +512,26 @@ internal static class Program
         Assert(service.AssignTaskToGroup(task.Id, secondGroup.Id), "Task should join a group in its project.");
         Assert(task.GroupId == secondGroup.Id, "Group assignment should set GroupId.");
         Assert(service.AssignTaskToProject(task.Id, secondProject.Id), "Same-project assignment should succeed.");
-        Assert(task.GroupId == secondGroup.Id, "Same-project assignment should retain a valid group.");
+        Assert(task.GroupId is null, "Assigning to project should move task to project root.");
         Assert(service.AssignTaskToGroup(task.Id, firstGroup.Id), "Task should move to an existing group.");
         Assert(task.GroupId == firstGroup.Id, "Group assignment should update GroupId.");
         Assert(task.ProjectId == firstProject.Id, "Group assignment should also update ProjectId.");
         Assert(service.ClearTaskGroup(task.Id), "Existing task group should clear.");
         Assert(task.GroupId is null, "ClearTaskGroup should clear only GroupId.");
+        Assert(task.ParentTaskId is null, "ClearTaskGroup should move task out of a task parent.");
         Assert(task.ProjectId == firstProject.Id, "ClearTaskGroup should preserve ProjectId.");
         Assert(!service.AssignTaskToProject(Guid.NewGuid(), secondProject.Id), "Missing task should fail safely.");
         Assert(!service.AssignTaskToProject(task.Id, Guid.NewGuid()), "Missing project should fail safely.");
         Assert(!service.AssignTaskToGroup(task.Id, Guid.NewGuid()), "Missing group should fail safely.");
         Assert(!service.ClearTaskGroup(Guid.NewGuid()), "Missing task clear should fail safely.");
+        Assert(service.AssignTaskToGroup(parent.Id, secondGroup.Id), "ProjectService should use tree-aware move.");
+        Assert(parent.ParentTaskId is null, "Moving parent to group should clear its ParentTaskId.");
+        Assert(child.ParentTaskId == parent.Id, "Descendant should remain attached to moved parent.");
+        Assert(child.ProjectId == secondProject.Id, "Descendant ProjectId should cascade.");
+        Assert(child.GroupId == secondGroup.Id, "Descendant GroupId should cascade.");
+        Assert(service.ClearTaskGroup(parent.Id), "Clearing parent group should move branch to project root.");
+        Assert(parent.GroupId is null && parent.ParentTaskId is null, "Cleared parent should be project-root task.");
+        Assert(child.GroupId is null && child.ProjectId == secondProject.Id, "Clear should cascade to descendants.");
     }
 
     private static void ProjectServiceOrphanSafety()
@@ -523,10 +549,14 @@ internal static class Program
         state.Groups.Add(orphanGroup);
         var service = new ProjectService(state);
 
+        Assert(orphanGroup.ProjectId == defaultProject.Id, "Orphan group should repair to Default.");
+        Assert(task.ProjectId == defaultProject.Id, "Orphan task should repair to Default.");
+        Assert(task.GroupId is null, "Missing group reference should be cleared.");
         Assert(
             ProjectReferenceResolver.ResolveProject(state, task)?.Id == defaultProject.Id,
             "Orphan project references should resolve to Default.");
-        Assert(!service.AssignTaskToGroup(task.Id, orphanGroup.Id), "Orphan group assignment should fail safely.");
+        Assert(service.AssignTaskToGroup(task.Id, orphanGroup.Id), "Repaired group assignment should succeed safely.");
+        Assert(task.GroupId == orphanGroup.Id, "Repaired group should become the task parent.");
         Assert(service.AssignTaskToProject(task.Id, defaultProject.Id), "Orphan task should move to Default safely.");
         Assert(task.ProjectId == defaultProject.Id, "Safe assignment should repair orphan ProjectId.");
         Assert(task.GroupId is null, "Safe assignment should clear orphan GroupId.");
@@ -585,6 +615,32 @@ internal static class Program
         Assert(!service.DeleteNode(defaultProject.Id), "Default project must remain safe.");
     }
 
+    private static void TreeDeleteAtomicFailure()
+    {
+        var state = CreateEmptyTreeState();
+        var service = new TreeStateService(state);
+        var project = state.Projects.Single();
+        var parent = service.CreateTask(project.Id, "Parent")!;
+        var firstChild = service.CreateTask(parent.Id, "First child")!;
+        var secondChild = service.CreateTask(parent.Id, "Second child")!;
+        var firstBefore = state.Tasks.Single(task => task.Id == firstChild.Id);
+        var secondBefore = state.Tasks.Single(task => task.Id == secondChild.Id);
+        var firstAssignment = (firstBefore.ProjectId, firstBefore.GroupId, firstBefore.ParentTaskId);
+        var secondAssignment = (secondBefore.ProjectId, secondBefore.GroupId, secondBefore.ParentTaskId);
+
+        state.Projects.Clear();
+        state.Tasks.Single(task => task.Id == parent.Id).ProjectId = Guid.NewGuid();
+
+        Assert(!service.DeleteNode(parent.Id), "Delete should fail when replacement parent cannot be planned.");
+        Assert(service.GetNode(parent.Id) is not null, "Failed delete must preserve parent task.");
+        Assert(
+            (firstBefore.ProjectId, firstBefore.GroupId, firstBefore.ParentTaskId) == firstAssignment,
+            "Failed delete must not partially reparent first child.");
+        Assert(
+            (secondBefore.ProjectId, secondBefore.GroupId, secondBefore.ParentTaskId) == secondAssignment,
+            "Failed delete must not partially reparent later children.");
+    }
+
     private static void TreeMoveAndCycleGuards()
     {
         var state = CreateEmptyTreeState();
@@ -638,6 +694,91 @@ internal static class Program
         Assert(!service.MoveNode(orphanTask.Id, Guid.NewGuid()), "Move to orphan parent should be rejected.");
     }
 
+    private static void TreeMissingDefaultRecovery()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var otherProjectId = Guid.NewGuid();
+            var orphanGroupId = Guid.NewGuid();
+            var orphanTaskId = Guid.NewGuid();
+            var handEditedJson =
+                $$"""
+                {
+                  "schemaVersion": 2,
+                  "tasks": [{
+                    "id": "{{orphanTaskId}}",
+                    "title": "Preserved task",
+                    "description": "preserved",
+                    "completed": false,
+                    "priority": "normal",
+                    "inWork": false,
+                    "createdAtUtc": "2026-06-01T08:30:00+00:00",
+                    "projectId": "{{Guid.NewGuid()}}",
+                    "groupId": "{{Guid.NewGuid()}}"
+                  }],
+                  "projects": [{
+                    "id": "{{otherProjectId}}",
+                    "name": "Other",
+                    "sortOrder": 0,
+                    "active": true,
+                    "createdAtUtc": "2026-06-01T08:30:00+00:00"
+                  }],
+                  "groups": [{
+                    "id": "{{orphanGroupId}}",
+                    "projectId": "{{Guid.NewGuid()}}",
+                    "name": "Orphan group",
+                    "sortOrder": 0,
+                    "active": true,
+                    "createdAtUtc": "2026-06-01T08:30:00+00:00"
+                  }],
+                  "overlaySettings": { "alwaysOnTop": true },
+                  "windowPlacement": { "collapsedLeft": 1800, "collapsedTop": 12 },
+                  "createdAtUtc": "2026-06-01T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-01T08:30:00+00:00"
+                }
+                """;
+            var store = new AppStateStore(directory);
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(store.StatePath, handEditedJson);
+            var loaded = store.Load();
+            var defaultProject = loaded.Projects.Single(project =>
+                project.Name == ProjectItem.DefaultName);
+            var loadedTask = loaded.Tasks.Single(task => task.Id == orphanTaskId);
+            var loadedGroup = loaded.Groups.Single(group => group.Id == orphanGroupId);
+            var rootNodes = new TreeStateService(loaded).GetChildren(parentId: null);
+
+            Assert(loaded.Tasks.Count == 1, "Default recovery must not delete user tasks.");
+            Assert(loadedGroup.ProjectId == defaultProject.Id, "Orphan group should move to Default.");
+            Assert(loadedTask.ProjectId == defaultProject.Id, "Orphan task should move to Default.");
+            Assert(loadedTask.GroupId is null, "Missing group reference should clear.");
+            Assert(rootNodes.All(node => node.Kind == TreeNodeKind.Project), "Tasks must not become root siblings.");
+            Assert(loaded.WindowPlacement.CollapsedLeft == 1800, "Default recovery must preserve handle anchor.");
+            Assert(File.Exists(store.BackupPath), "Normalized load should preserve the hand-edited state as backup.");
+            Assert(!File.ReadAllText(store.StatePath).Contains("\"active\":"), "Project/group Active should not persist.");
+        });
+    }
+
+    private static void TreeCycleRepair()
+    {
+        var state = CreateEmptyTreeState();
+        var project = state.Projects.Single();
+        var first = TaskItem.Create("First", projectId: project.Id);
+        var second = TaskItem.Create("Second", projectId: project.Id);
+        first.ParentTaskId = second.Id;
+        second.ParentTaskId = first.Id;
+        state.Tasks.Add(first);
+        state.Tasks.Add(second);
+
+        Assert(StateMigrator.RepairCurrentState(state), "Cycle repair should report a state change.");
+        Assert(
+            !(first.ParentTaskId == second.Id && second.ParentTaskId == first.Id),
+            "Repair should break the cyclic parent relationship.");
+        Assert(state.Tasks.Count == 2, "Cycle repair must preserve both tasks.");
+        var service = new TreeStateService(state);
+        Assert(service.GetProjectRoot(first.Id)?.Id == project.Id, "First repaired task should remain reachable.");
+        Assert(service.GetProjectRoot(second.Id)?.Id == project.Id, "Second repaired task should remain reachable.");
+    }
+
     private static void TreeSiblingOrdering()
     {
         var state = CreateEmptyTreeState();
@@ -669,8 +810,8 @@ internal static class Program
         var task = service.CreateTask(group.Id, "Task")!;
         var timestamp = DateTimeOffset.Parse("2026-06-21T09:00:00Z");
 
-        Assert(service.MarkActive(group.Id, true, timestamp), "Group active flag should update.");
-        Assert(service.GetNode(group.Id)?.Active == true, "Group should report active.");
+        Assert(!service.MarkActive(group.Id, true, timestamp), "Group active state is intentionally unsupported.");
+        Assert(service.GetNode(group.Id)?.Active == false, "Group should remain inactive in normalized view.");
         Assert(service.MarkActive(task.Id, true, timestamp), "Task should become active.");
         Assert(state.Tasks.Single().InWork, "Task active should retain flat InWork compatibility.");
         Assert(service.GetNode(task.Id)?.Active == true, "Normalized task should report active.");

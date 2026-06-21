@@ -44,7 +44,6 @@ public sealed class ProjectItem
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
     public int SortOrder { get; set; }
-    public bool Active { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
@@ -66,7 +65,6 @@ public sealed class GroupItem
     public Guid ProjectId { get; set; }
     public string Name { get; set; } = string.Empty;
     public int SortOrder { get; set; }
-    public bool Active { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
