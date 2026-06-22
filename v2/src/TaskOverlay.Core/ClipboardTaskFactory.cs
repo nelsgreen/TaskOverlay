@@ -8,7 +8,8 @@ public static class ClipboardTaskFactory
 {
     public static IReadOnlyList<TaskItem> CreateFromLines(
         string? clipboardText,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null,
+        Guid? projectId = null)
     {
         if (string.IsNullOrWhiteSpace(clipboardText))
         {
@@ -19,13 +20,14 @@ public static class ClipboardTaskFactory
         return SplitLines(clipboardText)
             .Select(line => line.Trim())
             .Where(line => line.Length > 0)
-            .Select(title => CreateTask(title, string.Empty, timestamp))
+            .Select(title => CreateTask(title, string.Empty, timestamp, projectId))
             .ToArray();
     }
 
     public static TaskItem? CreateSingle(
         string? clipboardText,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null,
+        Guid? projectId = null)
     {
         if (string.IsNullOrWhiteSpace(clipboardText))
         {
@@ -40,12 +42,17 @@ public static class ClipboardTaskFactory
 
         return title.Length == 0
             ? null
-            : CreateTask(title, string.Empty, now ?? DateTimeOffset.UtcNow);
+            : CreateTask(
+                title,
+                string.Empty,
+                now ?? DateTimeOffset.UtcNow,
+                projectId);
     }
 
     public static TaskItem? CreateWithDescription(
         string? clipboardText,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null,
+        Guid? projectId = null)
     {
         var parsed = ParseWithDescription(clipboardText);
         return parsed is null
@@ -53,7 +60,8 @@ public static class ClipboardTaskFactory
             : CreateTask(
                 parsed.Value.Title,
                 parsed.Value.Description,
-                now ?? DateTimeOffset.UtcNow);
+                now ?? DateTimeOffset.UtcNow,
+                projectId);
     }
 
     public static ClipboardTaskText? ParseWithDescription(string? clipboardText)
@@ -98,7 +106,8 @@ public static class ClipboardTaskFactory
     private static TaskItem CreateTask(
         string title,
         string description,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        Guid? projectId)
     {
         return new TaskItem
         {
@@ -108,9 +117,16 @@ public static class ClipboardTaskFactory
             Completed = false,
             Priority = TaskPriority.Normal,
             InWork = false,
+            Status = TaskStatus.Todo,
             CreatedAtUtc = createdAtUtc,
+            UpdatedAtUtc = createdAtUtc,
             CompletedAtUtc = null,
-            DueAtUtc = null
+            DueAtUtc = null,
+            ProjectId = projectId,
+            RemindAtUtc = null,
+            RemindEveryMinutes = null,
+            LastReminderAtUtc = null,
+            ReminderActive = false
         };
     }
 

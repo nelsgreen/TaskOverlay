@@ -352,8 +352,11 @@ public sealed class TreeStateService
         }
         else
         {
-            task.Completed = false;
-            task.CompletedAtUtc = null;
+            TaskInteractionService.SetStatus(
+                _state,
+                task,
+                TaskStatus.Todo,
+                timestamp);
         }
 
         task.UpdatedAtUtc = timestamp;
@@ -671,7 +674,7 @@ public sealed class TreeStateService
         task.SortOrder,
         TreeNodeKind.Task,
         task.Title,
-        task.Completed ? TreeNodeStatus.Done : TreeNodeStatus.Todo,
+        task.Status == TaskStatus.Done ? TreeNodeStatus.Done : TreeNodeStatus.Todo,
         task.InWork,
         task.CreatedAtUtc,
         task.UpdatedAtUtc);

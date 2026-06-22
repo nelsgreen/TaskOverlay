@@ -96,6 +96,15 @@ public static class StateMigrator
         }
 
         var projectIds = state.Projects.Select(project => project.Id).ToHashSet();
+        foreach (var project in state.Projects)
+        {
+            if (!ProjectColorPalette.IsValid(project.ColorHex))
+            {
+                project.ColorHex = ProjectColorPalette.Resolve(project.Name, project.Id);
+                changed = true;
+            }
+        }
+
         foreach (var group in state.Groups)
         {
             if (!projectIds.Contains(group.ProjectId))
@@ -113,6 +122,42 @@ public static class StateMigrator
             .ToDictionary(group => group.Key, group => group.First());
         foreach (var task in state.Tasks)
         {
+            var normalizedStatus = task.StoredStatus ??
+                                   (task.Completed
+                                       ? TaskStatus.Done
+                                       : task.InWork
+                                           ? TaskStatus.InWork
+                                           : TaskStatus.Todo);
+            var shouldBeCompleted = normalizedStatus == TaskStatus.Done;
+            var shouldBeInWork = normalizedStatus == TaskStatus.InWork;
+            if (task.StoredStatus != normalizedStatus ||
+                task.Completed != shouldBeCompleted ||
+                task.InWork != shouldBeInWork)
+            {
+                task.Status = normalizedStatus;
+                task.Completed = shouldBeCompleted;
+                task.InWork = shouldBeInWork;
+                changed = true;
+            }
+
+            if (task.WaitingFor is null)
+            {
+                task.WaitingFor = string.Empty;
+                changed = true;
+            }
+
+            if (task.RemindEveryMinutes <= 0)
+            {
+                task.RemindEveryMinutes = null;
+                changed = true;
+            }
+
+            if (task.Completed && task.ReminderActive)
+            {
+                task.ReminderActive = false;
+                changed = true;
+            }
+
             if (task.ParentTaskId == task.Id ||
                 task.ParentTaskId.HasValue && !tasksById.ContainsKey(task.ParentTaskId.Value))
             {

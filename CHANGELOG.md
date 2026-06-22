@@ -1,5 +1,28 @@
 # Changelog
 
+## v2 daily attention MVP
+
+### Added
+
+- Added persisted project colors and one-time KazChess, PLHIV, TaskOverlay, and
+  Personal project seeding.
+- Added Todo, InWork, Waiting, and Done task statuses with `waitingFor` data.
+- Added reminder fields, practical presets, 30-second in-app processing,
+  repeating schedules, snooze, and Still waiting actions.
+- Added Quick Add from tray and `Ctrl+Alt+Q`, plus project-aware clipboard
+  defaults.
+- Added project, WAIT, and DUE overlay accents and due-first sorting.
+- Extended Task Details with project, status, reminder time/repeat, and waiting
+  fields.
+
+### Compatibility
+
+- Existing schema v2 files load additively; legacy `Completed`/`InWork` values
+  normalize to the new status model.
+- Windows toast notifications are deferred; reminder notification is in-app.
+- Overlay modes, collapsed handle behavior, Tree Manager, workflows, and Go v1
+  are preserved.
+
 ## v2 unified overlay modes and reliable handle dragging
 
 ### Added

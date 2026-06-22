@@ -35,9 +35,23 @@ The Settings window provides two in-work modes. **Multiple tasks** independently
 toggles focus on each text click and is the default. **Single task** focuses the
 clicked task and clears focus from the others. In-work rows are highlighted.
 Right-click **Edit** opens a separate details window for title, description,
-in-work, completion, and deletion. Save persists changes; Cancel discards them.
+project, Todo/In work/Waiting/Done status, waiting-for person, reminder time,
+repeat preset, and deletion. Save persists changes; Cancel discards them.
 Descriptions remain hidden in passive mode and may appear in active mode for
 expanded or in-work tasks.
+
+Use **Quick Add task** in the tray or `Ctrl+Alt+Q` for daily capture. Choose a
+project, Todo/Waiting/In work status, reminder preset, optional waiting-for
+person, and description. First startup seeds KazChess (green), PLHIV (orange),
+TaskOverlay (purple), and Personal (gray). Overlay rows retain a compact colored
+project stripe/badge plus explicit `WAIT` and `DUE` badges.
+
+Reminder presets cover 30 minutes, 1 hour, 2 hours, tomorrow morning, every 2
+hours, and daily. A 30-second in-app timer activates due tasks, records the last
+reminder, advances repeating schedules, sorts due tasks toward the top, and
+reveals the overlay. Use task context actions to snooze 30 minutes/1 hour or
+mark **Still waiting**. Windows toast notifications are deferred; reminders are
+in-app for this MVP.
 
 V2 provides three clipboard intake modes through the tray and fixed global
 hotkeys:
@@ -47,9 +61,11 @@ hotkeys:
 - `Ctrl+Alt+D` creates one task whose first non-empty line is the title and
   remaining text is the description.
 - `Ctrl+Alt+T` shows or hides the overlay.
+- `Ctrl+Alt+Q` opens Quick Add.
 
 Created tasks are saved together in one atomic state update and the overlay is
-shown. Empty clipboard text is ignored and logged.
+shown. Clipboard tasks use the last selected project, then Personal, with Todo
+status and no reminder. Empty clipboard text is ignored and logged.
 
 Choose one persisted **Overlay mode** from the tray: **Auto quest tracker**
 shows the passive task list and expands on hover, **Collapsed handle** rests as

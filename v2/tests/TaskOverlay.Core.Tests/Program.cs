@@ -41,6 +41,13 @@ internal static class Program
             ("tree navigation", TreeNavigation),
             ("tree projections", TreeProjections),
             ("tree legacy flat state compatibility", TreeLegacyFlatStateCompatibility),
+            ("daily MVP project seeding", DailyMvpProjectSeeding),
+            ("old attention state compatibility", OldAttentionStateCompatibility),
+            ("waiting status persistence", WaitingStatusPersistence),
+            ("project color persistence", ProjectColorPersistence),
+            ("reminder scheduling", ReminderScheduling),
+            ("reminder snooze and still waiting", ReminderSnoozeAndStillWaiting),
+            ("quick task capture", QuickTaskCapture),
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
             ("old collapsed mode migration", OldCollapsedModeMigration),
@@ -1016,6 +1023,173 @@ internal static class Program
         });
     }
 
+    private static void DailyMvpProjectSeeding()
+    {
+        var state = AppState.CreateDefault();
+
+        Assert(MvpProjectSeeder.EnsureSeedProjects(state), "First seed pass should change state.");
+        Assert(!MvpProjectSeeder.EnsureSeedProjects(state), "Seed pass should be idempotent.");
+        foreach (var definition in ProjectColorPalette.MvpProjects)
+        {
+            var project = state.Projects.Single(item => item.Name == definition.Name);
+            Assert(project.ColorHex == definition.ColorHex, $"{definition.Name} should use its MVP color.");
+        }
+
+        Assert(
+            TaskCaptureService.ResolvePreferredProject(state)?.Name == "Personal",
+            "Personal should become the initial quick-capture project.");
+    }
+
+    private static void OldAttentionStateCompatibility()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var projectId = Guid.NewGuid();
+            var taskId = Guid.NewGuid();
+            var oldStateJson =
+                $$"""
+                {
+                  "schemaVersion": 2,
+                  "tasks": [{
+                    "id": "{{taskId}}",
+                    "title": "Legacy active task",
+                    "description": "",
+                    "completed": false,
+                    "priority": "normal",
+                    "inWork": true,
+                    "createdAtUtc": "2026-06-01T08:30:00+00:00",
+                    "projectId": "{{projectId}}"
+                  }],
+                  "projects": [{
+                    "id": "{{projectId}}",
+                    "name": "Default",
+                    "sortOrder": 0,
+                    "createdAtUtc": "2026-06-01T08:30:00+00:00"
+                  }],
+                  "groups": [],
+                  "overlaySettings": { "alwaysOnTop": true },
+                  "windowPlacement": {},
+                  "createdAtUtc": "2026-06-01T08:30:00+00:00",
+                  "updatedAtUtc": "2026-06-01T08:30:00+00:00"
+                }
+                """;
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "state.json"), oldStateJson);
+
+            var loaded = new AppStateStore(directory).Load();
+            var task = loaded.Tasks.Single();
+            var project = loaded.Projects.Single();
+
+            Assert(task.Status == TaskStatus.InWork, "Legacy InWork should migrate to InWork status.");
+            Assert(ProjectColorPalette.IsValid(project.ColorHex), "Missing project color should be repaired.");
+            Assert(task.RemindAtUtc is null, "Old tasks should default to no reminder.");
+            Assert(task.WaitingFor == string.Empty, "Old tasks should default waitingFor to empty.");
+        });
+    }
+
+    private static void WaitingStatusPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            var task = state.Tasks[0];
+            TaskInteractionService.SetStatus(state, task, TaskStatus.Waiting);
+            task.WaitingFor = "Madina";
+            task.RemindAtUtc = DateTimeOffset.Parse("2026-06-22T12:00:00Z");
+            task.RemindEveryMinutes = 120;
+
+            store.Save(state);
+            var loaded = new AppStateStore(directory).Load().Tasks.Single(item => item.Id == task.Id);
+
+            Assert(loaded.Status == TaskStatus.Waiting, "Waiting status should persist.");
+            Assert(loaded.WaitingFor == "Madina", "waitingFor should persist.");
+            Assert(loaded.RemindEveryMinutes == 120, "Repeat interval should persist.");
+        });
+    }
+
+    private static void ProjectColorPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.Projects[0].ColorHex = "#123ABC";
+
+            store.Save(state);
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(loaded.Projects[0].ColorHex == "#123ABC", "Project color should persist.");
+        });
+    }
+
+    private static void ReminderScheduling()
+    {
+        var task = TaskItem.Create("Follow up");
+        var start = DateTimeOffset.Parse("2026-06-22T08:00:00Z");
+        ReminderService.ApplyPreset(
+            task,
+            ReminderPreset.RepeatEvery2Hours,
+            start,
+            TimeZoneInfo.Utc);
+
+        var due = ReminderService.ProcessDueReminders(
+            new[] { task },
+            start.AddHours(2));
+
+        Assert(due.Count == 1, "Due reminder should activate once.");
+        Assert(task.ReminderActive, "Due reminder should remain visibly active.");
+        Assert(task.LastReminderAtUtc == start.AddHours(2), "Last reminder time should be recorded.");
+        Assert(task.RemindAtUtc == start.AddHours(4), "Repeating reminder should schedule the next occurrence.");
+        Assert(
+            ReminderService.ProcessDueReminders(new[] { task }, start.AddHours(3)).Count == 0,
+            "Active reminder should not fire repeatedly before acknowledgement.");
+    }
+
+    private static void ReminderSnoozeAndStillWaiting()
+    {
+        var task = TaskItem.Create("Waiting response");
+        var now = DateTimeOffset.Parse("2026-06-22T10:00:00Z");
+        task.Status = TaskStatus.Waiting;
+        task.ReminderActive = true;
+
+        Assert(ReminderService.Snooze(task, 30, now), "Snooze should succeed.");
+        Assert(task.RemindAtUtc == now.AddMinutes(30), "Snooze should set the requested time.");
+        Assert(!task.ReminderActive, "Snooze should acknowledge the due badge.");
+
+        task.RemindEveryMinutes = null;
+        Assert(ReminderService.MarkStillWaiting(task, now), "Still waiting should succeed.");
+        Assert(task.Status == TaskStatus.Waiting, "Still waiting should retain Waiting status.");
+        Assert(task.RemindAtUtc == now.AddHours(2), "Still waiting should default to a two-hour follow-up.");
+    }
+
+    private static void QuickTaskCapture()
+    {
+        var state = AppState.CreateDefault();
+        MvpProjectSeeder.EnsureSeedProjects(state);
+        var kazChess = state.Projects.Single(project => project.Name == "KazChess");
+        var now = DateTimeOffset.Parse("2026-06-22T10:00:00Z");
+
+        var task = TaskCaptureService.CreateQuickTask(
+            state,
+            new QuickTaskValues(
+                "Wait for contract reply",
+                kazChess.Id,
+                TaskStatus.Waiting,
+                ReminderPreset.RepeatEvery2Hours,
+                "Madina",
+                "Contract follow-up"),
+            now,
+            TimeZoneInfo.Utc);
+
+        Assert(task is not null, "Quick capture should create a task.");
+        Assert(task!.ProjectId == kazChess.Id, "Quick task should use the selected project.");
+        Assert(task.Status == TaskStatus.Waiting, "Quick task should use Waiting status.");
+        Assert(task.WaitingFor == "Madina", "Quick task should store waitingFor.");
+        Assert(task.RemindAtUtc == now.AddHours(2), "Repeat preset should schedule first reminder.");
+        Assert(task.RemindEveryMinutes == 120, "Repeat preset should store interval.");
+    }
+
     private static void SaveLoadRoundtrip()
     {
         WithTemporaryDirectory(directory =>
@@ -1026,10 +1200,8 @@ internal static class Program
 
             task.Description = "Stored description";
             task.Priority = TaskPriority.High;
-            task.InWork = true;
             task.DueAtUtc = DateTimeOffset.UtcNow.AddHours(2);
-            task.Completed = true;
-            task.CompletedAtUtc = DateTimeOffset.UtcNow;
+            TaskInteractionService.Complete(task);
             state.WindowPlacement.Left = 123.5;
             state.WindowPlacement.Top = 456.5;
 
@@ -1039,8 +1211,9 @@ internal static class Program
 
             Assert(loadedTask.Description == task.Description, "Description did not roundtrip.");
             Assert(loadedTask.Priority == TaskPriority.High, "Priority did not roundtrip.");
-            Assert(loadedTask.InWork, "In-work flag did not roundtrip.");
+            Assert(!loadedTask.InWork, "Done task should not remain in work.");
             Assert(loadedTask.Completed, "Completed flag did not roundtrip.");
+            Assert(loadedTask.Status == TaskStatus.Done, "Done status did not roundtrip.");
             Assert(loadedTask.CompletedAtUtc is not null, "Completed timestamp did not roundtrip.");
             Assert(loadedTask.DueAtUtc is not null, "Due timestamp did not roundtrip.");
             Assert(loaded.WindowPlacement.Left == 123.5, "Window left did not roundtrip.");
@@ -1670,11 +1843,14 @@ internal static class Program
         Assert(!task.Completed, "Created task should be active.");
         Assert(task.Priority == TaskPriority.Normal, "Created task priority should be normal.");
         Assert(!task.InWork, "Created task should not be in work.");
+        Assert(task.Status == TaskStatus.Todo, "Created task status should be Todo.");
         Assert(
             task.CreatedAtUtc == expectedCreatedAtUtc,
             "Created task should have the expected UTC timestamp.");
         Assert(task.CompletedAtUtc is null, "Completed timestamp should be empty.");
         Assert(task.DueAtUtc is null, "Due time should be empty.");
+        Assert(task.RemindAtUtc is null, "Reminder time should be empty.");
+        Assert(task.RemindEveryMinutes is null, "Reminder repeat should be empty.");
     }
 
     private static void Assert(bool condition, string message)

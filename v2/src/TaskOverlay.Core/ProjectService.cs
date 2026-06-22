@@ -42,6 +42,7 @@ public sealed class ProjectService
             CreatedAtUtc = timestamp,
             UpdatedAtUtc = timestamp
         };
+        project.ColorHex = ProjectColorPalette.Resolve(project.Name, project.Id);
         _state.Projects.Add(project);
         return project;
     }

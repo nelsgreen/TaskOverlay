@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -13,6 +14,7 @@ public partial class App : System.Windows.Application
     private OverlayWindow? _overlayWindow;
     private SettingsWindow? _settingsWindow;
     private TreeManagerWindow? _treeManagerWindow;
+    private QuickAddWindow? _quickAddWindow;
     private Forms.NotifyIcon? _trayIcon;
     private Forms.ContextMenuStrip? _trayMenu;
     private Forms.ToolStripMenuItem? _overlayModeMenuItem;
@@ -23,6 +25,7 @@ public partial class App : System.Windows.Application
     private AppStateStore? _stateStore;
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
+    private DispatcherTimer? _reminderTimer;
     private volatile bool _isShuttingDown;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -39,12 +42,18 @@ public partial class App : System.Windows.Application
                 _diagnostics.StateDirectory,
                 (message, exception) => _diagnostics.Log(message, exception));
             _state = _stateStore.Load();
+            if (MvpProjectSeeder.EnsureSeedProjects(_state))
+            {
+                PersistState();
+                _diagnostics.Log("Daily MVP projects seeded.");
+            }
 
             _overlayWindow = CreateOverlayWindow();
             _overlayWindow.Show();
 
             CreateTrayIcon();
             RegisterGlobalHotkeys();
+            StartReminderTimer();
             _diagnostics.Log("Application startup completed.");
         }
         catch (Exception ex)
@@ -64,6 +73,7 @@ public partial class App : System.Windows.Application
         }
 
         DisposeGlobalHotkeys();
+        StopReminderTimer();
         DisposeTrayIcon();
         UnregisterExceptionHandlers();
         _diagnostics?.Log("Application shutdown completed.");
@@ -95,6 +105,11 @@ public partial class App : System.Windows.Application
     private void CreateTrayIcon()
     {
         _trayMenu = new Forms.ContextMenuStrip();
+        _trayMenu.Items.Add(
+            "Quick Add task",
+            null,
+            (_, _) => RunCommand("Tray", "Quick Add task", ShowQuickAdd));
+        _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add(
             "Create tasks from clipboard lines",
             null,
@@ -193,6 +208,11 @@ public partial class App : System.Windows.Application
             "Ctrl+Alt+T",
             Forms.Keys.T,
             GlobalHotkeyAction.ToggleOverlay);
+        RegisterGlobalHotkey(
+            5,
+            "Ctrl+Alt+Q",
+            Forms.Keys.Q,
+            GlobalHotkeyAction.QuickAddTask);
     }
 
     private void RegisterGlobalHotkey(
@@ -244,6 +264,12 @@ public partial class App : System.Windows.Application
                     "Hotkey",
                     "Ctrl+Alt+T - Show/hide overlay",
                     ToggleOverlay);
+                break;
+            case GlobalHotkeyAction.QuickAddTask:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+Q - Quick Add task",
+                    ShowQuickAdd);
                 break;
         }
     }
@@ -317,26 +343,32 @@ public partial class App : System.Windows.Application
     {
         CreateTasksFromClipboard(
             "clipboard lines",
-            text => ClipboardTaskFactory.CreateFromLines(text));
+            (text, projectId) => ClipboardTaskFactory.CreateFromLines(
+                text,
+                projectId: projectId));
     }
 
     private void CreateOneTaskFromClipboard()
     {
         CreateTasksFromClipboard(
             "single task",
-            text => ToTaskList(ClipboardTaskFactory.CreateSingle(text)));
+            (text, projectId) => ToTaskList(
+                ClipboardTaskFactory.CreateSingle(text, projectId: projectId)));
     }
 
     private void CreateOneTaskWithDescription()
     {
         CreateTasksFromClipboard(
             "task with description",
-            text => ToTaskList(ClipboardTaskFactory.CreateWithDescription(text)));
+            (text, projectId) => ToTaskList(
+                ClipboardTaskFactory.CreateWithDescription(
+                    text,
+                    projectId: projectId)));
     }
 
     private void CreateTasksFromClipboard(
         string mode,
-        Func<string, IReadOnlyList<TaskItem>> createTasks)
+        Func<string, Guid?, IReadOnlyList<TaskItem>> createTasks)
     {
         if (_isShuttingDown || _state is null)
         {
@@ -348,7 +380,8 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var tasks = createTasks(clipboardText);
+        var project = TaskCaptureService.ResolvePreferredProject(_state);
+        var tasks = createTasks(clipboardText, project?.Id);
         if (tasks.Count == 0)
         {
             _diagnostics?.Log(
@@ -357,6 +390,7 @@ public partial class App : System.Windows.Application
         }
 
         _state.Tasks.AddRange(tasks);
+        _state.OverlaySettings.LastSelectedProjectId = project?.Id;
         PersistState();
         _treeManagerWindow?.Refresh();
         ShowOverlay();
@@ -457,6 +491,111 @@ public partial class App : System.Windows.Application
             PersistState();
             UpdateOverlayModeUi(mode);
         }
+    }
+
+    private void ShowQuickAdd()
+    {
+        if (_isShuttingDown || _state is null)
+        {
+            return;
+        }
+
+        if (_quickAddWindow is null)
+        {
+            _quickAddWindow = new QuickAddWindow(_state, AddQuickTask);
+            _quickAddWindow.Closed += QuickAddWindow_OnClosed;
+        }
+
+        _quickAddWindow.Show();
+        _quickAddWindow.Activate();
+    }
+
+    private bool AddQuickTask(QuickTaskValues values)
+    {
+        if (_isShuttingDown || _state is null)
+        {
+            return false;
+        }
+
+        var task = TaskCaptureService.CreateQuickTask(_state, values);
+        if (task is null)
+        {
+            return false;
+        }
+
+        PersistState();
+        _treeManagerWindow?.Refresh();
+        ShowOverlay();
+        _overlayWindow?.RevealTasks(new[] { task });
+        _diagnostics?.Log(
+            $"Quick Add task created: id={task.Id}; status={task.Status}; projectId={task.ProjectId}.");
+        return true;
+    }
+
+    private void QuickAddWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (_quickAddWindow is null)
+        {
+            return;
+        }
+
+        _quickAddWindow.Closed -= QuickAddWindow_OnClosed;
+        _quickAddWindow = null;
+    }
+
+    private void StartReminderTimer()
+    {
+        if (_reminderTimer is not null)
+        {
+            return;
+        }
+
+        _reminderTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromSeconds(30)
+        };
+        _reminderTimer.Tick += ReminderTimer_OnTick;
+        _reminderTimer.Start();
+        ProcessDueReminders();
+    }
+
+    private void ReminderTimer_OnTick(object? sender, EventArgs e)
+    {
+        ProcessDueReminders();
+    }
+
+    private void ProcessDueReminders()
+    {
+        if (_isShuttingDown || _state is null)
+        {
+            return;
+        }
+
+        var activated = ReminderService.ProcessDueReminders(_state.Tasks);
+        if (activated.Count == 0)
+        {
+            return;
+        }
+
+        PersistState();
+        RefreshTaskPresentations();
+        ShowOverlay();
+        _overlayWindow?.RevealTasks(activated);
+        _diagnostics?.Log(
+            $"In-app reminders activated: count={activated.Count}; " +
+            $"tasks={string.Join(",", activated.Select(task => task.Id))}.");
+    }
+
+    private void StopReminderTimer()
+    {
+        if (_reminderTimer is null)
+        {
+            return;
+        }
+
+        _reminderTimer.Stop();
+        _reminderTimer.Tick -= ReminderTimer_OnTick;
+        _reminderTimer = null;
     }
 
     private void ShowSettings()
@@ -591,12 +730,15 @@ public partial class App : System.Windows.Application
         _isShuttingDown = true;
         _diagnostics?.Log($"Application shutdown started. Reason: {reason}");
 
+        StopReminderTimer();
         StopOverlayAndPersist();
         DisposeGlobalHotkeys();
         DisposeTrayIcon();
 
         try
         {
+            _quickAddWindow?.Close();
+            _quickAddWindow = null;
             _treeManagerWindow?.Close();
             _treeManagerWindow = null;
             _settingsWindow?.Close();

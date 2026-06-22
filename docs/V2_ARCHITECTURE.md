@@ -24,6 +24,29 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
 No v1 migration, subtask editing, editable hotkey bindings, network access, or
 advanced themes are included.
 
+## Daily attention MVP
+
+`ProjectItem.colorHex` persists a compact project accent. A one-time
+`MvpProjectSeeder` adds KazChess, PLHIV, TaskOverlay, and Personal without
+recreating projects the user later deletes. `TaskItem.status` adds Todo,
+InWork, Waiting, and Done while `StateMigrator` keeps the legacy
+`Completed`/`InWork` fields synchronized for old files and existing services.
+
+Tasks persist `remindAtUtc`, `remindEveryMinutes`, `lastReminderAtUtc`,
+`waitingFor`, and `reminderActive`. `ReminderService` owns presets, due
+activation, repeat advancement, snooze, and Still waiting behavior. A single
+30-second `DispatcherTimer` in `App` processes reminders, saves one batch, and
+refreshes/reveals the overlay. Repeating reminders schedule their next time but
+remain visibly active until snoozed, marked Still waiting, or completed. This
+MVP uses in-app `DUE` highlighting; Windows toast notifications are deferred.
+
+`QuickAddWindow` creates tasks through `TaskCaptureService`; clipboard capture
+uses the same last-project/Personal fallback and starts as Todo with no reminder.
+`TaskDetailsWindow` edits project assignment through `ProjectService`, status,
+waiting-for text, presets, explicit local reminder time, and the two supported
+repeat intervals. The overlay remains compact: project stripe/badge, WAIT/DUE
+badges, title, and active-only description/waiting details.
+
 ## Task interaction model
 
 `TaskInteractionService` owns task mutations independently of WPF. Marker clicks
@@ -135,6 +158,7 @@ Ctrl+Alt+A  Create tasks from clipboard lines
 Ctrl+Alt+S  Create one task from clipboard
 Ctrl+Alt+D  Create one task with description
 Ctrl+Alt+T  Show or hide overlay
+Ctrl+Alt+Q  Open Quick Add task
 ```
 
 Registrations use `MOD_NOREPEAT` so one held keypress does not repeatedly invoke
