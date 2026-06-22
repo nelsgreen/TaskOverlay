@@ -1,5 +1,23 @@
 # Changelog
 
+## v2 Tree Manager editing MVP
+
+### Added
+
+- Added single-card selection and type-aware editing controls to the separate
+  Tree Manager window.
+- Added project, group, task, and subtask creation plus rename and confirmed
+  deletion through `TreeStateService`.
+- Added task active/clear-active and complete/reopen actions with immediate
+  overlay synchronization.
+- Added safe **Move to...** parent selection while retaining Core cycle and
+  parent validation.
+
+### Preserved
+
+- Overlay modes, collapsed handle behavior, compact `OverlayWindow`, JSON
+  recovery, and Go v1 remain unchanged.
+
 ## v2 unified overlay modes and reliable handle dragging
 
 ### Added

@@ -39,6 +39,14 @@ in-work, completion, and deletion. Save persists changes; Cancel discards them.
 Descriptions remain hidden in passive mode and may appear in active mode for
 expanded or in-work tasks.
 
+Open **Tree Manager** from the tray to edit the project workspace without
+changing the compact overlay. Select one card to create groups, tasks, or
+subtasks in context; rename or confirm deletion; set/clear task activity;
+complete/reopen tasks; or move a group/task to another valid parent. With no
+selection, **New project** remains available and **New task** uses the Default
+project (or the first available project). Every successful change is persisted
+and reflected in the overlay immediately.
+
 V2 provides three clipboard intake modes through the tray and fixed global
 hotkeys:
 

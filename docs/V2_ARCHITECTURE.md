@@ -12,6 +12,8 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
 - Marker clicks complete tasks; body clicks apply the configured in-work mode.
 - Row context actions and `TaskDetailsWindow` provide focused task editing
   without turning the overlay into a full management window.
+- `TreeManagerWindow` is the separate project/task structure workspace; it does
+  not embed tree controls into `OverlayWindow`.
 - The tray and fixed global hotkeys provide three clipboard task intake modes
   and reveal created tasks immediately in the overlay.
 - A single persisted overlay mode selects automatic passive tracking, a compact
@@ -21,8 +23,23 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
 - `SettingsWindow` owns the editable SingleTask/MultipleTasks selection.
 - The manifest requests Per-Monitor V2 DPI awareness.
 
-No v1 migration, subtask editing, editable hotkey bindings, network access, or
-advanced themes are included.
+No v1 migration, editable hotkey bindings, network access, or advanced themes
+are included.
+
+## Tree Manager editing
+
+`TreeManagerWindow` uses a single selected `TreeCardViewModel` and enables its
+toolbar from the selected node kind. It supports project and group creation,
+task/subtask creation, rename, confirmed delete, task active/status changes,
+and explicit **Move to...** selection. With no selection, task creation resolves
+the Default project or the first project.
+
+The WPF layer never writes `ProjectId`, `GroupId`, or `ParentTaskId`. All
+mutations call `TreeStateService`, which delegates project safeguards to
+`ProjectService` and performs final move/cycle validation. Move target filtering
+is only a convenience; `MoveNode` remains authoritative. Successful mutations
+follow one synchronization path: persist state, rebuild the Tree Manager
+projection while preserving selection, then refresh overlay task presentation.
 
 ## Task interaction model
 
