@@ -26,6 +26,7 @@ public partial class App : System.Windows.Application
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
     private DispatcherTimer? _reminderTimer;
+    private readonly HashSet<Guid> _revealedDueTaskIds = new();
     private volatile bool _isShuttingDown;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -572,18 +573,30 @@ public partial class App : System.Windows.Application
         }
 
         var activated = ReminderService.ProcessDueReminders(_state.Tasks);
-        if (activated.Count == 0)
+        if (activated.Count > 0)
+        {
+            PersistState();
+            RefreshTaskPresentations();
+        }
+
+        var dueTasks = _state.Tasks
+            .Where(task => ReminderService.IsDue(task))
+            .ToList();
+        var dueIds = dueTasks.Select(task => task.Id).ToHashSet();
+        _revealedDueTaskIds.IntersectWith(dueIds);
+        var tasksToReveal = dueTasks
+            .Where(task => _revealedDueTaskIds.Add(task.Id))
+            .ToList();
+        if (tasksToReveal.Count == 0)
         {
             return;
         }
 
-        PersistState();
-        RefreshTaskPresentations();
         ShowOverlay();
-        _overlayWindow?.RevealTasks(activated);
+        _overlayWindow?.RevealTasks(tasksToReveal);
         _diagnostics?.Log(
-            $"In-app reminders activated: count={activated.Count}; " +
-            $"tasks={string.Join(",", activated.Select(task => task.Id))}.");
+            $"In-app reminders revealed: count={tasksToReveal.Count}; " +
+            $"tasks={string.Join(",", tasksToReveal.Select(task => task.Id))}.");
     }
 
     private void StopReminderTimer()

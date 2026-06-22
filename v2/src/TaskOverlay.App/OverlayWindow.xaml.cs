@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -925,23 +926,6 @@ public partial class OverlayWindow : Window
         return false;
     }
 
-    private void TaskMarker_OnClick(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetTask(sender, out var task))
-        {
-            return;
-        }
-
-        if (!TaskInteractionService.Complete(task))
-        {
-            return;
-        }
-
-        _log($"Task completed: id={task.Id}; title={task.Title}");
-        RefreshTasks();
-        _saveState();
-    }
-
     private void TaskBody_OnClick(object sender, RoutedEventArgs e)
     {
         if (!TryGetTask(sender, out var task))
@@ -996,31 +980,137 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        if (contextMenu.Items[1] is MenuItem descriptionItem)
-        {
-            descriptionItem.Header =
-                row.Task.DescriptionExpanded
-                    ? "Hide description"
-                    : "Show description";
-            descriptionItem.IsEnabled =
-                !string.IsNullOrWhiteSpace(row.Task.Description);
-        }
-
-        if (contextMenu.Items[2] is MenuItem inWorkItem)
-        {
-            inWorkItem.Header = row.Task.Status == TaskStatus.InWork
-                ? "Clear in work"
-                : "Mark as in work";
-            inWorkItem.IsEnabled = row.Task.Status != TaskStatus.Done;
-        }
-
-        if (contextMenu.Items[6] is MenuItem waitingItem)
-        {
-            waitingItem.Header = row.Task.Status == TaskStatus.Waiting
-                ? "Still waiting"
-                : "Mark still waiting";
-        }
+        PopulateTaskContextMenu(contextMenu, row);
     }
+
+    private void PopulateTaskContextMenu(
+        ContextMenu contextMenu,
+        TaskRowViewModel row)
+    {
+        contextMenu.Items.Clear();
+        contextMenu.DataContext = row;
+        contextMenu.Items.Add(CreateTaskMenuItem(
+            "Open details",
+            EditTaskMenuItem_OnClick,
+            row));
+
+        var descriptionItem = CreateTaskMenuItem(
+            row.Task.DescriptionExpanded ? "Hide description" : "Show description",
+            ToggleDescriptionMenuItem_OnClick,
+            row);
+        descriptionItem.IsEnabled = !string.IsNullOrWhiteSpace(row.Task.Description);
+        contextMenu.Items.Add(descriptionItem);
+
+        var statusMenu = new MenuItem { Header = "Change status", DataContext = row };
+        foreach (var option in TaskAttentionUiOptions.EditableStatuses)
+        {
+            statusMenu.Items.Add(CreateTaskMenuItem(
+                option.Label,
+                SetStatusMenuItem_OnClick,
+                row,
+                option.Value,
+                isChecked: row.Task.Status == option.Value));
+        }
+
+        contextMenu.Items.Add(statusMenu);
+
+        var projectMenu = new MenuItem { Header = "Change project", DataContext = row };
+        foreach (var project in OrderedProjects())
+        {
+            projectMenu.Items.Add(CreateTaskMenuItem(
+                project.Name,
+                ChangeProjectMenuItem_OnClick,
+                row,
+                project.Id,
+                isChecked: row.Task.ProjectId == project.Id));
+        }
+
+        contextMenu.Items.Add(projectMenu);
+
+        var reminderMenu = new MenuItem { Header = "Reminder", DataContext = row };
+        AddReminderPresetMenuItem(reminderMenu, row, "In 30m", ReminderPreset.In30Minutes);
+        AddReminderPresetMenuItem(reminderMenu, row, "In 1h", ReminderPreset.In1Hour);
+        AddReminderPresetMenuItem(reminderMenu, row, "In 2h", ReminderPreset.In2Hours);
+        AddReminderPresetMenuItem(reminderMenu, row, "Tomorrow morning", ReminderPreset.TomorrowMorning);
+        reminderMenu.Items.Add(new Separator());
+        AddReminderPresetMenuItem(reminderMenu, row, "Repeat every 2h", ReminderPreset.RepeatEvery2Hours);
+        AddReminderPresetMenuItem(reminderMenu, row, "Repeat daily", ReminderPreset.RepeatDaily);
+        reminderMenu.Items.Add(new Separator());
+        reminderMenu.Items.Add(CreateTaskMenuItem(
+            "Clear reminder",
+            ClearReminderMenuItem_OnClick,
+            row));
+        contextMenu.Items.Add(reminderMenu);
+
+        if (row.IsReminderDue)
+        {
+            contextMenu.Items.Add(new Separator());
+            contextMenu.Items.Add(CreateTaskMenuItem(
+                "Snooze 30m",
+                Snooze30MenuItem_OnClick,
+                row));
+            contextMenu.Items.Add(CreateTaskMenuItem(
+                "Snooze 1h",
+                Snooze1HourMenuItem_OnClick,
+                row));
+        }
+
+        if (row.IsWaiting || row.IsReminderDue)
+        {
+            contextMenu.Items.Add(CreateTaskMenuItem(
+                "Still waiting",
+                StillWaitingMenuItem_OnClick,
+                row));
+        }
+
+        contextMenu.Items.Add(new Separator());
+        contextMenu.Items.Add(CreateTaskMenuItem(
+            "Mark done",
+            CompleteTaskMenuItem_OnClick,
+            row));
+        contextMenu.Items.Add(CreateTaskMenuItem(
+            "Delete",
+            DeleteTaskMenuItem_OnClick,
+            row));
+    }
+
+    private static MenuItem CreateTaskMenuItem(
+        string header,
+        RoutedEventHandler clickHandler,
+        TaskRowViewModel row,
+        object? tag = null,
+        bool isChecked = false)
+    {
+        var item = new MenuItem
+        {
+            Header = header,
+            DataContext = row,
+            Tag = tag,
+            IsCheckable = tag is TaskStatus || tag is Guid,
+            IsChecked = isChecked
+        };
+        item.Click += clickHandler;
+        return item;
+    }
+
+    private void AddReminderPresetMenuItem(
+        ItemsControl parent,
+        TaskRowViewModel row,
+        string header,
+        ReminderPreset preset)
+    {
+        parent.Items.Add(CreateTaskMenuItem(
+            header,
+            ReminderPresetMenuItem_OnClick,
+            row,
+            preset));
+    }
+
+    private IEnumerable<ProjectItem> OrderedProjects() =>
+        _state.Projects
+            .OrderBy(project => project.SortOrder)
+            .ThenBy(project => project.Name)
+            .ThenBy(project => project.Id);
 
     private void TaskContextMenu_OnOpened(object sender, RoutedEventArgs e)
     {
@@ -1054,16 +1144,112 @@ public partial class OverlayWindow : Window
         _saveState();
     }
 
-    private void ToggleInWorkMenuItem_OnClick(object sender, RoutedEventArgs e)
+    private void SetStatusMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
-        if (!TryGetMenuTask(sender, out var task))
+        if (!TryGetMenuTask(sender, out var task) ||
+            sender is not MenuItem { Tag: TaskStatus status } ||
+            !TaskInteractionService.SetStatus(_state, task, status))
         {
             return;
         }
 
-        TaskInteractionService.SetInWork(_state, task, task.Status != TaskStatus.InWork);
         RefreshTasks();
         _saveState();
+        _log($"Task status changed: id={task.Id}; status={task.Status}.");
+    }
+
+    private void ProjectBadge_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button
+            {
+                DataContext: TaskRowViewModel row
+            } button)
+        {
+            return;
+        }
+
+        var menu = new ContextMenu
+        {
+            DataContext = row,
+            PlacementTarget = button,
+            Placement = PlacementMode.Bottom
+        };
+        menu.Opened += TaskContextMenu_OnOpened;
+        menu.Closed += TaskContextMenu_OnClosed;
+        foreach (var project in OrderedProjects())
+        {
+            menu.Items.Add(CreateTaskMenuItem(
+                project.Name,
+                ChangeProjectMenuItem_OnClick,
+                row,
+                project.Id,
+                isChecked: row.Task.ProjectId == project.Id));
+        }
+
+        button.ContextMenu = menu;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void ChangeProjectMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetMenuTask(sender, out var task) ||
+            sender is not MenuItem { Tag: Guid projectId } ||
+            task.ProjectId == projectId ||
+            !new ProjectService(_state).AssignTaskToProject(task.Id, projectId))
+        {
+            return;
+        }
+
+        RefreshTasks();
+        _saveState();
+        _log($"Task project changed: id={task.Id}; projectId={projectId}.");
+    }
+
+    private void DueBadge_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button
+            {
+                ContextMenu: ContextMenu contextMenu
+            } button)
+        {
+            return;
+        }
+
+        contextMenu.PlacementTarget = button;
+        contextMenu.Placement = PlacementMode.Bottom;
+        contextMenu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void ReminderPresetMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetMenuTask(sender, out var task) ||
+            sender is not MenuItem { Tag: ReminderPreset preset } ||
+            !ReminderService.ApplyPreset(task, preset))
+        {
+            return;
+        }
+
+        CommitReminderChange(task, $"preset={preset}");
+    }
+
+    private void ClearReminderMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetMenuTask(sender, out var task) ||
+            !ReminderService.ApplyPreset(task, ReminderPreset.None))
+        {
+            return;
+        }
+
+        CommitReminderChange(task, "cleared");
+    }
+
+    private void CommitReminderChange(TaskItem task, string action)
+    {
+        RefreshTasks();
+        _saveState();
+        _log($"Task reminder changed: id={task.Id}; action={action}.");
     }
 
     private void Snooze30MenuItem_OnClick(object sender, RoutedEventArgs e)
@@ -1595,7 +1781,8 @@ public partial class OverlayWindow : Window
 
     private bool CanCollapse()
     {
-        return OverlayCollapseGuard.CanCollapse(
+        return !_state.Tasks.Any(task => ReminderService.IsDue(task)) &&
+               OverlayCollapseGuard.CanCollapse(
             new OverlayInteractionState(
                 OverlayMode: _state.OverlaySettings.OverlayMode,
                 TaskDetailsOpen: _taskDetailsWindow?.IsVisible == true,
