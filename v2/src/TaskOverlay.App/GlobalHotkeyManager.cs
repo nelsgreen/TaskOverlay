@@ -11,6 +11,7 @@ internal enum GlobalHotkeyAction
     CreateTasksFromLines,
     CreateSingleTask,
     CreateTaskWithDescription,
+    QuickAddTask,
     ToggleOverlay
 }
 

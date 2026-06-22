@@ -68,6 +68,11 @@
                            FontFamily="Consolas"
                            FontSize="14"
                            Text="Ctrl+Alt+T   Show or hide overlay" />
+                <TextBlock Margin="0,7,0,0"
+                           Foreground="#FFD4D4D8"
+                           FontFamily="Consolas"
+                           FontSize="14"
+                           Text="Ctrl+Alt+Q   Quick Add task" />
                 <TextBlock Margin="0,14,0,0"
                            Foreground="#FFA1A1AA"
                            FontSize="12"

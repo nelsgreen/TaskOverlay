@@ -43,6 +43,7 @@ public sealed class ProjectItem
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
+    public string ColorHex { get; set; } = string.Empty;
     public int SortOrder { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
@@ -53,6 +54,7 @@ public sealed class ProjectItem
         return new ProjectItem
         {
             Name = DefaultName,
+            ColorHex = ProjectColorPalette.Default,
             CreatedAtUtc = timestamp,
             UpdatedAtUtc = timestamp
         };
@@ -77,10 +79,31 @@ public sealed class TaskItem
     public bool Completed { get; set; }
     public TaskPriority Priority { get; set; } = TaskPriority.Normal;
     public bool InWork { get; set; }
+
+    [JsonPropertyName("status")]
+    public TaskStatus? StoredStatus { get; set; }
+
+    [JsonIgnore]
+    public TaskStatus Status
+    {
+        get => StoredStatus ??
+               (Completed
+                   ? TaskStatus.Done
+                   : InWork
+                       ? TaskStatus.InWork
+                       : TaskStatus.Todo);
+        set => StoredStatus = value;
+    }
+
     public bool DescriptionExpanded { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAtUtc { get; set; }
     public DateTimeOffset? DueAtUtc { get; set; }
+    public DateTimeOffset? RemindAtUtc { get; set; }
+    public int? RemindEveryMinutes { get; set; }
+    public DateTimeOffset? LastReminderAtUtc { get; set; }
+    public string WaitingFor { get; set; } = string.Empty;
+    public bool ReminderActive { get; set; }
     public Guid? ProjectId { get; set; }
     public Guid? GroupId { get; set; }
     public Guid? ParentTaskId { get; set; }
@@ -97,6 +120,7 @@ public sealed class TaskItem
         {
             Id = Guid.NewGuid(),
             Title = title,
+            Status = TaskStatus.Todo,
             CreatedAtUtc = timestamp,
             UpdatedAtUtc = timestamp,
             ProjectId = projectId
@@ -110,6 +134,26 @@ public enum TaskPriority
     Normal,
     High,
     Critical
+}
+
+public enum TaskStatus
+{
+    Todo,
+    InWork,
+    Waiting,
+    Done
+}
+
+public enum ReminderPreset
+{
+    KeepCurrent,
+    None,
+    In30Minutes,
+    In1Hour,
+    In2Hours,
+    TomorrowMorning,
+    RepeatEvery2Hours,
+    RepeatDaily
 }
 
 public enum InWorkMode
@@ -148,6 +192,8 @@ public sealed class OverlaySettings
     public bool PinnedActiveMode { get; set; }
 
     public InWorkMode InWorkMode { get; set; } = InWorkMode.MultipleTasks;
+    public Guid? LastSelectedProjectId { get; set; }
+    public bool MvpProjectsSeeded { get; set; }
 
     public void NormalizeOverlayMode()
     {

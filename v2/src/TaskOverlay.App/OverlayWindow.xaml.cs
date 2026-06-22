@@ -1008,8 +1008,17 @@ public partial class OverlayWindow : Window
 
         if (contextMenu.Items[2] is MenuItem inWorkItem)
         {
-            inWorkItem.Header = "Mark as in work";
-            inWorkItem.IsEnabled = !row.Task.InWork;
+            inWorkItem.Header = row.Task.Status == TaskStatus.InWork
+                ? "Clear in work"
+                : "Mark as in work";
+            inWorkItem.IsEnabled = row.Task.Status != TaskStatus.Done;
+        }
+
+        if (contextMenu.Items[6] is MenuItem waitingItem)
+        {
+            waitingItem.Header = row.Task.Status == TaskStatus.Waiting
+                ? "Still waiting"
+                : "Mark still waiting";
         }
     }
 
@@ -1052,9 +1061,45 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        TaskInteractionService.SetInWork(_state, task, true);
+        TaskInteractionService.SetInWork(_state, task, task.Status != TaskStatus.InWork);
         RefreshTasks();
         _saveState();
+    }
+
+    private void Snooze30MenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        SnoozeTask(sender, 30);
+    }
+
+    private void Snooze1HourMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        SnoozeTask(sender, 60);
+    }
+
+    private void SnoozeTask(object sender, int minutes)
+    {
+        if (!TryGetMenuTask(sender, out var task) ||
+            !ReminderService.Snooze(task, minutes))
+        {
+            return;
+        }
+
+        RefreshTasks();
+        _saveState();
+        _log($"Task reminder snoozed: id={task.Id}; minutes={minutes}.");
+    }
+
+    private void StillWaitingMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetMenuTask(sender, out var task) ||
+            !ReminderService.MarkStillWaiting(task))
+        {
+            return;
+        }
+
+        RefreshTasks();
+        _saveState();
+        _log($"Task remains waiting: id={task.Id}; nextReminder={task.RemindAtUtc:O}.");
     }
 
     private void CompleteTaskMenuItem_OnClick(object sender, RoutedEventArgs e)
@@ -1117,6 +1162,7 @@ public partial class OverlayWindow : Window
         StopModeTimers();
         SetActiveMode(true);
         _taskDetailsWindow = new TaskDetailsWindow(
+            _state,
             task,
             SaveTaskEdits,
             DeleteTask,
@@ -1145,7 +1191,9 @@ public partial class OverlayWindow : Window
         TaskInteractionService.Update(_state, task, values);
         RefreshTasks();
         _saveState();
-        _log($"Task edited: id={task.Id}; completed={task.Completed}; inWork={task.InWork}");
+        _log(
+            $"Task edited: id={task.Id}; status={task.Status}; " +
+            $"projectId={task.ProjectId}; remindAt={task.RemindAtUtc:O}");
     }
 
     private void DeleteTask(TaskItem task)
@@ -1180,9 +1228,15 @@ public partial class OverlayWindow : Window
         }
 
         _activeTasks.Clear();
-        foreach (var task in _state.Tasks.Where(task => !task.Completed))
+        var now = DateTimeOffset.UtcNow;
+        foreach (var task in _state.Tasks
+                     .Where(task => task.Status != TaskStatus.Done)
+                     .OrderByDescending(task => ReminderService.IsDue(task, now))
+                     .ThenByDescending(task => task.Status == TaskStatus.InWork)
+                     .ThenBy(task => task.SortOrder)
+                     .ThenBy(task => task.CreatedAtUtc))
         {
-            _activeTasks.Add(new TaskRowViewModel(task, _isActiveMode));
+            _activeTasks.Add(new TaskRowViewModel(_state, task, _isActiveMode, now));
         }
     }
 

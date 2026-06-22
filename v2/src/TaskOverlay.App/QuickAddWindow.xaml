@@ -1,12 +1,12 @@
-<Window x:Class="TaskOverlay.App.TaskDetailsWindow"
+<Window x:Class="TaskOverlay.App.QuickAddWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Task details"
-        Width="620"
-        Height="760"
-        MinWidth="500"
-        MinHeight="620"
-        WindowStartupLocation="CenterOwner"
+        Title="Quick Add task"
+        Width="560"
+        Height="650"
+        MinWidth="460"
+        MinHeight="560"
+        WindowStartupLocation="CenterScreen"
         ShowInTaskbar="False">
     <Grid Background="#FF181B22">
         <Grid Margin="28">
@@ -25,7 +25,7 @@
                        Foreground="#FFF4F4F5"
                        FontSize="24"
                        FontWeight="SemiBold"
-                       Text="Task details" />
+                       Text="Quick Add task" />
 
             <StackPanel Grid.Row="1" Margin="0,20,0,0">
                 <TextBlock Foreground="#FFD4D4D8" Text="Title" />
@@ -60,6 +60,14 @@
             </Grid>
 
             <StackPanel Grid.Row="3" Margin="0,16,0,0">
+                <TextBlock Foreground="#FFD4D4D8" Text="Reminder" />
+                <ComboBox x:Name="ReminderComboBox"
+                          Margin="0,7,0,0"
+                          Padding="7,5"
+                          DisplayMemberPath="Label" />
+            </StackPanel>
+
+            <StackPanel Grid.Row="4" Margin="0,16,0,0">
                 <TextBlock Foreground="#FFD4D4D8" Text="Waiting for" />
                 <TextBox x:Name="WaitingForTextBox"
                          Margin="0,7,0,0"
@@ -67,35 +75,11 @@
                          MaxLength="300" />
             </StackPanel>
 
-            <StackPanel Grid.Row="4" Margin="0,16,0,0">
-                <TextBlock Foreground="#FFD4D4D8" Text="Reminder preset" />
-                <ComboBox x:Name="ReminderPresetComboBox"
-                          Margin="0,7,0,0"
-                          Padding="7,5"
-                          DisplayMemberPath="Label" />
-            </StackPanel>
-
-            <Grid Grid.Row="5" Margin="0,16,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="18" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Foreground="#FFD4D4D8"
-                               Text="Remind at (local yyyy-MM-dd HH:mm)" />
-                    <TextBox x:Name="RemindAtTextBox"
-                             Margin="0,7,0,0"
-                             Padding="8" />
-                </StackPanel>
-                <StackPanel Grid.Column="2">
-                    <TextBlock Foreground="#FFD4D4D8" Text="Repeat" />
-                    <ComboBox x:Name="RepeatComboBox"
-                              Margin="0,7,0,0"
-                              Padding="7,5"
-                              DisplayMemberPath="Label" />
-                </StackPanel>
-            </Grid>
+            <TextBlock x:Name="ValidationText"
+                       Grid.Row="5"
+                       Margin="0,10,0,0"
+                       Foreground="#FFF87171"
+                       FontSize="12" />
 
             <StackPanel Grid.Row="6" Margin="0,16,0,0">
                 <TextBlock Foreground="#FFD4D4D8" Text="Description" />
@@ -107,28 +91,22 @@
                          VerticalScrollBarVisibility="Auto" />
             </StackPanel>
 
-            <DockPanel Grid.Row="7" Margin="0,24,0,0">
-                <Button DockPanel.Dock="Left"
-                        MinWidth="88"
+            <StackPanel Grid.Row="7"
+                        Margin="0,24,0,0"
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal">
+                <Button MinWidth="88"
+                        Margin="0,0,10,0"
                         Padding="12,7"
-                        Foreground="#FFF4F4F5"
-                        Background="#FF7F1D1D"
-                        BorderBrush="#FF991B1B"
-                        Content="Delete"
-                        Click="DeleteButton_OnClick" />
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button MinWidth="88"
-                            Margin="0,0,10,0"
-                            Padding="12,7"
-                            Content="Cancel"
-                            Click="CancelButton_OnClick" />
-                    <Button MinWidth="88"
-                            Padding="12,7"
-                            Content="Save"
-                            IsDefault="True"
-                            Click="SaveButton_OnClick" />
-                </StackPanel>
-            </DockPanel>
+                        Content="Cancel"
+                        IsCancel="True"
+                        Click="CancelButton_OnClick" />
+                <Button MinWidth="88"
+                        Padding="12,7"
+                        Content="Add"
+                        IsDefault="True"
+                        Click="AddButton_OnClick" />
+            </StackPanel>
         </Grid>
     </Grid>
 </Window>

@@ -110,6 +110,16 @@
                                                     <Setter Property="Background"
                                                             Value="#3329B6F6" />
                                                 </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsWaiting}"
+                                                             Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="#334B2E16" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsReminderDue}"
+                                                             Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="#445B1D1D" />
+                                                </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
                                     </Border.Style>
@@ -124,7 +134,14 @@
                                             <MenuItem Header="Mark as in work"
                                                       Click="ToggleInWorkMenuItem_OnClick" />
                                             <Separator />
-                                            <MenuItem Header="Mark completed"
+                                            <MenuItem Header="Snooze 30m"
+                                                      Click="Snooze30MenuItem_OnClick" />
+                                            <MenuItem Header="Snooze 1h"
+                                                      Click="Snooze1HourMenuItem_OnClick" />
+                                            <MenuItem Header="Still waiting"
+                                                      Click="StillWaitingMenuItem_OnClick" />
+                                            <Separator />
+                                            <MenuItem Header="Done"
                                                       Click="CompleteTaskMenuItem_OnClick" />
                                             <MenuItem Header="Delete"
                                                       Click="DeleteTaskMenuItem_OnClick" />
@@ -133,10 +150,17 @@
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
 
-                                        <Button Grid.Column="0"
+                                        <Border Grid.Column="0"
+                                                Width="4"
+                                                Margin="0,2,6,2"
+                                                Background="{Binding ProjectColorHex}"
+                                                CornerRadius="2" />
+
+                                        <Button Grid.Column="1"
                                                 Width="28"
                                                 MinHeight="30"
                                                 Margin="0,0,4,0"
@@ -148,12 +172,12 @@
                                                 ToolTip="Mark completed"
                                                 Click="TaskMarker_OnClick">
                                             <TextBlock VerticalAlignment="Top"
-                                                       Foreground="#FFFFE878"
+                                                       Foreground="{Binding ProjectColorHex}"
                                                        FontSize="16"
                                                        Text="&#x25CF;" />
                                         </Button>
 
-                                        <Button Grid.Column="1"
+                                        <Button Grid.Column="2"
                                                 Padding="0,2"
                                                 HorizontalContentAlignment="Stretch"
                                                 Background="Transparent"
@@ -170,6 +194,56 @@
                                                 </ControlTemplate>
                                             </Button.Template>
                                             <StackPanel>
+                                                <WrapPanel Margin="0,0,0,3">
+                                                    <Border Margin="0,0,5,0"
+                                                            Padding="5,1"
+                                                            Background="{Binding ProjectColorHex}"
+                                                            CornerRadius="3">
+                                                        <TextBlock Foreground="#FFFFFFFF"
+                                                                   FontSize="9"
+                                                                   FontWeight="SemiBold"
+                                                                   MaxWidth="110"
+                                                                   Text="{Binding ProjectName}"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </Border>
+                                                    <Border Margin="0,0,5,0"
+                                                            Padding="5,1"
+                                                            Background="#FFB45309"
+                                                            CornerRadius="3">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsWaiting}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <TextBlock Foreground="#FFFFFFFF"
+                                                                   FontSize="9"
+                                                                   FontWeight="Bold"
+                                                                   Text="WAIT" />
+                                                    </Border>
+                                                    <Border Padding="5,1"
+                                                            Background="#FFDC2626"
+                                                            CornerRadius="3">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsReminderDue}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <TextBlock Foreground="#FFFFFFFF"
+                                                                   FontSize="9"
+                                                                   FontWeight="Bold"
+                                                                   Text="DUE" />
+                                                    </Border>
+                                                </WrapPanel>
                                                 <TextBlock VerticalAlignment="Center"
                                                            Foreground="#FFFFE878"
                                                            FontSize="20"
@@ -192,6 +266,22 @@
                                                                              Value="True">
                                                                     <Setter Property="Visibility"
                                                                             Value="Visible" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <TextBlock Margin="0,3,0,1"
+                                                           Foreground="#FFFBBF24"
+                                                           FontSize="12"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding WaitingForLabel}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding ShowWaitingFor}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Visible" />
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
