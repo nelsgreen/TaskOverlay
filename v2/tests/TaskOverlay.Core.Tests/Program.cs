@@ -47,6 +47,10 @@ internal static class Program
             ("project color persistence", ProjectColorPersistence),
             ("reminder scheduling", ReminderScheduling),
             ("reminder snooze and still waiting", ReminderSnoozeAndStillWaiting),
+            ("due attention acknowledgement", DueAttentionAcknowledgement),
+            ("due notification snooze persistence", DueNotificationSnoozePersistence),
+            ("due attention ordering", DueAttentionOrdering),
+            ("done and clear remove due attention", DoneAndClearRemoveDueAttention),
             ("quick task capture", QuickTaskCapture),
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
@@ -1163,6 +1167,113 @@ internal static class Program
         Assert(task.RemindAtUtc == now.AddHours(2), "Still waiting should default to a two-hour follow-up.");
     }
 
+    private static void DueAttentionAcknowledgement()
+    {
+        var task = TaskItem.Create("Recurring follow-up");
+        var start = DateTimeOffset.Parse("2026-06-22T08:00:00Z");
+        ReminderService.ApplyPreset(
+            task,
+            ReminderPreset.RepeatEvery2Hours,
+            start,
+            TimeZoneInfo.Utc);
+        ReminderService.ProcessDueReminders(new[] { task }, start.AddHours(2));
+
+        Assert(
+            ReminderAttentionService.ShouldShowNotification(task, start.AddHours(2)),
+            "A new due occurrence should show attention.");
+        Assert(
+            ReminderAttentionService.Acknowledge(task, start.AddHours(2).AddMinutes(1)),
+            "The current occurrence should be acknowledged.");
+        Assert(
+            !ReminderAttentionService.ShouldShowNotification(task, start.AddHours(2).AddMinutes(1)),
+            "Acknowledgement should hide only the current occurrence.");
+        Assert(
+            task.RemindAtUtc == start.AddHours(4),
+            "Acknowledgement must preserve the reminder schedule.");
+
+        ReminderService.ProcessDueReminders(new[] { task }, start.AddHours(4));
+        Assert(
+            ReminderAttentionService.ShouldShowNotification(task, start.AddHours(4)),
+            "A later occurrence should notify again.");
+    }
+
+    private static void DueNotificationSnoozePersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-06-22T10:00:00Z");
+            var state = AppState.CreateDefault(now);
+            state.Tasks.Clear();
+            var task = TaskItem.Create("Persist notification snooze", now, state.Projects[0].Id);
+            task.RemindAtUtc = now;
+            state.Tasks.Add(task);
+            ReminderService.ProcessDueReminders(state.Tasks, now);
+            var reminderSchedule = task.RemindAtUtc;
+
+            Assert(
+                ReminderAttentionService.SnoozeNotification(task, 10, now),
+                "Notification snooze should succeed for a due task.");
+            Assert(
+                task.RemindAtUtc == reminderSchedule,
+                "Notification snooze must not change the reminder schedule.");
+
+            var store = new AppStateStore(directory);
+            store.Save(state);
+            var loaded = new AppStateStore(directory).Load().Tasks.Single();
+
+            Assert(
+                loaded.ReminderSnoozedUntilUtc == now.AddMinutes(10),
+                "Notification snooze should survive restart.");
+            Assert(
+                !ReminderAttentionService.ShouldShowNotification(loaded, now.AddMinutes(5)),
+                "The notification should remain hidden during the snooze.");
+            Assert(
+                ReminderAttentionService.ShouldShowNotification(loaded, now.AddMinutes(11)),
+                "The notification should return after the snooze expires.");
+        });
+    }
+
+    private static void DueAttentionOrdering()
+    {
+        var now = DateTimeOffset.Parse("2026-06-22T12:00:00Z");
+        var normal = TaskItem.Create("Normal", now.AddMinutes(-3));
+        normal.SortOrder = 0;
+        var focused = TaskItem.Create("Focused", now.AddMinutes(-2));
+        focused.Status = TaskStatus.InWork;
+        focused.InWork = true;
+        focused.SortOrder = 1;
+        var due = TaskItem.Create("Due", now.AddMinutes(-1));
+        due.RemindAtUtc = now;
+        due.SortOrder = 2;
+
+        var ordered = ReminderAttentionService
+            .OrderForOverlay(new[] { normal, focused, due }, now)
+            .ToList();
+
+        Assert(ordered[0].Id == due.Id, "DUE tasks should remain first in the overlay.");
+        Assert(ordered[1].Id == focused.Id, "Focused tasks should remain ahead of normal tasks.");
+    }
+
+    private static void DoneAndClearRemoveDueAttention()
+    {
+        var now = DateTimeOffset.Parse("2026-06-22T14:00:00Z");
+        var completed = TaskItem.Create("Complete me", now);
+        completed.RemindAtUtc = now;
+        ReminderService.ProcessDueReminders(new[] { completed }, now);
+        TaskInteractionService.Complete(completed, now);
+        Assert(
+            !ReminderAttentionService.ShouldShowNotification(completed, now),
+            "Completing a task should remove its due notification.");
+
+        var cleared = TaskItem.Create("Clear me", now);
+        cleared.RemindAtUtc = now;
+        ReminderService.ProcessDueReminders(new[] { cleared }, now);
+        ReminderService.ApplyPreset(cleared, ReminderPreset.None, now);
+        Assert(
+            !ReminderAttentionService.ShouldShowNotification(cleared, now),
+            "Clearing a reminder should remove its due notification.");
+    }
+
     private static void QuickTaskCapture()
     {
         var state = AppState.CreateDefault();
@@ -1371,6 +1482,17 @@ internal static class Program
         Assert(
             OverlayCollapseGuard.CanCollapse(idle),
             "Idle overlay should be allowed to collapse.");
+
+        var dueTask = TaskItem.Create("Due while idle");
+        dueTask.ReminderActive = true;
+        Assert(ReminderService.IsDue(dueTask), "Test task should be due.");
+        Assert(
+            OverlayCollapseGuard.CanCollapse(idle),
+            "A DUE task must not block AutoQuestTracker collapse.");
+        Assert(
+            OverlayCollapseGuard.CanCollapse(
+                idle with { OverlayMode = OverlayMode.CollapsedHandle }),
+            "A DUE task must not block CollapsedHandle collapse.");
 
         var blockers = new[]
         {

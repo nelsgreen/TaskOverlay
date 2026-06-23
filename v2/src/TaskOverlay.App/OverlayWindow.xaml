@@ -245,6 +245,7 @@
                                                             <ContextMenu Opened="TaskContextMenu_OnOpened"
                                                                          Closed="TaskContextMenu_OnClosed"
                                                                          DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                                <MenuItem Header="Acknowledge" Click="AcknowledgeReminderMenuItem_OnClick" />
                                                                 <MenuItem Header="Snooze 30m" Click="Snooze30MenuItem_OnClick" />
                                                                 <MenuItem Header="Snooze 1h" Click="Snooze1HourMenuItem_OnClick" />
                                                                 <MenuItem Header="Still waiting" Click="StillWaitingMenuItem_OnClick" />

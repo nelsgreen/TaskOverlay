@@ -1046,6 +1046,10 @@ public partial class OverlayWindow : Window
         {
             contextMenu.Items.Add(new Separator());
             contextMenu.Items.Add(CreateTaskMenuItem(
+                "Acknowledge",
+                AcknowledgeReminderMenuItem_OnClick,
+                row));
+            contextMenu.Items.Add(CreateTaskMenuItem(
                 "Snooze 30m",
                 Snooze30MenuItem_OnClick,
                 row));
@@ -1265,14 +1269,27 @@ public partial class OverlayWindow : Window
     private void SnoozeTask(object sender, int minutes)
     {
         if (!TryGetMenuTask(sender, out var task) ||
-            !ReminderService.Snooze(task, minutes))
+            !ReminderAttentionService.SnoozeNotification(task, minutes))
         {
             return;
         }
 
         RefreshTasks();
         _saveState();
-        _log($"Task reminder snoozed: id={task.Id}; minutes={minutes}.");
+        _log($"Task due notification snoozed: id={task.Id}; minutes={minutes}.");
+    }
+
+    private void AcknowledgeReminderMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetMenuTask(sender, out var task) ||
+            !ReminderAttentionService.Acknowledge(task))
+        {
+            return;
+        }
+
+        RefreshTasks();
+        _saveState();
+        _log($"Task due notification acknowledged: id={task.Id}.");
     }
 
     private void StillWaitingMenuItem_OnClick(object sender, RoutedEventArgs e)
@@ -1415,12 +1432,9 @@ public partial class OverlayWindow : Window
 
         _activeTasks.Clear();
         var now = DateTimeOffset.UtcNow;
-        foreach (var task in _state.Tasks
-                     .Where(task => task.Status != TaskStatus.Done)
-                     .OrderByDescending(task => ReminderService.IsDue(task, now))
-                     .ThenByDescending(task => task.Status == TaskStatus.InWork)
-                     .ThenBy(task => task.SortOrder)
-                     .ThenBy(task => task.CreatedAtUtc))
+        foreach (var task in ReminderAttentionService.OrderForOverlay(
+                     _state.Tasks,
+                     now))
         {
             _activeTasks.Add(new TaskRowViewModel(_state, task, _isActiveMode, now));
         }
@@ -1781,8 +1795,7 @@ public partial class OverlayWindow : Window
 
     private bool CanCollapse()
     {
-        return !_state.Tasks.Any(task => ReminderService.IsDue(task)) &&
-               OverlayCollapseGuard.CanCollapse(
+        return OverlayCollapseGuard.CanCollapse(
             new OverlayInteractionState(
                 OverlayMode: _state.OverlaySettings.OverlayMode,
                 TaskDetailsOpen: _taskDetailsWindow?.IsVisible == true,

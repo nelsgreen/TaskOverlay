@@ -15,6 +15,7 @@ public partial class App : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private TreeManagerWindow? _treeManagerWindow;
     private QuickAddWindow? _quickAddWindow;
+    private DueAttentionWindow? _dueAttentionWindow;
     private Forms.NotifyIcon? _trayIcon;
     private Forms.ContextMenuStrip? _trayMenu;
     private Forms.ToolStripMenuItem? _overlayModeMenuItem;
@@ -26,7 +27,6 @@ public partial class App : System.Windows.Application
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
     private DispatcherTimer? _reminderTimer;
-    private readonly HashSet<Guid> _revealedDueTaskIds = new();
     private volatile bool _isShuttingDown;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -75,6 +75,16 @@ public partial class App : System.Windows.Application
 
         DisposeGlobalHotkeys();
         StopReminderTimer();
+        try
+        {
+            _dueAttentionWindow?.CloseForExit();
+            _dueAttentionWindow = null;
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("Due attention window shutdown failed.", ex);
+        }
+
         DisposeTrayIcon();
         UnregisterExceptionHandlers();
         _diagnostics?.Log("Application shutdown completed.");
@@ -577,26 +587,14 @@ public partial class App : System.Windows.Application
         {
             PersistState();
             RefreshTaskPresentations();
+            _diagnostics?.Log(
+                $"In-app reminders activated: count={activated.Count}; " +
+                $"tasks={string.Join(",", activated.Select(task => task.Id))}.");
         }
-
-        var dueTasks = _state.Tasks
-            .Where(task => ReminderService.IsDue(task))
-            .ToList();
-        var dueIds = dueTasks.Select(task => task.Id).ToHashSet();
-        _revealedDueTaskIds.IntersectWith(dueIds);
-        var tasksToReveal = dueTasks
-            .Where(task => _revealedDueTaskIds.Add(task.Id))
-            .ToList();
-        if (tasksToReveal.Count == 0)
+        else
         {
-            return;
+            RefreshDueAttentionSurface();
         }
-
-        ShowOverlay();
-        _overlayWindow?.RevealTasks(tasksToReveal);
-        _diagnostics?.Log(
-            $"In-app reminders revealed: count={tasksToReveal.Count}; " +
-            $"tasks={string.Join(",", tasksToReveal.Select(task => task.Id))}.");
     }
 
     private void StopReminderTimer()
@@ -650,7 +648,11 @@ public partial class App : System.Windows.Application
             _treeManagerWindow = new TreeManagerWindow(
                 _state,
                 PersistState,
-                () => _overlayWindow?.RefreshTaskPresentation());
+                () =>
+                {
+                    _overlayWindow?.RefreshTaskPresentation();
+                    RefreshDueAttentionSurface();
+                });
             _treeManagerWindow.Closed += TreeManagerWindow_OnClosed;
         }
 
@@ -700,12 +702,93 @@ public partial class App : System.Windows.Application
     {
         PersistState();
         _treeManagerWindow?.Refresh();
+        RefreshDueAttentionSurface();
     }
 
     private void RefreshTaskPresentations()
     {
         _overlayWindow?.RefreshTaskPresentation();
         _treeManagerWindow?.Refresh();
+        RefreshDueAttentionSurface();
+    }
+
+    private void RefreshDueAttentionSurface()
+    {
+        if (_isShuttingDown || _state is null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var dueTasks = ReminderAttentionService
+            .OrderForOverlay(_state.Tasks, now)
+            .Where(task => ReminderAttentionService.ShouldShowNotification(task, now))
+            .ToList();
+        if (dueTasks.Count == 0 && _dueAttentionWindow is null)
+        {
+            return;
+        }
+
+        if (_dueAttentionWindow is null || _dueAttentionWindow.IsClosed)
+        {
+            _dueAttentionWindow = new DueAttentionWindow(
+                AcknowledgeDueNotification,
+                SnoozeDueNotification,
+                CompleteDueTask,
+                ClearDueReminder);
+        }
+
+        _dueAttentionWindow.UpdateTasks(dueTasks);
+    }
+
+    private void AcknowledgeDueNotification(Guid taskId)
+    {
+        if (TryGetTask(taskId, out var task) &&
+            ReminderAttentionService.Acknowledge(task))
+        {
+            PersistState();
+            RefreshTaskPresentations();
+            _diagnostics?.Log($"Due notification acknowledged: task={taskId}.");
+        }
+    }
+
+    private void SnoozeDueNotification(Guid taskId)
+    {
+        if (TryGetTask(taskId, out var task) &&
+            ReminderAttentionService.SnoozeNotification(task, 10))
+        {
+            PersistState();
+            RefreshTaskPresentations();
+            _diagnostics?.Log($"Due notification snoozed: task={taskId}; minutes=10.");
+        }
+    }
+
+    private void CompleteDueTask(Guid taskId)
+    {
+        if (TryGetTask(taskId, out var task) &&
+            TaskInteractionService.Complete(task))
+        {
+            PersistState();
+            RefreshTaskPresentations();
+            _diagnostics?.Log($"Due task completed: task={taskId}.");
+        }
+    }
+
+    private void ClearDueReminder(Guid taskId)
+    {
+        if (TryGetTask(taskId, out var task) &&
+            ReminderService.ApplyPreset(task, ReminderPreset.None))
+        {
+            PersistState();
+            RefreshTaskPresentations();
+            _diagnostics?.Log($"Due reminder cleared: task={taskId}.");
+        }
+    }
+
+    private bool TryGetTask(Guid taskId, out TaskItem task)
+    {
+        task = _state?.Tasks.FirstOrDefault(item => item.Id == taskId)!;
+        return task is not null;
     }
 
     private void OverlayWindow_OnOverlayModeChanged(OverlayMode mode)
@@ -756,6 +839,8 @@ public partial class App : System.Windows.Application
             _treeManagerWindow = null;
             _settingsWindow?.Close();
             _settingsWindow = null;
+            _dueAttentionWindow?.CloseForExit();
+            _dueAttentionWindow = null;
             if (_overlayWindow is not null)
             {
                 _overlayWindow.OverlayModeChanged -=
