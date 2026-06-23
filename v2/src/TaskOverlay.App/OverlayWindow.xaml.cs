@@ -598,7 +598,8 @@ public partial class OverlayWindow : Window
             _isShuttingDown ||
             e.ChangedButton != MouseButton.Left ||
             UsesHandleWindow ||
-            IsHandleEventSource(e.OriginalSource))
+            IsHandleEventSource(e.OriginalSource) ||
+            IsInteractiveEventSource(e.OriginalSource))
         {
             return;
         }
@@ -916,6 +917,22 @@ public partial class OverlayWindow : Window
         while (current is not null)
         {
             if (ReferenceEquals(current, CollapsedActivation))
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
+    private static bool IsInteractiveEventSource(object source)
+    {
+        var current = source as DependencyObject;
+        while (current is not null)
+        {
+            if (current is ButtonBase)
             {
                 return true;
             }

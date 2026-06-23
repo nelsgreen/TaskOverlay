@@ -459,6 +459,8 @@ public partial class App : System.Windows.Application
         {
             _overlayWindow.Activate();
         }
+
+        RefreshDueAttentionSurface();
     }
 
     private void HideOverlay()
@@ -469,6 +471,7 @@ public partial class App : System.Windows.Application
         }
 
         _overlayWindow?.HideSafely();
+        RefreshDueAttentionSurface();
     }
 
     private void ToggleOverlay()
@@ -719,11 +722,16 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        var shouldShow =
+            _state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle &&
+            _overlayWindow?.IsOverlayVisible == true;
         var now = DateTimeOffset.UtcNow;
-        var dueTasks = ReminderAttentionService
-            .OrderForOverlay(_state.Tasks, now)
-            .Where(task => ReminderAttentionService.ShouldShowNotification(task, now))
-            .ToList();
+        var dueTasks = shouldShow
+            ? ReminderAttentionService
+                .OrderForOverlay(_state.Tasks, now)
+                .Where(task => ReminderAttentionService.ShouldShowNotification(task, now))
+                .ToList()
+            : new List<TaskItem>();
         if (dueTasks.Count == 0 && _dueAttentionWindow is null)
         {
             return;
@@ -794,6 +802,7 @@ public partial class App : System.Windows.Application
     private void OverlayWindow_OnOverlayModeChanged(OverlayMode mode)
     {
         UpdateOverlayModeUi(mode);
+        RefreshDueAttentionSurface();
     }
 
     private void UpdateOverlayModeUi(OverlayMode mode)

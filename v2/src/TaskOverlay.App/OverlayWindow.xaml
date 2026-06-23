@@ -98,36 +98,28 @@
                             <DataTemplate>
                                 <Border Margin="0,2"
                                         Padding="8,5"
-                                        BorderThickness="1"
+                                        BorderThickness="0"
                                         CornerRadius="6"
                                         ContextMenuOpening="TaskRow_OnContextMenuOpening">
                                     <Border.Style>
                                         <Style TargetType="Border">
                                             <Setter Property="Background"
                                                     Value="Transparent" />
-                                            <Setter Property="BorderBrush"
-                                                    Value="Transparent" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding InWork}"
                                                              Value="True">
                                                     <Setter Property="Background"
                                                             Value="#332563EB" />
-                                                    <Setter Property="BorderBrush"
-                                                            Value="#885BA8FF" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsWaiting}"
                                                              Value="True">
                                                     <Setter Property="Background"
                                                             Value="#334B2E16" />
-                                                    <Setter Property="BorderBrush"
-                                                            Value="#887C4A12" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsReminderDue}"
                                                              Value="True">
                                                     <Setter Property="Background"
                                                             Value="#665B1D1D" />
-                                                    <Setter Property="BorderBrush"
-                                                            Value="#FFEF4444" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
