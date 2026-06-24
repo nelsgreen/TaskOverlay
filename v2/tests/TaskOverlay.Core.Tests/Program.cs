@@ -47,10 +47,10 @@ internal static class Program
             ("project color persistence", ProjectColorPersistence),
             ("reminder scheduling", ReminderScheduling),
             ("reminder snooze and still waiting", ReminderSnoozeAndStillWaiting),
-            ("due attention acknowledgement", DueAttentionAcknowledgement),
-            ("due notification snooze persistence", DueNotificationSnoozePersistence),
-            ("due attention ordering", DueAttentionOrdering),
-            ("done and clear remove due attention", DoneAndClearRemoveDueAttention),
+            ("reminder focus transition", ReminderFocusTransition),
+            ("reminder notification snooze persistence", ReminderNotificationSnoozePersistence),
+            ("reminder attention ordering", ReminderAttentionOrdering),
+            ("done and clear remove reminder attention", DoneAndClearRemoveReminderAttention),
             ("quick task capture", QuickTaskCapture),
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
@@ -1141,13 +1141,13 @@ internal static class Program
             new[] { task },
             start.AddHours(2));
 
-        Assert(due.Count == 1, "Due reminder should activate once.");
-        Assert(task.ReminderActive, "Due reminder should remain visibly active.");
+        Assert(due.Count == 1, "Reminder should activate once at its scheduled time.");
+        Assert(task.ReminderActive, "REMIND attention should remain visibly active.");
         Assert(task.LastReminderAtUtc == start.AddHours(2), "Last reminder time should be recorded.");
         Assert(task.RemindAtUtc == start.AddHours(4), "Repeating reminder should schedule the next occurrence.");
         Assert(
             ReminderService.ProcessDueReminders(new[] { task }, start.AddHours(3)).Count == 0,
-            "Active reminder should not fire repeatedly before acknowledgement.");
+            "Active reminder should not fire repeatedly before it is handled.");
     }
 
     private static void ReminderSnoozeAndStillWaiting()
@@ -1159,7 +1159,7 @@ internal static class Program
 
         Assert(ReminderService.Snooze(task, 30, now), "Snooze should succeed.");
         Assert(task.RemindAtUtc == now.AddMinutes(30), "Snooze should set the requested time.");
-        Assert(!task.ReminderActive, "Snooze should acknowledge the due badge.");
+        Assert(!task.ReminderActive, "Snooze should dismiss the REMIND badge.");
 
         task.RemindEveryMinutes = null;
         Assert(ReminderService.MarkStillWaiting(task, now), "Still waiting should succeed.");
@@ -1167,9 +1167,28 @@ internal static class Program
         Assert(task.RemindAtUtc == now.AddHours(2), "Still waiting should default to a two-hour follow-up.");
     }
 
-    private static void DueAttentionAcknowledgement()
+    private static void ReminderFocusTransition()
     {
+        var state = AppState.CreateDefault();
+        state.Tasks.Clear();
+        var oneShot = TaskItem.Create("One-shot reminder");
+        var oneShotTime = DateTimeOffset.Parse("2026-06-22T07:00:00Z");
+        oneShot.RemindAtUtc = oneShotTime;
+        state.Tasks.Add(oneShot);
+        ReminderService.ProcessDueReminders(state.Tasks, oneShotTime);
+
+        Assert(
+            ReminderAttentionService.Focus(state, oneShot, oneShotTime.AddMinutes(1)),
+            "Focus should handle a one-shot reminder.");
+        Assert(
+            ReminderService.IsDue(oneShot, oneShotTime.AddMinutes(1)),
+            "The overdue timestamp remains scheduled until the reminder is removed.");
+        Assert(
+            !ReminderAttentionService.ShouldShowNotification(oneShot, oneShotTime.AddMinutes(1)),
+            "A handled overdue timestamp must not recreate REMIND attention.");
+
         var task = TaskItem.Create("Recurring follow-up");
+        state.Tasks.Add(task);
         var start = DateTimeOffset.Parse("2026-06-22T08:00:00Z");
         ReminderService.ApplyPreset(
             task,
@@ -1180,24 +1199,27 @@ internal static class Program
 
         Assert(
             ReminderAttentionService.ShouldShowNotification(task, start.AddHours(2)),
-            "A new due occurrence should show attention.");
+            "A new reminder occurrence should show attention.");
         Assert(
-            ReminderAttentionService.Acknowledge(task, start.AddHours(2).AddMinutes(1)),
-            "The current occurrence should be acknowledged.");
+            ReminderAttentionService.Focus(state, task, start.AddHours(2).AddMinutes(1)),
+            "Focus should handle the current reminder occurrence.");
+        Assert(
+            task.Status == TaskStatus.InWork && task.InWork,
+            "Focus should move the task into the internal focused state.");
         Assert(
             !ReminderAttentionService.ShouldShowNotification(task, start.AddHours(2).AddMinutes(1)),
-            "Acknowledgement should hide only the current occurrence.");
+            "Focus should dismiss the current reminder occurrence.");
         Assert(
             task.RemindAtUtc == start.AddHours(4),
-            "Acknowledgement must preserve the reminder schedule.");
+            "Focus must preserve the reminder schedule.");
 
         ReminderService.ProcessDueReminders(new[] { task }, start.AddHours(4));
         Assert(
             ReminderAttentionService.ShouldShowNotification(task, start.AddHours(4)),
-            "A later occurrence should notify again.");
+            "A later reminder occurrence should notify again.");
     }
 
-    private static void DueNotificationSnoozePersistence()
+    private static void ReminderNotificationSnoozePersistence()
     {
         WithTemporaryDirectory(directory =>
         {
@@ -1212,7 +1234,7 @@ internal static class Program
 
             Assert(
                 ReminderAttentionService.SnoozeNotification(task, 30, now),
-                "Notification snooze should succeed for a due task.");
+                "Notification snooze should succeed for a task with REMIND attention.");
             Assert(
                 task.RemindAtUtc == reminderSchedule,
                 "Notification snooze must not change the reminder schedule.");
@@ -1237,10 +1259,13 @@ internal static class Program
             Assert(
                 loaded.ReminderSnoozedUntilUtc == now.AddMinutes(91),
                 "The 60-minute action should use the requested duration.");
+            Assert(
+                !ReminderAttentionService.ShouldShowNotification(loaded, now.AddMinutes(90)),
+                "The notification should remain hidden during a 60-minute snooze.");
         });
     }
 
-    private static void DueAttentionOrdering()
+    private static void ReminderAttentionOrdering()
     {
         var now = DateTimeOffset.Parse("2026-06-22T12:00:00Z");
         var normal = TaskItem.Create("Normal", now.AddMinutes(-3));
@@ -1257,11 +1282,11 @@ internal static class Program
             .OrderForOverlay(new[] { normal, focused, due }, now)
             .ToList();
 
-        Assert(ordered[0].Id == due.Id, "DUE tasks should remain first in the overlay.");
+        Assert(ordered[0].Id == due.Id, "REMIND tasks should remain first in the overlay.");
         Assert(ordered[1].Id == focused.Id, "Focused tasks should remain ahead of normal tasks.");
     }
 
-    private static void DoneAndClearRemoveDueAttention()
+    private static void DoneAndClearRemoveReminderAttention()
     {
         var now = DateTimeOffset.Parse("2026-06-22T14:00:00Z");
         var completed = TaskItem.Create("Complete me", now);
@@ -1270,7 +1295,7 @@ internal static class Program
         TaskInteractionService.Complete(completed, now);
         Assert(
             !ReminderAttentionService.ShouldShowNotification(completed, now),
-            "Completing a task should remove its due notification.");
+            "Completing a task should remove its reminder notification.");
 
         var cleared = TaskItem.Create("Clear me", now);
         cleared.RemindAtUtc = now;
@@ -1278,7 +1303,10 @@ internal static class Program
         ReminderService.ApplyPreset(cleared, ReminderPreset.None, now);
         Assert(
             !ReminderAttentionService.ShouldShowNotification(cleared, now),
-            "Clearing a reminder should remove its due notification.");
+            "Removing a reminder should dismiss its notification.");
+        Assert(
+            cleared.Status != TaskStatus.Done && cleared.Title == "Clear me",
+            "Removing a reminder must not complete or delete the task.");
     }
 
     private static void QuickTaskCapture()
@@ -1495,11 +1523,11 @@ internal static class Program
         Assert(ReminderService.IsDue(dueTask), "Test task should be due.");
         Assert(
             OverlayCollapseGuard.CanCollapse(idle),
-            "A DUE task must not block AutoQuestTracker collapse.");
+            "A REMIND task must not block AutoQuestTracker collapse.");
         Assert(
             OverlayCollapseGuard.CanCollapse(
                 idle with { OverlayMode = OverlayMode.CollapsedHandle }),
-            "A DUE task must not block CollapsedHandle collapse.");
+            "A REMIND task must not block CollapsedHandle collapse.");
 
         var blockers = new[]
         {

@@ -13,7 +13,7 @@ internal static class TaskAttentionUiOptions
         new[]
         {
             new TaskStatusOption(TaskStatus.Todo, "Todo"),
-            new TaskStatusOption(TaskStatus.InWork, "In work"),
+            new TaskStatusOption(TaskStatus.InWork, "Focus"),
             new TaskStatusOption(TaskStatus.Waiting, "Waiting"),
             new TaskStatusOption(TaskStatus.Done, "Done")
         };
@@ -23,7 +23,7 @@ internal static class TaskAttentionUiOptions
         {
             new TaskStatusOption(TaskStatus.Todo, "Todo"),
             new TaskStatusOption(TaskStatus.Waiting, "Waiting"),
-            new TaskStatusOption(TaskStatus.InWork, "In work")
+            new TaskStatusOption(TaskStatus.InWork, "Focus")
         };
 
     public static IReadOnlyList<ReminderPresetOption> ReminderPresets { get; } =

@@ -17,7 +17,7 @@ internal sealed class TaskRowViewModel
         ProjectColorHex = ProjectColorPalette.IsValid(project?.ColorHex)
             ? project!.ColorHex
             : ProjectColorPalette.Resolve(ProjectName, project?.Id ?? Guid.Empty);
-        IsReminderDue = ReminderService.IsDue(task, now);
+        IsReminderDue = ReminderAttentionService.ShouldShowNotification(task, now);
         ShowDescription =
             activeMode &&
             !string.IsNullOrWhiteSpace(task.Description) &&

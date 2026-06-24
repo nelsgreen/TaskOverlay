@@ -26,7 +26,7 @@ internal sealed class TreeCardViewModel
         _ => "TASK"
     };
     public string StatusLabel => IsActive
-        ? "IN WORK"
+        ? "FOCUS"
         : IsDone
             ? "COMPLETED"
             : string.Empty;

@@ -1063,8 +1063,8 @@ public partial class OverlayWindow : Window
         {
             contextMenu.Items.Add(new Separator());
             contextMenu.Items.Add(CreateTaskMenuItem(
-                "Acknowledge",
-                AcknowledgeReminderMenuItem_OnClick,
+                "Focus",
+                FocusReminderMenuItem_OnClick,
                 row));
             contextMenu.Items.Add(CreateTaskMenuItem(
                 "Snooze 30m",
@@ -1296,17 +1296,17 @@ public partial class OverlayWindow : Window
         _log($"Task due notification snoozed: id={task.Id}; minutes={minutes}.");
     }
 
-    private void AcknowledgeReminderMenuItem_OnClick(object sender, RoutedEventArgs e)
+    private void FocusReminderMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
         if (!TryGetMenuTask(sender, out var task) ||
-            !ReminderAttentionService.Acknowledge(task))
+            !ReminderAttentionService.Focus(_state, task))
         {
             return;
         }
 
         RefreshTasks();
         _saveState();
-        _log($"Task due notification acknowledged: id={task.Id}.");
+        _log($"Task reminder notification focused: id={task.Id}.");
     }
 
     private void StillWaitingMenuItem_OnClick(object sender, RoutedEventArgs e)

@@ -756,12 +756,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var focused = TaskInteractionService.SetStatus(
-            _state!,
-            task,
-            TaskOverlay.Core.TaskStatus.InWork);
-        var acknowledged = ReminderAttentionService.Acknowledge(task);
-        if (!focused && !acknowledged)
+        if (!ReminderAttentionService.Focus(_state!, task))
         {
             return;
         }

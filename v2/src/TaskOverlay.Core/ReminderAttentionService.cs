@@ -53,6 +53,29 @@ public static class ReminderAttentionService
         return true;
     }
 
+    public static bool Focus(
+        AppState state,
+        TaskItem task,
+        DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(task);
+
+        var timestamp = now ?? DateTimeOffset.UtcNow;
+        if (!ShouldShowNotification(task, timestamp))
+        {
+            return false;
+        }
+
+        var statusChanged = TaskInteractionService.SetStatus(
+            state,
+            task,
+            TaskStatus.InWork,
+            timestamp);
+        var notificationHandled = Acknowledge(task, timestamp);
+        return statusChanged || notificationHandled;
+    }
+
     public static bool SnoozeNotification(
         TaskItem task,
         int minutes,
