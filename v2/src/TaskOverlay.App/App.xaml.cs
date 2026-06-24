@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using TaskOverlay.Core;
+using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
 
 namespace TaskOverlay.App;
@@ -17,6 +18,7 @@ public partial class App : System.Windows.Application
     private QuickAddWindow? _quickAddWindow;
     private DueAttentionWindow? _dueAttentionWindow;
     private Forms.NotifyIcon? _trayIcon;
+    private Drawing.Icon? _trayApplicationIcon;
     private Forms.ContextMenuStrip? _trayMenu;
     private Forms.ToolStripMenuItem? _overlayModeMenuItem;
     private Forms.ToolStripMenuItem? _autoQuestTrackerMenuItem;
@@ -173,14 +175,29 @@ public partial class App : System.Windows.Application
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("Exit", null, (_, _) => RunCommand("Tray", "Exit", () => BeginShutdown("Tray Exit command.")));
 
+        _trayApplicationIcon = LoadApplicationIcon();
         _trayIcon = new Forms.NotifyIcon
         {
             Text = "TaskOverlay v2 prototype",
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = _trayApplicationIcon,
             ContextMenuStrip = _trayMenu,
             Visible = true
         };
         _trayIcon.DoubleClick += TrayIcon_OnDoubleClick;
+    }
+
+    private static Drawing.Icon LoadApplicationIcon()
+    {
+        var resource = GetResourceStream(
+            new Uri("Assets/app.ico", UriKind.Relative));
+        if (resource is null)
+        {
+            throw new InvalidOperationException("Application icon resource was not found.");
+        }
+
+        using var stream = resource.Stream;
+        using var icon = new Drawing.Icon(stream);
+        return (Drawing.Icon)icon.Clone();
     }
 
     private void RegisterGlobalHotkeys()
@@ -930,6 +947,22 @@ public partial class App : System.Windows.Application
             finally
             {
                 _trayIcon = null;
+            }
+        }
+
+        if (_trayApplicationIcon is not null)
+        {
+            try
+            {
+                _trayApplicationIcon.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _diagnostics?.Log("Tray application icon disposal failed.", ex);
+            }
+            finally
+            {
+                _trayApplicationIcon = null;
             }
         }
 
