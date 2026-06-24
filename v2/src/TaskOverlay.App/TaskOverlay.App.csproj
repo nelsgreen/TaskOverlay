@@ -8,9 +8,17 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <AssemblyName>TaskOverlay.V2</AssemblyName>
     <RootNamespace>TaskOverlay.App</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app-icon-256.png" />
+    <Resource Include="Assets\app-icon-512.png" />
+    <Resource Include="Assets\logo-lockup.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\TaskOverlay.Core\TaskOverlay.Core.csproj" />
