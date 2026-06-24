@@ -741,6 +741,7 @@ public partial class App : System.Windows.Application
         {
             _dueAttentionWindow = new DueAttentionWindow(
                 FocusDueNotification,
+                EditDueTask,
                 SnoozeDueNotification,
                 CompleteDueTask,
                 ClearDueReminder);
@@ -764,6 +765,11 @@ public partial class App : System.Windows.Application
         PersistState();
         RefreshTaskPresentations();
         _diagnostics?.Log($"Due notification focused: task={taskId}.");
+    }
+
+    private void EditDueTask(Guid taskId)
+    {
+        _overlayWindow?.OpenTaskDetails(taskId);
     }
 
     private void SnoozeDueNotification(Guid taskId, int minutes)

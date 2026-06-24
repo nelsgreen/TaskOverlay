@@ -13,6 +13,76 @@
         ShowInTaskbar="False"
         Topmost="True"
         Focusable="False">
+    <Window.Resources>
+        <Style x:Key="RemindButtonBase" TargetType="Button">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Foreground" Value="#FFF4F4F5" />
+            <Setter Property="Background" Value="#FF303540" />
+            <Setter Property="BorderBrush" Value="#FF525866" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder"
+                                        Property="Opacity"
+                                        Value="0.86" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder"
+                                        Property="Opacity"
+                                        Value="0.68" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FocusButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource RemindButtonBase}">
+            <Setter Property="Background" Value="#FF2563EB" />
+            <Setter Property="BorderBrush" Value="#FF60A5FA" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="EditButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource RemindButtonBase}">
+            <Setter Property="Background" Value="#FF3F3F46" />
+            <Setter Property="BorderBrush" Value="#FF71717A" />
+        </Style>
+        <Style x:Key="SnoozeButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource RemindButtonBase}" />
+        <Style x:Key="RemoveButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource RemindButtonBase}">
+            <Setter Property="Foreground" Value="#FFFCD34D" />
+            <Setter Property="Background" Value="#33271305" />
+            <Setter Property="BorderBrush" Value="#FFB45309" />
+        </Style>
+        <Style x:Key="DoneButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource RemindButtonBase}">
+            <Setter Property="Background" Value="#FF166534" />
+            <Setter Property="BorderBrush" Value="#FF22C55E" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Window.Resources>
     <Border Margin="8"
             Padding="12"
             Background="#F2181B22"
@@ -39,37 +109,42 @@
                                                FontWeight="SemiBold"
                                                Text="{Binding Title}"
                                                TextWrapping="Wrap" />
-                                    <WrapPanel Margin="0,8,0,0">
-                                        <Button Margin="0,0,6,0"
-                                                Padding="7,3"
-                                                Focusable="False"
+                                    <UniformGrid Margin="0,10,0,0" Columns="2">
+                                        <Button Margin="0,0,3,0"
+                                                Style="{StaticResource FocusButtonStyle}"
                                                 Tag="{Binding TaskId}"
                                                 Click="Focus_OnClick"
                                                 Content="Focus" />
-                                        <Button Margin="0,0,6,0"
-                                                Padding="7,3"
-                                                Focusable="False"
+                                        <Button Margin="3,0,0,0"
+                                                Style="{StaticResource EditButtonStyle}"
+                                                Tag="{Binding TaskId}"
+                                                Click="EditTask_OnClick"
+                                                Content="Edit task" />
+                                    </UniformGrid>
+                                    <UniformGrid Margin="0,6,0,0" Columns="2">
+                                        <Button Margin="0,0,3,0"
+                                                Style="{StaticResource SnoozeButtonStyle}"
                                                 Tag="{Binding TaskId}"
                                                 Click="Snooze30_OnClick"
                                                 Content="Snooze 30m" />
-                                        <Button Margin="0,0,6,0"
-                                                Padding="7,3"
-                                                Focusable="False"
+                                        <Button Margin="3,0,0,0"
+                                                Style="{StaticResource SnoozeButtonStyle}"
                                                 Tag="{Binding TaskId}"
                                                 Click="Snooze60_OnClick"
                                                 Content="Snooze 60m" />
-                                        <Button Margin="0,0,6,0"
-                                                Padding="7,3"
-                                                Focusable="False"
-                                                Tag="{Binding TaskId}"
-                                                Click="Done_OnClick"
-                                                Content="Done" />
-                                        <Button Padding="7,3"
-                                                Focusable="False"
+                                    </UniformGrid>
+                                    <UniformGrid Margin="0,6,0,0" Columns="2">
+                                        <Button Margin="0,0,3,0"
+                                                Style="{StaticResource RemoveButtonStyle}"
                                                 Tag="{Binding TaskId}"
                                                 Click="Clear_OnClick"
                                                 Content="Remove reminder" />
-                                    </WrapPanel>
+                                        <Button Margin="3,0,0,0"
+                                                Style="{StaticResource DoneButtonStyle}"
+                                                Tag="{Binding TaskId}"
+                                                Click="Done_OnClick"
+                                                Content="Done" />
+                                    </UniformGrid>
                                 </StackPanel>
                             </Border>
                         </DataTemplate>
