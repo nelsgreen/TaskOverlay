@@ -740,7 +740,7 @@ public partial class App : System.Windows.Application
         if (_dueAttentionWindow is null || _dueAttentionWindow.IsClosed)
         {
             _dueAttentionWindow = new DueAttentionWindow(
-                AcknowledgeDueNotification,
+                FocusDueNotification,
                 SnoozeDueNotification,
                 CompleteDueTask,
                 ClearDueReminder);
@@ -749,25 +749,37 @@ public partial class App : System.Windows.Application
         _dueAttentionWindow.UpdateTasks(dueTasks);
     }
 
-    private void AcknowledgeDueNotification(Guid taskId)
+    private void FocusDueNotification(Guid taskId)
     {
-        if (TryGetTask(taskId, out var task) &&
-            ReminderAttentionService.Acknowledge(task))
+        if (!TryGetTask(taskId, out var task))
         {
-            PersistState();
-            RefreshTaskPresentations();
-            _diagnostics?.Log($"Due notification acknowledged: task={taskId}.");
+            return;
         }
+
+        var focused = TaskInteractionService.SetStatus(
+            _state!,
+            task,
+            TaskOverlay.Core.TaskStatus.InWork);
+        var acknowledged = ReminderAttentionService.Acknowledge(task);
+        if (!focused && !acknowledged)
+        {
+            return;
+        }
+
+        PersistState();
+        RefreshTaskPresentations();
+        _diagnostics?.Log($"Due notification focused: task={taskId}.");
     }
 
-    private void SnoozeDueNotification(Guid taskId)
+    private void SnoozeDueNotification(Guid taskId, int minutes)
     {
         if (TryGetTask(taskId, out var task) &&
-            ReminderAttentionService.SnoozeNotification(task, 10))
+            ReminderAttentionService.SnoozeNotification(task, minutes))
         {
             PersistState();
             RefreshTaskPresentations();
-            _diagnostics?.Log($"Due notification snoozed: task={taskId}; minutes=10.");
+            _diagnostics?.Log(
+                $"Due notification snoozed: task={taskId}; minutes={minutes}.");
         }
     }
 

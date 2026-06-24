@@ -25,7 +25,7 @@
                        Foreground="#FFFCA5A5"
                        FontSize="11"
                        FontWeight="Bold"
-                       Text="DUE" />
+                       Text="REMIND" />
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <ItemsControl x:Name="DueItems">
                     <ItemsControl.ItemTemplate>
@@ -44,14 +44,20 @@
                                                 Padding="7,3"
                                                 Focusable="False"
                                                 Tag="{Binding TaskId}"
-                                                Click="Acknowledge_OnClick"
-                                                Content="Acknowledge" />
+                                                Click="Focus_OnClick"
+                                                Content="Focus" />
                                         <Button Margin="0,0,6,0"
                                                 Padding="7,3"
                                                 Focusable="False"
                                                 Tag="{Binding TaskId}"
-                                                Click="Snooze_OnClick"
-                                                Content="Snooze 10m" />
+                                                Click="Snooze30_OnClick"
+                                                Content="Snooze 30m" />
+                                        <Button Margin="0,0,6,0"
+                                                Padding="7,3"
+                                                Focusable="False"
+                                                Tag="{Binding TaskId}"
+                                                Click="Snooze60_OnClick"
+                                                Content="Snooze 60m" />
                                         <Button Margin="0,0,6,0"
                                                 Padding="7,3"
                                                 Focusable="False"
@@ -62,7 +68,7 @@
                                                 Focusable="False"
                                                 Tag="{Binding TaskId}"
                                                 Click="Clear_OnClick"
-                                                Content="Clear reminder" />
+                                                Content="Remove reminder" />
                                     </WrapPanel>
                                 </StackPanel>
                             </Border>

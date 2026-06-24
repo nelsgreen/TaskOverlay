@@ -1211,7 +1211,7 @@ internal static class Program
             var reminderSchedule = task.RemindAtUtc;
 
             Assert(
-                ReminderAttentionService.SnoozeNotification(task, 10, now),
+                ReminderAttentionService.SnoozeNotification(task, 30, now),
                 "Notification snooze should succeed for a due task.");
             Assert(
                 task.RemindAtUtc == reminderSchedule,
@@ -1222,14 +1222,21 @@ internal static class Program
             var loaded = new AppStateStore(directory).Load().Tasks.Single();
 
             Assert(
-                loaded.ReminderSnoozedUntilUtc == now.AddMinutes(10),
+                loaded.ReminderSnoozedUntilUtc == now.AddMinutes(30),
                 "Notification snooze should survive restart.");
             Assert(
-                !ReminderAttentionService.ShouldShowNotification(loaded, now.AddMinutes(5)),
+                !ReminderAttentionService.ShouldShowNotification(loaded, now.AddMinutes(29)),
                 "The notification should remain hidden during the snooze.");
             Assert(
-                ReminderAttentionService.ShouldShowNotification(loaded, now.AddMinutes(11)),
+                ReminderAttentionService.ShouldShowNotification(loaded, now.AddMinutes(31)),
                 "The notification should return after the snooze expires.");
+
+            Assert(
+                ReminderAttentionService.SnoozeNotification(loaded, 60, now.AddMinutes(31)),
+                "A 60-minute notification snooze should succeed.");
+            Assert(
+                loaded.ReminderSnoozedUntilUtc == now.AddMinutes(91),
+                "The 60-minute action should use the requested duration.");
         });
     }
 

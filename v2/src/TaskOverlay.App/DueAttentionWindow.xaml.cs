@@ -16,20 +16,20 @@ public partial class DueAttentionWindow : Window
     private const int NoActivateStyle = 0x08000000;
     private const double WorkAreaMargin = 16;
 
-    private readonly Action<Guid> _acknowledge;
-    private readonly Action<Guid> _snooze;
+    private readonly Action<Guid> _focus;
+    private readonly Action<Guid, int> _snooze;
     private readonly Action<Guid> _markDone;
     private readonly Action<Guid> _clearReminder;
     private bool _allowClose;
     private bool _isClosed;
 
     public DueAttentionWindow(
-        Action<Guid> acknowledge,
-        Action<Guid> snooze,
+        Action<Guid> focus,
+        Action<Guid, int> snooze,
         Action<Guid> markDone,
         Action<Guid> clearReminder)
     {
-        _acknowledge = acknowledge;
+        _focus = focus;
         _snooze = snooze;
         _markDone = markDone;
         _clearReminder = clearReminder;
@@ -108,11 +108,14 @@ public partial class DueAttentionWindow : Window
         Top = Math.Max(workArea.Top, workArea.Bottom - ActualHeight - WorkAreaMargin);
     }
 
-    private void Acknowledge_OnClick(object sender, RoutedEventArgs e) =>
-        InvokeTaskAction(sender, _acknowledge);
+    private void Focus_OnClick(object sender, RoutedEventArgs e) =>
+        InvokeTaskAction(sender, _focus);
 
-    private void Snooze_OnClick(object sender, RoutedEventArgs e) =>
-        InvokeTaskAction(sender, _snooze);
+    private void Snooze30_OnClick(object sender, RoutedEventArgs e) =>
+        InvokeSnoozeAction(sender, 30);
+
+    private void Snooze60_OnClick(object sender, RoutedEventArgs e) =>
+        InvokeSnoozeAction(sender, 60);
 
     private void Done_OnClick(object sender, RoutedEventArgs e) =>
         InvokeTaskAction(sender, _markDone);
@@ -125,6 +128,14 @@ public partial class DueAttentionWindow : Window
         if (sender is Button { Tag: Guid taskId })
         {
             action(taskId);
+        }
+    }
+
+    private void InvokeSnoozeAction(object sender, int minutes)
+    {
+        if (sender is Button { Tag: Guid taskId })
+        {
+            _snooze(taskId, minutes);
         }
     }
 
