@@ -3,17 +3,17 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Task details"
         Icon="Assets/app.ico"
-        Width="560"
-        Height="800"
-        MinWidth="520"
-        MinHeight="680"
+        Width="540"
+        Height="680"
+        MinWidth="500"
+        MinHeight="580"
         Background="#FF111318"
         FontFamily="Segoe UI"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
     <Window.Resources>
         <Style x:Key="SectionCardStyle" TargetType="Border">
-            <Setter Property="Padding" Value="14" />
+            <Setter Property="Padding" Value="12" />
             <Setter Property="Background" Value="#FF1A1D24" />
             <Setter Property="BorderBrush" Value="#FF30343D" />
             <Setter Property="BorderThickness" Value="1" />
@@ -220,7 +220,7 @@
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
-                Padding="20,15"
+                Padding="16,12"
                 Background="#FF181B21"
                 BorderBrush="#FF30343D"
                 BorderThickness="0,0,0,1">
@@ -246,7 +246,7 @@
         <ScrollViewer Grid.Row="1"
                       HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="20,16,20,20">
+            <StackPanel Margin="16,12,16,14">
                 <Border Style="{StaticResource SectionCardStyle}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource FieldLabelStyle}" Text="TITLE" />
@@ -256,7 +256,7 @@
                                  FontWeight="SemiBold"
                                  MaxLength="500" />
 
-                        <TextBlock Margin="0,15,0,7"
+                        <TextBlock Margin="0,12,0,7"
                                    Style="{StaticResource FieldLabelStyle}"
                                    Text="PROJECT" />
                         <ListBox x:Name="ProjectListBox"
@@ -275,7 +275,7 @@
                             </ListBox.ItemTemplate>
                         </ListBox>
 
-                        <TextBlock Margin="0,8,0,7"
+                        <TextBlock Margin="0,5,0,7"
                                    Style="{StaticResource FieldLabelStyle}"
                                    Text="STATUS" />
                         <ListBox x:Name="StatusListBox"
@@ -291,7 +291,7 @@
                             </ListBox.ItemTemplate>
                         </ListBox>
 
-                        <StackPanel x:Name="WaitingSection" Margin="0,7,0,0">
+                        <StackPanel x:Name="WaitingSection" Margin="0,4,0,0">
                             <TextBlock Style="{StaticResource FieldLabelStyle}" Text="WAITING FOR" />
                             <TextBox x:Name="WaitingForTextBox"
                                      Style="{StaticResource EditorTextBoxStyle}"
@@ -300,9 +300,9 @@
                     </StackPanel>
                 </Border>
 
-                <Border Margin="0,14,0,0" Style="{StaticResource SectionCardStyle}">
+                <Border Margin="0,10,0,0" Style="{StaticResource SectionCardStyle}">
                     <StackPanel>
-                        <DockPanel Margin="0,0,0,12">
+                        <DockPanel Margin="0,0,0,10">
                             <TextBlock VerticalAlignment="Center"
                                        Style="{StaticResource SectionTitleStyle}"
                                        Text="REMIND" />
@@ -317,7 +317,7 @@
                         <TextBlock x:Name="ReminderOffText"
                                    Foreground="#FF71717A"
                                    FontSize="12"
-                                   Text="No reminder is scheduled." />
+                                   Text="REMIND is off." />
 
                         <StackPanel x:Name="ReminderControlsPanel">
                             <Grid>
@@ -332,13 +332,27 @@
                                 <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
                                     <TextBlock Style="{StaticResource FieldLabelStyle}" Text="DATE" />
                                     <DatePicker x:Name="ReminderDatePicker"
-                                                Height="42"
-                                                Padding="8"
+                                                Height="38"
+                                                Padding="6"
                                                 Foreground="#FFF4F4F5"
                                                 Background="#FF24272E"
                                                 BorderBrush="#FF4B505B"
+                                                FontSize="12"
                                                 SelectedDateFormat="Long"
-                                                SelectedDateChanged="ReminderDatePicker_OnSelectedDateChanged" />
+                                                SelectedDateChanged="ReminderDatePicker_OnSelectedDateChanged">
+                                        <DatePicker.Resources>
+                                            <Style TargetType="{x:Type DatePickerTextBox}">
+                                                <Setter Property="Foreground" Value="#FFF4F4F5" />
+                                                <Setter Property="Background" Value="#FF24272E" />
+                                                <Setter Property="BorderBrush" Value="Transparent" />
+                                                <Setter Property="BorderThickness" Value="0" />
+                                                <Setter Property="CaretBrush" Value="#FFF4F4F5" />
+                                                <Setter Property="SelectionBrush" Value="#FF2563EB" />
+                                                <Setter Property="Padding" Value="3,0" />
+                                                <Setter Property="VerticalContentAlignment" Value="Center" />
+                                            </Style>
+                                        </DatePicker.Resources>
+                                    </DatePicker>
                                 </StackPanel>
 
                                 <StackPanel Grid.Column="2">
@@ -420,7 +434,7 @@
                                         Click="ClearReminderButton_OnClick" />
                             </WrapPanel>
 
-                            <TextBlock Margin="0,5,0,7"
+                            <TextBlock Margin="0,3,0,7"
                                        Style="{StaticResource FieldLabelStyle}"
                                        Text="PRESET" />
                             <ListBox x:Name="ReminderPresetListBox"
@@ -434,29 +448,16 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
 
-                            <TextBlock Margin="0,5,0,7"
-                                       Style="{StaticResource FieldLabelStyle}"
-                                       Text="REPEAT" />
-                            <ListBox x:Name="RepeatListBox"
-                                     Style="{StaticResource ChipListStyle}"
-                                     ItemContainerStyle="{StaticResource ChipItemStyle}"
-                                     SelectionChanged="RepeatListBox_OnSelectionChanged">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock FontSize="11" Text="{Binding Label}" />
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <Border Margin="0,14,0,0" Style="{StaticResource SectionCardStyle}">
+                <Border Margin="0,10,0,0" Style="{StaticResource SectionCardStyle}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource SectionTitleStyle}" Text="NOTES" />
                         <TextBox x:Name="DescriptionTextBox"
-                                 Height="112"
-                                 Margin="0,10,0,0"
+                                 Height="88"
+                                 Margin="0,8,0,0"
                                  Style="{StaticResource EditorTextBoxStyle}"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
@@ -468,7 +469,7 @@
         </ScrollViewer>
 
         <Border Grid.Row="2"
-                Padding="20,12"
+                Padding="16,10"
                 Background="#FF181B21"
                 BorderBrush="#FF30343D"
                 BorderThickness="0,1,0,0">

@@ -22,7 +22,6 @@ public partial class TaskDetailsWindow : Window
         new[]
         {
             new ReminderPresetOption(ReminderPreset.KeepCurrent, "Custom time"),
-            new ReminderPresetOption(ReminderPreset.None, "No reminder"),
             new ReminderPresetOption(ReminderPreset.In30Minutes, "In 30 minutes"),
             new ReminderPresetOption(ReminderPreset.In1Hour, "In 1 hour"),
             new ReminderPresetOption(ReminderPreset.In2Hours, "In 2 hours"),
@@ -38,7 +37,8 @@ public partial class TaskDetailsWindow : Window
     private readonly DateTimeOffset? _originalRemindAtUtc;
     private readonly int? _originalRepeatMinutes;
 
-    private DateTime _reminderLocalDateTime;
+    private DateTime? _reminderLocalDateTime;
+    private int? _pendingRepeatMinutes;
     private bool _initializing;
     private bool _updatingReminderControls;
     private bool _reminderScheduleEdited;
@@ -58,6 +58,7 @@ public partial class TaskDetailsWindow : Window
         _originalRepeatMinutes = task.RemindEveryMinutes;
         _reminderLocalDateTime = NormalizeToMinute(
             task.RemindAtUtc?.ToLocalTime().DateTime ?? DateTime.Now.AddHours(1));
+        _pendingRepeatMinutes = task.RemindEveryMinutes;
 
         _initializing = true;
         InitializeComponent();
@@ -79,24 +80,15 @@ public partial class TaskDetailsWindow : Window
             .First(option => option.Value == task.Status);
 
         ReminderPresetListBox.ItemsSource = DetailReminderPresets;
+        var detectedPreset = ReminderService.DetectPreset(task);
         ReminderPresetListBox.SelectedItem = DetailReminderPresets
-            .First(option => option.Value == ReminderService.DetectPreset(task));
-
-        var repeatOptions = TaskAttentionUiOptions.RepeatOptions.ToList();
-        if (task.RemindEveryMinutes is int existingInterval &&
-            repeatOptions.All(option => option.Minutes != existingInterval))
-        {
-            repeatOptions.Add(new RepeatOption(
-                existingInterval,
-                $"Every {existingInterval} minutes"));
-        }
-
-        RepeatListBox.ItemsSource = repeatOptions;
-        RepeatListBox.SelectedItem = repeatOptions
-            .First(option => option.Minutes == task.RemindEveryMinutes);
+            .First(option => option.Value ==
+                (detectedPreset == ReminderPreset.None
+                    ? ReminderPreset.KeepCurrent
+                    : detectedPreset));
 
         ReminderToggleButton.IsChecked = task.RemindAtUtc is not null;
-        ReminderDatePicker.SelectedDate = _reminderLocalDateTime.Date;
+        ReminderDatePicker.SelectedDate = _reminderLocalDateTime?.Date;
         UpdateReminderTimeText();
 
         _initializing = false;
@@ -121,11 +113,15 @@ public partial class TaskDetailsWindow : Window
         _reminderScheduleEdited = true;
         if (ReminderToggleButton.IsChecked == true)
         {
+            if (_reminderLocalDateTime is null)
+            {
+                _reminderLocalDateTime = NormalizeToMinute(DateTime.Now.AddHours(1));
+                UpdateReminderControls(
+                    () => ReminderDatePicker.SelectedDate = _reminderLocalDateTime.Value.Date);
+                UpdateReminderTimeText();
+            }
+
             SelectReminderPreset(ReminderPreset.KeepCurrent);
-        }
-        else
-        {
-            SelectReminderPreset(ReminderPreset.None);
         }
 
         UpdateReminderVisibility();
@@ -142,9 +138,11 @@ public partial class TaskDetailsWindow : Window
             return;
         }
 
+        var currentTime = _reminderLocalDateTime ??
+                          NormalizeToMinute(DateTime.Now.AddHours(1));
         _reminderLocalDateTime = selectedDate.Date
-            .AddHours(_reminderLocalDateTime.Hour)
-            .AddMinutes(_reminderLocalDateTime.Minute);
+            .AddHours(currentTime.Hour)
+            .AddMinutes(currentTime.Minute);
         _reminderScheduleEdited = true;
         EnsureReminderEnabled();
         SelectReminderPreset(ReminderPreset.KeepCurrent);
@@ -165,9 +163,6 @@ public partial class TaskDetailsWindow : Window
         switch (option.Value)
         {
             case ReminderPreset.KeepCurrent:
-                return;
-            case ReminderPreset.None:
-                ClearPendingReminder();
                 return;
             case ReminderPreset.In30Minutes:
                 SetPendingReminder(now.AddMinutes(30), option.Value, null);
@@ -191,20 +186,6 @@ public partial class TaskDetailsWindow : Window
                 SetPendingReminder(now.AddDays(1), option.Value, 1440);
                 return;
         }
-    }
-
-    private void RepeatListBox_OnSelectionChanged(
-        object sender,
-        SelectionChangedEventArgs e)
-    {
-        if (_initializing || _updatingReminderControls)
-        {
-            return;
-        }
-
-        _reminderScheduleEdited = true;
-        EnsureReminderEnabled();
-        SelectReminderPreset(ReminderPreset.KeepCurrent);
     }
 
     private void HourUpButton_OnClick(object sender, RoutedEventArgs e) =>
@@ -233,24 +214,25 @@ public partial class TaskDetailsWindow : Window
 
     private void ClearReminderButton_OnClick(object sender, RoutedEventArgs e)
     {
-        ClearPendingReminder();
+        ResetReminderInputs();
     }
 
     private void SetQuickReminder(DateTime localDateTime)
     {
-        var repeatMinutes = (RepeatListBox.SelectedItem as RepeatOption)?.Minutes;
         SetPendingReminder(
             localDateTime,
             ReminderPreset.KeepCurrent,
-            repeatMinutes);
+            _pendingRepeatMinutes);
     }
 
     private void AdjustReminderTime(TimeSpan adjustment)
     {
+        var currentTime = _reminderLocalDateTime ??
+                          NormalizeToMinute(DateTime.Now.AddHours(1));
         SetPendingReminder(
-            _reminderLocalDateTime.Add(adjustment),
+            currentTime.Add(adjustment),
             ReminderPreset.KeepCurrent,
-            (RepeatListBox.SelectedItem as RepeatOption)?.Minutes);
+            _pendingRepeatMinutes);
     }
 
     private void SetPendingReminder(
@@ -259,29 +241,32 @@ public partial class TaskDetailsWindow : Window
         int? repeatMinutes)
     {
         _reminderLocalDateTime = NormalizeToMinute(localDateTime);
+        _pendingRepeatMinutes = repeatMinutes;
         _reminderScheduleEdited = true;
 
         UpdateReminderControls(
             () =>
             {
                 ReminderToggleButton.IsChecked = true;
-                ReminderDatePicker.SelectedDate = _reminderLocalDateTime.Date;
-                SelectRepeatOptionCore(repeatMinutes);
+                ReminderDatePicker.SelectedDate = _reminderLocalDateTime.Value.Date;
                 SelectReminderPresetCore(selectedPreset);
                 UpdateReminderTimeText();
             });
         UpdateReminderVisibility();
     }
 
-    private void ClearPendingReminder()
+    private void ResetReminderInputs()
     {
+        _reminderLocalDateTime = null;
+        _pendingRepeatMinutes = null;
         _reminderScheduleEdited = true;
         UpdateReminderControls(
             () =>
             {
-                ReminderToggleButton.IsChecked = false;
-                SelectRepeatOptionCore(null);
-                SelectReminderPresetCore(ReminderPreset.None);
+                ReminderToggleButton.IsChecked = true;
+                ReminderDatePicker.SelectedDate = null;
+                ReminderPresetListBox.SelectedItem = null;
+                UpdateReminderTimeText();
             });
         UpdateReminderVisibility();
     }
@@ -308,16 +293,6 @@ public partial class TaskDetailsWindow : Window
             .First(option => option.Value == preset);
     }
 
-    private void SelectRepeatOptionCore(int? minutes)
-    {
-        if (RepeatListBox.ItemsSource is not IEnumerable<RepeatOption> options)
-        {
-            return;
-        }
-
-        RepeatListBox.SelectedItem = options.First(option => option.Minutes == minutes);
-    }
-
     private void UpdateReminderControls(Action update)
     {
         var wasUpdating = _updatingReminderControls;
@@ -334,8 +309,8 @@ public partial class TaskDetailsWindow : Window
 
     private void UpdateReminderTimeText()
     {
-        ReminderHourText.Text = _reminderLocalDateTime.Hour.ToString("00");
-        ReminderMinuteText.Text = _reminderLocalDateTime.Minute.ToString("00");
+        ReminderHourText.Text = _reminderLocalDateTime?.Hour.ToString("00") ?? "--";
+        ReminderMinuteText.Text = _reminderLocalDateTime?.Minute.ToString("00") ?? "--";
     }
 
     private void UpdateReminderVisibility()
@@ -364,16 +339,15 @@ public partial class TaskDetailsWindow : Window
         }
 
         if (ProjectListBox.SelectedItem is not ProjectItem project ||
-            StatusListBox.SelectedItem is not TaskStatusOption status ||
-            RepeatListBox.SelectedItem is not RepeatOption repeat)
+            StatusListBox.SelectedItem is not TaskStatusOption status)
         {
-            ShowWarning("Choose a project, status, and repeat option.");
+            ShowWarning("Choose a project and status.");
             return;
         }
 
         DateTimeOffset? remindAtUtc = null;
         var repeatMinutes = ReminderToggleButton.IsChecked == true
-            ? repeat.Minutes
+            ? _pendingRepeatMinutes
             : null;
         if (ReminderToggleButton.IsChecked == true &&
             !TryBuildReminderTime(out remindAtUtc))
@@ -406,15 +380,16 @@ public partial class TaskDetailsWindow : Window
     private bool TryBuildReminderTime(out DateTimeOffset? remindAtUtc)
     {
         remindAtUtc = null;
-        if (ReminderDatePicker.SelectedDate is not DateTime selectedDate)
+        if (ReminderDatePicker.SelectedDate is not DateTime selectedDate ||
+            _reminderLocalDateTime is not DateTime localTime)
         {
             return false;
         }
 
         var local = DateTime.SpecifyKind(
             selectedDate.Date
-                .AddHours(_reminderLocalDateTime.Hour)
-                .AddMinutes(_reminderLocalDateTime.Minute),
+                .AddHours(localTime.Hour)
+                .AddMinutes(localTime.Minute),
             DateTimeKind.Local);
         if (TimeZoneInfo.Local.IsInvalidTime(local))
         {
