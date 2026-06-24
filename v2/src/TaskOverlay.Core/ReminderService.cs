@@ -23,10 +23,14 @@ public static class ReminderService
             task.RemindAtUtc,
             task.RemindEveryMinutes,
             task.LastReminderAtUtc,
-            task.ReminderActive);
+            task.ReminderActive,
+            task.ReminderAcknowledgedAtUtc,
+            task.ReminderSnoozedUntilUtc);
 
         task.ReminderActive = false;
         task.LastReminderAtUtc = null;
+        task.ReminderAcknowledgedAtUtc = null;
+        task.ReminderSnoozedUntilUtc = null;
         switch (preset)
         {
             case ReminderPreset.None:
@@ -60,7 +64,9 @@ public static class ReminderService
             task.RemindAtUtc,
             task.RemindEveryMinutes,
             task.LastReminderAtUtc,
-            task.ReminderActive);
+            task.ReminderActive,
+            task.ReminderAcknowledgedAtUtc,
+            task.ReminderSnoozedUntilUtc);
     }
 
     public static IReadOnlyList<TaskItem> ProcessDueReminders(
@@ -83,6 +89,7 @@ public static class ReminderService
 
             task.ReminderActive = true;
             task.LastReminderAtUtc = timestamp;
+            task.ReminderSnoozedUntilUtc = null;
             task.UpdatedAtUtc = timestamp;
             if (task.RemindEveryMinutes is int intervalMinutes && intervalMinutes > 0)
             {
@@ -116,6 +123,8 @@ public static class ReminderService
         var timestamp = now ?? DateTimeOffset.UtcNow;
         task.RemindAtUtc = timestamp.AddMinutes(minutes);
         task.ReminderActive = false;
+        task.ReminderAcknowledgedAtUtc = null;
+        task.ReminderSnoozedUntilUtc = null;
         task.UpdatedAtUtc = timestamp;
         return true;
     }
@@ -141,11 +150,15 @@ public static class ReminderService
         var changed = task.RemindAtUtc != remindAtUtc ||
                       task.RemindEveryMinutes != repeatMinutes ||
                       task.ReminderActive ||
-                      task.LastReminderAtUtc is not null;
+                      task.LastReminderAtUtc is not null ||
+                      task.ReminderAcknowledgedAtUtc is not null ||
+                      task.ReminderSnoozedUntilUtc is not null;
         task.RemindAtUtc = remindAtUtc;
         task.RemindEveryMinutes = repeatMinutes;
         task.LastReminderAtUtc = null;
         task.ReminderActive = false;
+        task.ReminderAcknowledgedAtUtc = null;
+        task.ReminderSnoozedUntilUtc = null;
         task.UpdatedAtUtc = timestamp;
         return changed;
     }
@@ -169,6 +182,8 @@ public static class ReminderService
             : 120;
         task.RemindAtUtc = timestamp.AddMinutes(interval);
         task.ReminderActive = false;
+        task.ReminderAcknowledgedAtUtc = null;
+        task.ReminderSnoozedUntilUtc = null;
         task.UpdatedAtUtc = timestamp;
         return true;
     }
@@ -214,5 +229,7 @@ public static class ReminderService
         DateTimeOffset? RemindAtUtc,
         int? RemindEveryMinutes,
         DateTimeOffset? LastReminderAtUtc,
-        bool ReminderActive);
+        bool ReminderActive,
+        DateTimeOffset? ReminderAcknowledgedAtUtc,
+        DateTimeOffset? ReminderSnoozedUntilUtc);
 }

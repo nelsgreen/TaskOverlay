@@ -17,7 +17,7 @@ internal sealed class TaskRowViewModel
         ProjectColorHex = ProjectColorPalette.IsValid(project?.ColorHex)
             ? project!.ColorHex
             : ProjectColorPalette.Resolve(ProjectName, project?.Id ?? Guid.Empty);
-        IsReminderDue = ReminderService.IsDue(task, now);
+        IsReminderDue = ReminderAttentionService.ShouldShowNotification(task, now);
         ShowDescription =
             activeMode &&
             !string.IsNullOrWhiteSpace(task.Description) &&
@@ -34,6 +34,13 @@ internal sealed class TaskRowViewModel
     public bool InWork => Task.Status == TaskStatus.InWork;
     public bool IsWaiting => Task.Status == TaskStatus.Waiting;
     public bool IsReminderDue { get; }
+    public string StatusDotColorHex => IsReminderDue
+        ? "#FFEF4444"
+        : InWork
+            ? "#FF38BDF8"
+            : IsWaiting
+                ? "#FFF59E0B"
+                : "#FF71717A";
     public string ProjectName { get; }
     public string ProjectColorHex { get; }
     public string WaitingForLabel => $"Waiting for: {Task.WaitingFor}";

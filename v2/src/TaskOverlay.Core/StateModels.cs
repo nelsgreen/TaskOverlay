@@ -102,6 +102,8 @@ public sealed class TaskItem
     public DateTimeOffset? RemindAtUtc { get; set; }
     public int? RemindEveryMinutes { get; set; }
     public DateTimeOffset? LastReminderAtUtc { get; set; }
+    public DateTimeOffset? ReminderAcknowledgedAtUtc { get; set; }
+    public DateTimeOffset? ReminderSnoozedUntilUtc { get; set; }
     public string WaitingFor { get; set; } = string.Empty;
     public bool ReminderActive { get; set; }
     public Guid? ProjectId { get; set; }
