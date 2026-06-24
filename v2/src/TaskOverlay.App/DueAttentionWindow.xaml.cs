@@ -17,6 +17,7 @@ public partial class DueAttentionWindow : Window
     private const double WorkAreaMargin = 16;
 
     private readonly Action<Guid> _focus;
+    private readonly Action<Guid> _editTask;
     private readonly Action<Guid, int> _snooze;
     private readonly Action<Guid> _markDone;
     private readonly Action<Guid> _clearReminder;
@@ -25,11 +26,13 @@ public partial class DueAttentionWindow : Window
 
     public DueAttentionWindow(
         Action<Guid> focus,
+        Action<Guid> editTask,
         Action<Guid, int> snooze,
         Action<Guid> markDone,
         Action<Guid> clearReminder)
     {
         _focus = focus;
+        _editTask = editTask;
         _snooze = snooze;
         _markDone = markDone;
         _clearReminder = clearReminder;
@@ -110,6 +113,17 @@ public partial class DueAttentionWindow : Window
 
     private void Focus_OnClick(object sender, RoutedEventArgs e) =>
         InvokeTaskAction(sender, _focus);
+
+    private void EditTask_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: Guid taskId })
+        {
+            return;
+        }
+
+        Hide();
+        _editTask(taskId);
+    }
 
     private void Snooze30_OnClick(object sender, RoutedEventArgs e) =>
         InvokeSnoozeAction(sender, 30);

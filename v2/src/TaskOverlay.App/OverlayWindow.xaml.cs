@@ -234,6 +234,18 @@ public partial class OverlayWindow : Window
         ScheduleCollapse();
     }
 
+    public void OpenTaskDetails(Guid taskId)
+    {
+        if (_isClosed ||
+            _isShuttingDown ||
+            _state.Tasks.FirstOrDefault(task => task.Id == taskId) is not TaskItem task)
+        {
+            return;
+        }
+
+        OpenTaskDetails(task);
+    }
+
     public void HideSafely()
     {
         if (_isClosed || _isShuttingDown)
