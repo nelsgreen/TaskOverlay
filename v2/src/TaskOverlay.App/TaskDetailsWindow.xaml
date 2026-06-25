@@ -322,7 +322,7 @@
                         <StackPanel x:Name="ReminderControlsPanel">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="148" />
                                     <ColumnDefinition Width="12" />
                                     <ColumnDefinition Width="56" />
                                     <ColumnDefinition Width="18" />
@@ -332,13 +332,15 @@
                                 <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
                                     <TextBlock Style="{StaticResource FieldLabelStyle}" Text="DATE" />
                                     <DatePicker x:Name="ReminderDatePicker"
+                                                Width="148"
                                                 Height="38"
                                                 Padding="6"
+                                                HorizontalAlignment="Left"
                                                 Foreground="#FFF4F4F5"
                                                 Background="#FF24272E"
                                                 BorderBrush="#FF4B505B"
                                                 FontSize="12"
-                                                SelectedDateFormat="Long"
+                                                SelectedDateFormat="Short"
                                                 SelectedDateChanged="ReminderDatePicker_OnSelectedDateChanged">
                                         <DatePicker.Resources>
                                             <Style TargetType="{x:Type DatePickerTextBox}">
@@ -426,7 +428,7 @@
                                         Content="+1h"
                                         Click="Add1HourButton_OnClick" />
                                 <Button Style="{StaticResource QuickButtonStyle}"
-                                        Content="Tomorrow"
+                                        Content="+1d"
                                         Click="TomorrowButton_OnClick" />
                                 <Button Style="{StaticResource QuickButtonStyle}"
                                         Foreground="#FFFCA5A5"

@@ -36,6 +36,8 @@ public partial class TaskDetailsWindow : Window
     private readonly Action<bool> _modalInteractionChanged;
     private readonly DateTimeOffset? _originalRemindAtUtc;
     private readonly int? _originalRepeatMinutes;
+    private readonly ReminderPreset _originalReminderPreset;
+    private readonly DateTime? _originalReminderLocalDateTime;
 
     private DateTime? _reminderLocalDateTime;
     private int? _pendingRepeatMinutes;
@@ -56,8 +58,12 @@ public partial class TaskDetailsWindow : Window
         _modalInteractionChanged = modalInteractionChanged;
         _originalRemindAtUtc = task.RemindAtUtc;
         _originalRepeatMinutes = task.RemindEveryMinutes;
+        _originalReminderPreset = ReminderService.DetectPreset(task);
         _reminderLocalDateTime = NormalizeToMinute(
             task.RemindAtUtc?.ToLocalTime().DateTime ?? DateTime.Now.AddHours(1));
+        _originalReminderLocalDateTime = task.RemindAtUtc is DateTimeOffset remindAtUtc
+            ? NormalizeToMinute(remindAtUtc.ToLocalTime().DateTime)
+            : null;
         _pendingRepeatMinutes = task.RemindEveryMinutes;
 
         _initializing = true;
@@ -201,26 +207,27 @@ public partial class TaskDetailsWindow : Window
         AdjustReminderTime(TimeSpan.FromMinutes(-5));
 
     private void Add10MinutesButton_OnClick(object sender, RoutedEventArgs e) =>
-        SetQuickReminder(DateTime.Now.AddMinutes(10));
+        AddQuickReminder(TimeSpan.FromMinutes(10));
 
     private void Add30MinutesButton_OnClick(object sender, RoutedEventArgs e) =>
-        SetQuickReminder(DateTime.Now.AddMinutes(30));
+        AddQuickReminder(TimeSpan.FromMinutes(30));
 
     private void Add1HourButton_OnClick(object sender, RoutedEventArgs e) =>
-        SetQuickReminder(DateTime.Now.AddHours(1));
+        AddQuickReminder(TimeSpan.FromHours(1));
 
     private void TomorrowButton_OnClick(object sender, RoutedEventArgs e) =>
-        SetQuickReminder(DateTime.Today.AddDays(1).AddHours(9));
+        AddQuickReminder(TimeSpan.FromDays(1));
 
     private void ClearReminderButton_OnClick(object sender, RoutedEventArgs e)
     {
         ResetReminderInputs();
     }
 
-    private void SetQuickReminder(DateTime localDateTime)
+    private void AddQuickReminder(TimeSpan increment)
     {
+        var baseTime = _reminderLocalDateTime ?? NormalizeToMinute(DateTime.Now);
         SetPendingReminder(
-            localDateTime,
+            baseTime.Add(increment),
             ReminderPreset.KeepCurrent,
             _pendingRepeatMinutes);
     }
@@ -257,15 +264,17 @@ public partial class TaskDetailsWindow : Window
 
     private void ResetReminderInputs()
     {
-        _reminderLocalDateTime = null;
-        _pendingRepeatMinutes = null;
-        _reminderScheduleEdited = true;
+        _reminderLocalDateTime = _originalReminderLocalDateTime;
+        _pendingRepeatMinutes = _originalRepeatMinutes;
+        _reminderScheduleEdited = false;
         UpdateReminderControls(
             () =>
             {
                 ReminderToggleButton.IsChecked = true;
-                ReminderDatePicker.SelectedDate = null;
-                ReminderPresetListBox.SelectedItem = null;
+                ReminderDatePicker.SelectedDate = _reminderLocalDateTime?.Date;
+                SelectReminderPresetCore(_originalReminderPreset == ReminderPreset.None
+                    ? ReminderPreset.KeepCurrent
+                    : _originalReminderPreset);
                 UpdateReminderTimeText();
             });
         UpdateReminderVisibility();
