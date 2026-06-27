@@ -62,6 +62,7 @@ internal static class Program
             ("old overlay mode default", OldOverlayModeDefault),
             ("legacy auto mode fallback", LegacyAutoModeFallback),
             ("overlay collapse guard", OverlayCollapseGuardBehavior),
+            ("working activation policy", WorkingActivationPolicyBehavior),
             ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
             ("overlay mode click cycle", OverlayModeClickCycle),
             ("overlay mode shortcut policy", OverlayModeShortcutPolicyBehavior),
@@ -1658,16 +1659,26 @@ internal static class Program
             OverlayCollapseGuard.CanCollapse(idle),
             "A REMIND task must not block Working mode idle transition.");
         Assert(
+            OverlayCollapseGuard.CanCollapse(idle with { SettingsOpen = true }),
+            "Settings should not block Working from returning to idle.");
+        Assert(
             OverlayCollapseGuard.CanCollapse(
                 idle with { OverlayMode = OverlayMode.CollapsedHandle }),
             "A REMIND task must not block CollapsedHandle collapse.");
+        Assert(
+            !OverlayCollapseGuard.CanCollapse(
+                idle with
+                {
+                    OverlayMode = OverlayMode.CollapsedHandle,
+                    SettingsOpen = true
+                }),
+            "Settings should preserve the existing CollapsedHandle interaction guard.");
 
         var blockers = new[]
         {
             idle with { OverlayMode = OverlayMode.PinnedExpanded },
             idle with { TaskDetailsOpen = true },
             idle with { ContextMenuOpen = true },
-            idle with { SettingsOpen = true },
             idle with { ModalDialogOpen = true },
             idle with { Dragging = true }
         };
@@ -1675,6 +1686,45 @@ internal static class Program
         Assert(
             blockers.All(state => !OverlayCollapseGuard.CanCollapse(state)),
             "Every active interaction should prevent overlay collapse.");
+    }
+
+    private static void WorkingActivationPolicyBehavior()
+    {
+        Assert(
+            !OverlayActiveStatePolicy.AfterModeSwitch(OverlayMode.Working),
+            "Switching to Working should render idle first.");
+        Assert(
+            OverlayActiveStatePolicy.AfterModeSwitch(OverlayMode.PinnedExpanded),
+            "Switching to Pinned should render active immediately.");
+        Assert(
+            !OverlayActiveStatePolicy.AfterModeSwitch(OverlayMode.CollapsedHandle),
+            "Switching to CollapsedHandle should not render active immediately.");
+
+        Assert(
+            !OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.Working,
+                pointerInside: false),
+            "Opening Settings away from Working should preserve idle presentation.");
+        Assert(
+            OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.Working,
+                pointerInside: true),
+            "Working should still activate on real hover while Settings is open.");
+        Assert(
+            !OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.Working,
+                pointerInside: false),
+            "Working should return to idle after pointer leave while Settings is open.");
+        Assert(
+            OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.PinnedExpanded,
+                pointerInside: false),
+            "Settings should preserve Pinned active behavior.");
+        Assert(
+            OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.CollapsedHandle,
+                pointerInside: false),
+            "Settings should preserve the existing CollapsedHandle active interaction.");
     }
 
     private static void PointerClickVersusDragThreshold()

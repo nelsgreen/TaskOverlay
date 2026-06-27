@@ -161,6 +161,7 @@ public partial class OverlayWindow : Window
         StopModeTimers();
         ResetStaleInputState(closeContextMenus: false);
         _state.OverlaySettings.OverlayMode = mode;
+        var initialActiveState = OverlayActiveStatePolicy.AfterModeSwitch(mode);
 
         if (mode == OverlayMode.CollapsedHandle)
         {
@@ -178,32 +179,31 @@ public partial class OverlayWindow : Window
                 RestoreCollapsedHandle();
             }
 
-            if (mode == OverlayMode.CollapsedHandle)
-            {
-                SetActiveMode(false, force: true);
-            }
-            else
-            {
-                SetActiveMode(
-                    mode == OverlayMode.PinnedExpanded || IsPointerOverOverlay(),
-                    force: mode == OverlayMode.Working);
-            }
+            SetActiveMode(
+                initialActiveState,
+                force: true,
+                refreshPresentation: true);
         }
         else if (mode == OverlayMode.PinnedExpanded)
         {
             HideHandleWindow();
             _state.WindowPlacement.Left = Left;
             _state.WindowPlacement.Top = Top;
-            SetActiveMode(true);
+            SetActiveMode(
+                initialActiveState,
+                force: true,
+                refreshPresentation: true);
         }
         else
         {
             HideHandleWindow();
             RestoreNormalPosition();
-            SetActiveMode(IsMouseOver);
+            SetActiveMode(
+                initialActiveState,
+                force: true,
+                refreshPresentation: true);
         }
 
-        RefreshTasks();
         KeepCurrentModeWithinWorkArea();
         ScheduleWorkingPointerReconciliation();
 
@@ -223,11 +223,26 @@ public partial class OverlayWindow : Window
         if (active)
         {
             StopModeTimers();
-            SetActiveMode(true);
+            var mode = _state.OverlaySettings.OverlayMode;
+            var activeState = OverlayActiveStatePolicy.WhileSettingsOpen(
+                mode,
+                IsPointerOverOverlay());
+            SetActiveMode(
+                activeState,
+                force: mode is OverlayMode.Working or OverlayMode.AutoQuestTracker);
+            ScheduleWorkingPointerReconciliation();
         }
         else
         {
-            ScheduleCollapse();
+            if (_state.OverlaySettings.OverlayMode == OverlayMode.Working)
+            {
+                SetActiveMode(IsPointerOverOverlay(), force: true);
+                ScheduleWorkingPointerReconciliation();
+            }
+            else
+            {
+                ScheduleCollapse();
+            }
         }
     }
 
@@ -547,7 +562,10 @@ public partial class OverlayWindow : Window
         SetActiveMode(true);
     }
 
-    private void SetActiveMode(bool active, bool force = false)
+    private void SetActiveMode(
+        bool active,
+        bool force = false,
+        bool refreshPresentation = false)
     {
         if (_isClosed || _isShuttingDown || !Dispatcher.CheckAccess())
         {
@@ -562,7 +580,7 @@ public partial class OverlayWindow : Window
 
         var modeChanged = _isActiveMode != active;
         _isActiveMode = active;
-        if (modeChanged)
+        if (modeChanged || refreshPresentation)
         {
             RefreshTasks();
         }
