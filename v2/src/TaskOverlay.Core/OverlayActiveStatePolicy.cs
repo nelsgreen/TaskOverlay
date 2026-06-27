@@ -1,9 +1,16 @@
 namespace TaskOverlay.Core;
 
+public enum OverlayVisualBranch
+{
+    Expanded,
+    Working
+}
+
 public readonly record struct OverlayPresentationState(
     OverlayMode Mode,
     bool IsActive,
     bool IsWorking,
+    OverlayVisualBranch VisualBranch,
     bool ShowActiveChrome,
     bool ShowDescriptions,
     bool AllowFocusBadge,
@@ -25,7 +32,10 @@ public static class OverlayActiveStatePolicy
             mode,
             IsActive: activeRequested,
             IsWorking: working,
-            ShowActiveChrome: activeRequested,
+            VisualBranch: working
+                ? OverlayVisualBranch.Working
+                : OverlayVisualBranch.Expanded,
+            ShowActiveChrome: activeRequested && !working,
             ShowDescriptions: activeRequested,
             AllowFocusBadge: !working,
             UseCompactLayout: working);

@@ -1696,6 +1696,7 @@ internal static class Program
             {
                 IsActive: false,
                 IsWorking: true,
+                VisualBranch: OverlayVisualBranch.Working,
                 ShowActiveChrome: false,
                 ShowDescriptions: false,
                 AllowFocusBadge: false,
@@ -1720,12 +1721,13 @@ internal static class Program
             {
                 IsActive: true,
                 IsWorking: true,
-                ShowActiveChrome: true,
+                VisualBranch: OverlayVisualBranch.Working,
+                ShowActiveChrome: false,
                 ShowDescriptions: true,
                 AllowFocusBadge: false,
                 UseCompactLayout: true
             },
-            "Working hover should activate without weakening Working invariants.");
+            "Working hover should activate without adding expanded-only visuals.");
         Assert(
             !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
                 focusedTask,
@@ -1739,6 +1741,7 @@ internal static class Program
             {
                 IsActive: true,
                 IsWorking: false,
+                VisualBranch: OverlayVisualBranch.Expanded,
                 ShowActiveChrome: true,
                 ShowDescriptions: true,
                 AllowFocusBadge: true,
@@ -1750,6 +1753,13 @@ internal static class Program
                 focusedTask,
                 pinnedEntry),
             "Pinned entry should immediately restore FOCUS chips.");
+
+        Assert(
+            workingEntry.VisualBranch != pinnedEntry.VisualBranch,
+            "Working and Pinned should use distinct visual branches.");
+        Assert(
+            !workingEntry.ShowActiveChrome && !workingHover.ShowActiveChrome,
+            "Working should never request the expanded active header.");
 
         var collapsedEntry = OverlayActiveStatePolicy.ForModeEntry(
             OverlayMode.CollapsedHandle);
@@ -1828,6 +1838,16 @@ internal static class Program
             OverlayModeCycle.Next(OverlayMode.AutoQuestTracker) ==
             OverlayMode.Working,
             "Legacy AutoQuestTracker should cycle into Working.");
+
+        var mouseTarget = OverlayModeCycle.Next(OverlayMode.CollapsedHandle);
+        var hotkeyTarget = OverlayModeShortcutPolicy.Resolve(
+            OverlayMode.CollapsedHandle,
+            OverlayModeShortcut.Cycle).Mode;
+        Assert(
+            mouseTarget == hotkeyTarget &&
+            OverlayActiveStatePolicy.ForModeEntry(mouseTarget).VisualBranch ==
+            OverlayVisualBranch.Working,
+            "Mouse and Ctrl+Alt+1 cycles should resolve the same Working entry policy.");
     }
 
     private static void OverlayModeShortcutPolicyBehavior()
