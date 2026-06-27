@@ -3,133 +3,497 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Task details"
         Icon="Assets/app.ico"
-        Width="620"
-        Height="760"
+        Width="540"
+        Height="680"
         MinWidth="500"
-        MinHeight="620"
+        MinHeight="580"
+        Background="#FF111318"
+        FontFamily="Segoe UI"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
-    <Grid Background="#FF181B22">
-        <Grid Margin="28">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+    <Window.Resources>
+        <Style x:Key="SectionCardStyle" TargetType="Border">
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Background" Value="#FF1A1D24" />
+            <Setter Property="BorderBrush" Value="#FF30343D" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
 
-            <TextBlock Grid.Row="0"
-                       Foreground="#FFF4F4F5"
-                       FontSize="24"
-                       FontWeight="SemiBold"
-                       Text="Task details" />
+        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,0,7" />
+            <Setter Property="Foreground" Value="#FFA1A1AA" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
 
-            <StackPanel Grid.Row="1" Margin="0,20,0,0">
-                <TextBlock Foreground="#FFD4D4D8" Text="Title" />
-                <TextBox x:Name="TitleTextBox"
-                         Margin="0,7,0,0"
-                         Padding="8"
-                         FontSize="15"
-                         MaxLength="500" />
-            </StackPanel>
+        <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#FFE4E4E7" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
 
-            <Grid Grid.Row="2" Margin="0,16,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="18" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Foreground="#FFD4D4D8" Text="Project" />
-                    <ComboBox x:Name="ProjectComboBox"
-                              Margin="0,7,0,0"
-                              Padding="7,5"
-                              DisplayMemberPath="Name" />
+        <Style x:Key="EditorTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Foreground" Value="#FFF4F4F5" />
+            <Setter Property="Background" Value="#FF24272E" />
+            <Setter Property="BorderBrush" Value="#FF3F444E" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CaretBrush" Value="#FFF4F4F5" />
+            <Setter Property="SelectionBrush" Value="#FF2563EB" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Style.Triggers>
+                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                    <Setter Property="BorderBrush" Value="#FF60A5FA" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="ActionButtonBase" TargetType="Button">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="13,6" />
+            <Setter Property="Foreground" Value="#FFF4F4F5" />
+            <Setter Property="Background" Value="#FF2A2E36" />
+            <Setter Property="BorderBrush" Value="#FF454A55" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.86" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.68" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource ActionButtonBase}">
+            <Setter Property="Foreground" Value="#FF111827" />
+            <Setter Property="Background" Value="#FFE5E7EB" />
+            <Setter Property="BorderBrush" Value="#FFFFFFFF" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <Style x:Key="SecondaryButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource ActionButtonBase}" />
+
+        <Style x:Key="DangerButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource ActionButtonBase}">
+            <Setter Property="Foreground" Value="#FFFCA5A5" />
+            <Setter Property="Background" Value="#332B1013" />
+            <Setter Property="BorderBrush" Value="#FF7F1D1D" />
+        </Style>
+
+        <Style x:Key="QuickButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource ActionButtonBase}">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="Margin" Value="0,0,7,7" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+
+        <Style x:Key="ChipListStyle" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ItemsPanel">
+                <Setter.Value>
+                    <ItemsPanelTemplate>
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ChipItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,0,7,7" />
+            <Setter Property="Padding" Value="11,6" />
+            <Setter Property="Foreground" Value="#FFD4D4D8" />
+            <Setter Property="Background" Value="#FF22252B" />
+            <Setter Property="BorderBrush" Value="#FF3A3E47" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="ChipBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="14">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ChipBorder" Property="BorderBrush" Value="#FF71717A" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Foreground" Value="#FFFFFFFF" />
+                                <Setter TargetName="ChipBorder" Property="Background" Value="#FF253B64" />
+                                <Setter TargetName="ChipBorder" Property="BorderBrush" Value="#FF93C5FD" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ReminderToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Width" Value="54" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Content" Value="OFF" />
+            <Setter Property="Foreground" Value="#FFA1A1AA" />
+            <Setter Property="Background" Value="#FF2A2E36" />
+            <Setter Property="BorderBrush" Value="#FF4B505B" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="ToggleBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="13">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Content" Value="ON" />
+                                <Setter Property="Foreground" Value="#FFFFFFFF" />
+                                <Setter TargetName="ToggleBorder" Property="Background" Value="#FF2563EB" />
+                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="#FF60A5FA" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="StepperButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource ActionButtonBase}">
+            <Setter Property="MinHeight" Value="22" />
+            <Setter Property="Padding" Value="4,1" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Padding="16,12"
+                Background="#FF181B21"
+                BorderBrush="#FF30343D"
+                BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Image DockPanel.Dock="Left"
+                       Width="28"
+                       Height="28"
+                       Margin="0,0,11,0"
+                       Source="Assets/app.ico" />
+                <StackPanel>
+                    <TextBlock Foreground="#FFF4F4F5"
+                               FontSize="17"
+                               FontWeight="SemiBold"
+                               Text="Task details" />
+                    <TextBlock Margin="0,2,0,0"
+                               Foreground="#FF8B93A1"
+                               FontSize="11"
+                               Text="Edit task, focus, and reminder settings" />
                 </StackPanel>
-                <StackPanel Grid.Column="2">
-                    <TextBlock Foreground="#FFD4D4D8" Text="Status" />
-                    <ComboBox x:Name="StatusComboBox"
-                              Margin="0,7,0,0"
-                              Padding="7,5"
-                              DisplayMemberPath="Label"
-                              SelectionChanged="StatusComboBox_OnSelectionChanged" />
-                </StackPanel>
-            </Grid>
+            </DockPanel>
+        </Border>
 
-            <StackPanel Grid.Row="3" Margin="0,16,0,0">
-                <TextBlock Foreground="#FFD4D4D8" Text="Waiting for" />
-                <TextBox x:Name="WaitingForTextBox"
-                         Margin="0,7,0,0"
-                         Padding="8"
-                         MaxLength="300" />
+        <ScrollViewer Grid.Row="1"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="16,12,16,14">
+                <Border Style="{StaticResource SectionCardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource FieldLabelStyle}" Text="TITLE" />
+                        <TextBox x:Name="TitleTextBox"
+                                 Style="{StaticResource EditorTextBoxStyle}"
+                                 FontSize="15"
+                                 FontWeight="SemiBold"
+                                 MaxLength="500" />
+
+                        <TextBlock Margin="0,12,0,7"
+                                   Style="{StaticResource FieldLabelStyle}"
+                                   Text="PROJECT" />
+                        <ListBox x:Name="ProjectListBox"
+                                 Style="{StaticResource ChipListStyle}"
+                                 ItemContainerStyle="{StaticResource ChipItemStyle}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="7"
+                                                 Height="7"
+                                                 Margin="0,0,7,0"
+                                                 Fill="{Binding ColorHex}" />
+                                        <TextBlock FontSize="11" Text="{Binding Name}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <TextBlock Margin="0,5,0,7"
+                                   Style="{StaticResource FieldLabelStyle}"
+                                   Text="STATUS" />
+                        <ListBox x:Name="StatusListBox"
+                                 Style="{StaticResource ChipListStyle}"
+                                 ItemContainerStyle="{StaticResource ChipItemStyle}"
+                                 SelectionChanged="StatusListBox_OnSelectionChanged">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock FontSize="11"
+                                               FontWeight="SemiBold"
+                                               Text="{Binding Label}" />
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <StackPanel x:Name="WaitingSection" Margin="0,4,0,0">
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="WAITING FOR" />
+                            <TextBox x:Name="WaitingForTextBox"
+                                     Style="{StaticResource EditorTextBoxStyle}"
+                                     MaxLength="300" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,10,0,0" Style="{StaticResource SectionCardStyle}">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,10">
+                            <TextBlock VerticalAlignment="Center"
+                                       Style="{StaticResource SectionTitleStyle}"
+                                       Text="REMIND" />
+                            <ToggleButton x:Name="ReminderToggleButton"
+                                          DockPanel.Dock="Right"
+                                          HorizontalAlignment="Right"
+                                          Style="{StaticResource ReminderToggleStyle}"
+                                          Checked="ReminderToggleButton_OnChanged"
+                                          Unchecked="ReminderToggleButton_OnChanged" />
+                        </DockPanel>
+
+                        <TextBlock x:Name="ReminderOffText"
+                                   Foreground="#FF71717A"
+                                   FontSize="12"
+                                   Text="REMIND is off." />
+
+                        <StackPanel x:Name="ReminderControlsPanel">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="148" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="56" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="DATE" />
+                                    <DatePicker x:Name="ReminderDatePicker"
+                                                Width="148"
+                                                Height="38"
+                                                Padding="6"
+                                                HorizontalAlignment="Left"
+                                                Foreground="#FFF4F4F5"
+                                                Background="#FF24272E"
+                                                BorderBrush="#FF4B505B"
+                                                FontSize="12"
+                                                SelectedDateFormat="Short"
+                                                SelectedDateChanged="ReminderDatePicker_OnSelectedDateChanged">
+                                        <DatePicker.Resources>
+                                            <Style TargetType="{x:Type DatePickerTextBox}">
+                                                <Setter Property="Foreground" Value="#FFF4F4F5" />
+                                                <Setter Property="Background" Value="#FF24272E" />
+                                                <Setter Property="BorderBrush" Value="Transparent" />
+                                                <Setter Property="BorderThickness" Value="0" />
+                                                <Setter Property="CaretBrush" Value="#FFF4F4F5" />
+                                                <Setter Property="SelectionBrush" Value="#FF2563EB" />
+                                                <Setter Property="Padding" Value="3,0" />
+                                                <Setter Property="VerticalContentAlignment" Value="Center" />
+                                            </Style>
+                                        </DatePicker.Resources>
+                                    </DatePicker>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock HorizontalAlignment="Center"
+                                               Style="{StaticResource FieldLabelStyle}"
+                                               Text="HOUR" />
+                                    <Border Background="#FF24272E"
+                                            BorderBrush="#FF3F444E"
+                                            BorderThickness="1"
+                                            CornerRadius="5">
+                                        <StackPanel>
+                                            <Button Style="{StaticResource StepperButtonStyle}"
+                                                    Content="▲"
+                                                    Click="HourUpButton_OnClick" />
+                                            <TextBlock x:Name="ReminderHourText"
+                                                       HorizontalAlignment="Center"
+                                                       Margin="0,2"
+                                                       Foreground="#FFF4F4F5"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold" />
+                                            <Button Style="{StaticResource StepperButtonStyle}"
+                                                    Content="▼"
+                                                    Click="HourDownButton_OnClick" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <TextBlock Grid.Column="3"
+                                           Margin="0,26,0,0"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="#FF60A5FA"
+                                           FontSize="20"
+                                           FontWeight="Bold"
+                                           Text=":" />
+
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock HorizontalAlignment="Center"
+                                               Style="{StaticResource FieldLabelStyle}"
+                                               Text="MIN" />
+                                    <Border Background="#FF24272E"
+                                            BorderBrush="#FF3F444E"
+                                            BorderThickness="1"
+                                            CornerRadius="5">
+                                        <StackPanel>
+                                            <Button Style="{StaticResource StepperButtonStyle}"
+                                                    Content="▲"
+                                                    Click="MinuteUpButton_OnClick" />
+                                            <TextBlock x:Name="ReminderMinuteText"
+                                                       HorizontalAlignment="Center"
+                                                       Margin="0,2"
+                                                       Foreground="#FFF4F4F5"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold" />
+                                            <Button Style="{StaticResource StepperButtonStyle}"
+                                                    Content="▼"
+                                                    Click="MinuteDownButton_OnClick" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+
+                            <WrapPanel Margin="0,12,0,0">
+                                <Button Style="{StaticResource QuickButtonStyle}"
+                                        Content="+10m"
+                                        Click="Add10MinutesButton_OnClick" />
+                                <Button Style="{StaticResource QuickButtonStyle}"
+                                        Content="+30m"
+                                        Click="Add30MinutesButton_OnClick" />
+                                <Button Style="{StaticResource QuickButtonStyle}"
+                                        Content="+1h"
+                                        Click="Add1HourButton_OnClick" />
+                                <Button Style="{StaticResource QuickButtonStyle}"
+                                        Content="+1d"
+                                        Click="TomorrowButton_OnClick" />
+                                <Button Style="{StaticResource QuickButtonStyle}"
+                                        Foreground="#FFFCA5A5"
+                                        Content="Clear"
+                                        Click="ClearReminderButton_OnClick" />
+                            </WrapPanel>
+
+                            <TextBlock Margin="0,3,0,7"
+                                       Style="{StaticResource FieldLabelStyle}"
+                                       Text="PRESET" />
+                            <ListBox x:Name="ReminderPresetListBox"
+                                     Style="{StaticResource ChipListStyle}"
+                                     ItemContainerStyle="{StaticResource ChipItemStyle}"
+                                     SelectionChanged="ReminderPresetListBox_OnSelectionChanged">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock FontSize="11" Text="{Binding Label}" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,10,0,0" Style="{StaticResource SectionCardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}" Text="NOTES" />
+                        <TextBox x:Name="DescriptionTextBox"
+                                 Height="88"
+                                 Margin="0,8,0,0"
+                                 Style="{StaticResource EditorTextBoxStyle}"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalContentAlignment="Top"
+                                 VerticalScrollBarVisibility="Auto" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
+        </ScrollViewer>
 
-            <StackPanel Grid.Row="4" Margin="0,16,0,0">
-                <TextBlock Foreground="#FFD4D4D8" Text="Reminder preset" />
-                <ComboBox x:Name="ReminderPresetComboBox"
-                          Margin="0,7,0,0"
-                          Padding="7,5"
-                          DisplayMemberPath="Label" />
-            </StackPanel>
-
-            <Grid Grid.Row="5" Margin="0,16,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="18" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Foreground="#FFD4D4D8"
-                               Text="Remind at (local yyyy-MM-dd HH:mm)" />
-                    <TextBox x:Name="RemindAtTextBox"
-                             Margin="0,7,0,0"
-                             Padding="8" />
-                </StackPanel>
-                <StackPanel Grid.Column="2">
-                    <TextBlock Foreground="#FFD4D4D8" Text="Repeat" />
-                    <ComboBox x:Name="RepeatComboBox"
-                              Margin="0,7,0,0"
-                              Padding="7,5"
-                              DisplayMemberPath="Label" />
-                </StackPanel>
-            </Grid>
-
-            <StackPanel Grid.Row="6" Margin="0,16,0,0">
-                <TextBlock Foreground="#FFD4D4D8" Text="Description" />
-                <TextBox x:Name="DescriptionTextBox"
-                         Margin="0,7,0,0"
-                         Padding="8"
-                         AcceptsReturn="True"
-                         TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto" />
-            </StackPanel>
-
-            <DockPanel Grid.Row="7" Margin="0,24,0,0">
+        <Border Grid.Row="2"
+                Padding="16,10"
+                Background="#FF181B21"
+                BorderBrush="#FF30343D"
+                BorderThickness="0,1,0,0">
+            <DockPanel>
                 <Button DockPanel.Dock="Left"
                         MinWidth="88"
-                        Padding="12,7"
-                        Foreground="#FFF4F4F5"
-                        Background="#FF7F1D1D"
-                        BorderBrush="#FF991B1B"
+                        Style="{StaticResource DangerButtonStyle}"
                         Content="Delete"
                         Click="DeleteButton_OnClick" />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button MinWidth="88"
                             Margin="0,0,10,0"
-                            Padding="12,7"
+                            Style="{StaticResource SecondaryButtonStyle}"
                             Content="Cancel"
                             Click="CancelButton_OnClick" />
                     <Button MinWidth="88"
-                            Padding="12,7"
+                            Style="{StaticResource PrimaryButtonStyle}"
                             Content="Save"
                             IsDefault="True"
                             Click="SaveButton_OnClick" />
                 </StackPanel>
             </DockPanel>
-        </Grid>
+        </Border>
     </Grid>
 </Window>
