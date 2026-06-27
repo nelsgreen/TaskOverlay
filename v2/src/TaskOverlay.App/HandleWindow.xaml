@@ -31,8 +31,8 @@
             <Border.ContextMenu>
                 <ContextMenu Opened="ModeContextMenu_OnOpened"
                              Closed="ModeContextMenu_OnClosed">
-                    <MenuItem Header="Auto quest tracker"
-                              Tag="AutoQuestTracker"
+                    <MenuItem Header="Working"
+                              Tag="Working"
                               IsCheckable="True"
                               Click="ModeMenuItem_OnClick" />
                     <MenuItem Header="Collapsed handle"

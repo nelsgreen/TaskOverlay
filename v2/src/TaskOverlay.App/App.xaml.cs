@@ -21,7 +21,7 @@ public partial class App : System.Windows.Application
     private Drawing.Icon? _trayApplicationIcon;
     private Forms.ContextMenuStrip? _trayMenu;
     private Forms.ToolStripMenuItem? _overlayModeMenuItem;
-    private Forms.ToolStripMenuItem? _autoQuestTrackerMenuItem;
+    private Forms.ToolStripMenuItem? _workingModeMenuItem;
     private Forms.ToolStripMenuItem? _collapsedHandleMenuItem;
     private Forms.ToolStripMenuItem? _pinnedExpandedMenuItem;
     private GlobalHotkeyManager? _hotkeyManager;
@@ -148,9 +148,9 @@ public partial class App : System.Windows.Application
         _trayMenu.Items.Add("Show overlay", null, (_, _) => RunCommand("Tray", "Show overlay", ShowOverlay));
         _trayMenu.Items.Add("Hide overlay", null, (_, _) => RunCommand("Tray", "Hide overlay", HideOverlay));
         _overlayModeMenuItem = new Forms.ToolStripMenuItem("Overlay mode");
-        _autoQuestTrackerMenuItem = CreateOverlayModeMenuItem(
-            "Auto quest tracker",
-            OverlayMode.AutoQuestTracker);
+        _workingModeMenuItem = CreateOverlayModeMenuItem(
+            "Working",
+            OverlayMode.Working);
         _collapsedHandleMenuItem = CreateOverlayModeMenuItem(
             "Collapsed handle",
             OverlayMode.CollapsedHandle);
@@ -160,13 +160,13 @@ public partial class App : System.Windows.Application
         _overlayModeMenuItem.DropDownItems.AddRange(
             new Forms.ToolStripItem[]
             {
-                _autoQuestTrackerMenuItem,
+                _workingModeMenuItem,
                 _collapsedHandleMenuItem,
                 _pinnedExpandedMenuItem
             });
         _trayMenu.Items.Add(_overlayModeMenuItem);
         UpdateOverlayModeUi(_state?.OverlaySettings.OverlayMode ??
-                            OverlayMode.AutoQuestTracker);
+                            OverlayMode.Working);
         _trayMenu.Items.Add(
             "Open Tree Manager",
             null,
@@ -507,6 +507,11 @@ public partial class App : System.Windows.Application
 
     private void SetOverlayMode(OverlayMode mode)
     {
+        if (mode == OverlayMode.AutoQuestTracker)
+        {
+            mode = OverlayMode.Working;
+        }
+
         if (_state is null || _state.OverlaySettings.OverlayMode == mode)
         {
             return;
@@ -837,7 +842,7 @@ public partial class App : System.Windows.Application
 
     private void UpdateOverlayModeUi(OverlayMode mode)
     {
-        SetModeMenuCheck(_autoQuestTrackerMenuItem, mode, OverlayMode.AutoQuestTracker);
+        SetModeMenuCheck(_workingModeMenuItem, mode, OverlayMode.Working);
         SetModeMenuCheck(_collapsedHandleMenuItem, mode, OverlayMode.CollapsedHandle);
         SetModeMenuCheck(_pinnedExpandedMenuItem, mode, OverlayMode.PinnedExpanded);
 
@@ -978,7 +983,7 @@ public partial class App : System.Windows.Application
             {
                 foreach (var item in new[]
                 {
-                    _autoQuestTrackerMenuItem,
+                    _workingModeMenuItem,
                     _collapsedHandleMenuItem,
                     _pinnedExpandedMenuItem
                 })
@@ -989,7 +994,7 @@ public partial class App : System.Windows.Application
                     }
                 }
 
-                _autoQuestTrackerMenuItem = null;
+                _workingModeMenuItem = null;
                 _collapsedHandleMenuItem = null;
                 _pinnedExpandedMenuItem = null;
                 _overlayModeMenuItem = null;

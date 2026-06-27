@@ -26,6 +26,10 @@ public sealed class AppState
         {
             CreatedAtUtc = timestamp,
             UpdatedAtUtc = timestamp,
+            OverlaySettings = new OverlaySettings
+            {
+                OverlayMode = global::TaskOverlay.Core.OverlayMode.Working
+            },
             Projects = { defaultProject },
             Tasks =
             {
@@ -168,7 +172,8 @@ public enum OverlayMode
 {
     AutoQuestTracker,
     CollapsedHandle,
-    PinnedExpanded
+    PinnedExpanded,
+    Working
 }
 
 public sealed class OverlaySettings
@@ -183,7 +188,7 @@ public sealed class OverlaySettings
     public OverlayMode OverlayMode
     {
         get => StoredOverlayMode ??
-               global::TaskOverlay.Core.OverlayMode.AutoQuestTracker;
+               global::TaskOverlay.Core.OverlayMode.Working;
         set => StoredOverlayMode = value;
     }
 
@@ -197,16 +202,26 @@ public sealed class OverlaySettings
     public Guid? LastSelectedProjectId { get; set; }
     public bool MvpProjectsSeeded { get; set; }
 
-    public void NormalizeOverlayMode()
+    public bool NormalizeOverlayMode()
     {
-        OverlayMode = StoredOverlayMode ??
-                      (PinnedActiveMode
-                          ? global::TaskOverlay.Core.OverlayMode.PinnedExpanded
-                          : CollapsedMode
-                              ? global::TaskOverlay.Core.OverlayMode.CollapsedHandle
-                              : global::TaskOverlay.Core.OverlayMode.AutoQuestTracker);
+        var normalizedMode = StoredOverlayMode ??
+                             (PinnedActiveMode
+                                 ? global::TaskOverlay.Core.OverlayMode.PinnedExpanded
+                                 : CollapsedMode
+                                     ? global::TaskOverlay.Core.OverlayMode.CollapsedHandle
+                                     : global::TaskOverlay.Core.OverlayMode.Working);
+        if (normalizedMode == global::TaskOverlay.Core.OverlayMode.AutoQuestTracker)
+        {
+            normalizedMode = global::TaskOverlay.Core.OverlayMode.Working;
+        }
+
+        var changed = StoredOverlayMode != normalizedMode ||
+                      CollapsedMode ||
+                      PinnedActiveMode;
+        OverlayMode = normalizedMode;
         CollapsedMode = false;
         PinnedActiveMode = false;
+        return changed;
     }
 }
 

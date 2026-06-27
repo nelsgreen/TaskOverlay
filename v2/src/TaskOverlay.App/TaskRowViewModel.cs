@@ -18,14 +18,24 @@ internal sealed class TaskRowViewModel
             ? project!.ColorHex
             : ProjectColorPalette.Resolve(ProjectName, project?.Id ?? Guid.Empty);
         IsReminderDue = ReminderAttentionService.ShouldShowNotification(task, now);
-        ShowDescription =
-            activeMode &&
-            !string.IsNullOrWhiteSpace(task.Description) &&
-            (task.DescriptionExpanded || task.InWork || task.Status == TaskStatus.Waiting);
-        ShowWaitingFor =
-            activeMode &&
-            task.Status == TaskStatus.Waiting &&
-            !string.IsNullOrWhiteSpace(task.WaitingFor);
+        var workingMode = state.OverlaySettings.OverlayMode is
+            OverlayMode.Working or OverlayMode.AutoQuestTracker;
+        ShowDescription = activeMode &&
+                          !string.IsNullOrWhiteSpace(task.Description) &&
+                          (workingMode
+                              ? task.Status == TaskStatus.InWork
+                              : task.DescriptionExpanded ||
+                                task.InWork ||
+                                task.Status == TaskStatus.Waiting);
+        ShowWaitingFor = !workingMode &&
+                         activeMode &&
+                         task.Status == TaskStatus.Waiting &&
+                         !string.IsNullOrWhiteSpace(task.WaitingFor);
+        var quietIdleRow = workingMode && !activeMode && !IsReminderDue;
+        RowOpacity = quietIdleRow ? 0.58 : 1.0;
+        TitleColorHex = quietIdleRow
+            ? "#FFA1A1AA"
+            : "#FFFFE878";
     }
 
     public TaskItem Task { get; }
@@ -46,4 +56,6 @@ internal sealed class TaskRowViewModel
     public string WaitingForLabel => $"Waiting for: {Task.WaitingFor}";
     public bool ShowDescription { get; }
     public bool ShowWaitingFor { get; }
+    public double RowOpacity { get; }
+    public string TitleColorHex { get; }
 }

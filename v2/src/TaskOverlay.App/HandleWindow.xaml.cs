@@ -352,7 +352,18 @@ public partial class HandleWindow : Window
             HandleSurface.BorderBrush = PinnedBorder;
             HandleIndicator.Fill = PinnedForeground;
             HandleSurface.ToolTip =
-                "Pinned expanded. Click to return to auto quest tracker.";
+                "Pinned expanded. Click to return to Working.";
+            return;
+        }
+
+        if (_state.OverlaySettings.OverlayMode is
+            OverlayMode.Working or OverlayMode.AutoQuestTracker)
+        {
+            HandleSurface.Background = ExpandedBackground;
+            HandleSurface.BorderBrush = ExpandedBorder;
+            HandleIndicator.Fill = ExpandedForeground;
+            HandleSurface.ToolTip =
+                "Working. Click for collapsed handle; right-click to choose overlay mode.";
             return;
         }
 

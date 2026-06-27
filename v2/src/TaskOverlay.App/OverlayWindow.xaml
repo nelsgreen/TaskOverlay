@@ -42,8 +42,8 @@
             <Border.ContextMenu>
                 <ContextMenu Opened="HandleModeContextMenu_OnOpened"
                              Closed="HandleModeContextMenu_OnClosed">
-                    <MenuItem Header="Auto quest tracker"
-                              Tag="AutoQuestTracker"
+                    <MenuItem Header="Working"
+                              Tag="Working"
                               IsCheckable="True"
                               Click="HandleModeMenuItem_OnClick" />
                     <MenuItem Header="Collapsed handle"
@@ -94,11 +94,20 @@
                 <ScrollViewer x:Name="TasksScroller"
                               HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                    <TextBlock x:Name="EmptyState"
+                               Margin="8,6"
+                               Foreground="#FFA1A1AA"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Text="No FOCUS tasks"
+                               Visibility="Collapsed" />
                     <ItemsControl x:Name="ActiveTasks">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Margin="0,2"
                                         Padding="8,5"
+                                        Opacity="{Binding RowOpacity}"
                                         BorderThickness="0"
                                         CornerRadius="6"
                                         ContextMenuOpening="TaskRow_OnContextMenuOpening">
@@ -271,7 +280,7 @@
                                                 </Button.Template>
                                                 <StackPanel>
                                                 <TextBlock VerticalAlignment="Center"
-                                                           Foreground="#FFFFE878"
+                                                           Foreground="{Binding TitleColorHex}"
                                                            FontSize="20"
                                                            FontWeight="SemiBold"
                                                            Text="{Binding Title}"
@@ -321,6 +330,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    </StackPanel>
                 </ScrollViewer>
             </StackPanel>
         </Border>

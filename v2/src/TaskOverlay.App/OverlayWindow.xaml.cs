@@ -144,6 +144,11 @@ public partial class OverlayWindow : Window
 
     public void SetOverlayMode(OverlayMode mode)
     {
+        if (mode == OverlayMode.AutoQuestTracker)
+        {
+            mode = OverlayMode.Working;
+        }
+
         if (_isClosed ||
             _isShuttingDown ||
             _state.OverlaySettings.OverlayMode == mode)
@@ -179,7 +184,7 @@ public partial class OverlayWindow : Window
             {
                 SetActiveMode(
                     mode == OverlayMode.PinnedExpanded || IsPointerOverOverlay(),
-                    force: mode == OverlayMode.AutoQuestTracker);
+                    force: mode == OverlayMode.Working);
             }
         }
         else if (mode == OverlayMode.PinnedExpanded)
@@ -599,7 +604,12 @@ public partial class OverlayWindow : Window
         OverlayPanel.BorderBrush = active ? ActiveBorder : Brushes.Transparent;
         ActiveChrome.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         ShowPositionedHandlePanel();
-        ModeStatus.Text = mode == OverlayMode.PinnedExpanded ? "PINNED" : "ACTIVE";
+        ModeStatus.Text = mode switch
+        {
+            OverlayMode.PinnedExpanded => "PINNED",
+            OverlayMode.Working => "WORKING",
+            _ => "ACTIVE"
+        };
     }
 
     private void HoverSurface_OnPreviewMouseLeftButtonDown(
@@ -1461,12 +1471,25 @@ public partial class OverlayWindow : Window
 
         _activeTasks.Clear();
         var now = DateTimeOffset.UtcNow;
-        foreach (var task in ReminderAttentionService.OrderForOverlay(
-                     _state.Tasks,
-                     now))
+        var orderedTasks = ReminderAttentionService.OrderForOverlay(
+            _state.Tasks,
+            now);
+        var visibleTasks = OverlayTaskFilter.SelectForMode(
+            orderedTasks,
+            _state.OverlaySettings.OverlayMode,
+            now);
+        foreach (var task in visibleTasks)
         {
             _activeTasks.Add(new TaskRowViewModel(_state, task, _isActiveMode, now));
         }
+
+        var workingMode = _state.OverlaySettings.OverlayMode is
+            OverlayMode.Working or OverlayMode.AutoQuestTracker;
+        EmptyState.Text = workingMode ? "No FOCUS tasks" : "No tasks";
+        EmptyState.Opacity = workingMode && !_isActiveMode ? 0.58 : 1.0;
+        EmptyState.Visibility = _activeTasks.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void RestoreWindowPlacement()
@@ -2011,9 +2034,12 @@ public partial class OverlayWindow : Window
         CollapsedActivation.Background = ExpandedHandleBackground;
         CollapsedActivation.BorderBrush = ExpandedHandleBorder;
         HandleIndicator.Fill = ExpandedHandleForeground;
-        CollapsedActivation.ToolTip =
-            "Expanded. Click to pin; right-click to choose overlay mode.";
-        ModeStatus.Text = "ACTIVE";
+        var workingMode = _state.OverlaySettings.OverlayMode is
+            OverlayMode.Working or OverlayMode.AutoQuestTracker;
+        CollapsedActivation.ToolTip = workingMode
+            ? "Working. Click for collapsed handle; right-click to choose overlay mode."
+            : "Expanded. Click to pin; right-click to choose overlay mode.";
+        ModeStatus.Text = workingMode ? "WORKING" : "ACTIVE";
     }
 
     private void StopModeTimers()

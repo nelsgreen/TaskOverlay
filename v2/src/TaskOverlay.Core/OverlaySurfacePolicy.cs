@@ -7,7 +7,8 @@ public static class OverlaySurfacePolicy
         bool hasCollapsedAnchor)
     {
         return hasCollapsedAnchor &&
-               mode is OverlayMode.AutoQuestTracker or
+               mode is OverlayMode.Working or
+                   OverlayMode.AutoQuestTracker or
                    OverlayMode.CollapsedHandle or
                    OverlayMode.PinnedExpanded;
     }

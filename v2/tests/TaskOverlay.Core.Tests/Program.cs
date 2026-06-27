@@ -57,9 +57,11 @@ internal static class Program
             ("old collapsed mode migration", OldCollapsedModeMigration),
             ("old pinned mode migration", OldPinnedModeMigration),
             ("old overlay mode default", OldOverlayModeDefault),
+            ("legacy auto mode fallback", LegacyAutoModeFallback),
             ("overlay collapse guard", OverlayCollapseGuardBehavior),
             ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
             ("overlay mode click cycle", OverlayModeClickCycle),
+            ("working mode task filtering", WorkingModeTaskFiltering),
             ("handle surface ownership across modes", HandleSurfaceOwnershipAcrossModes),
             ("single task in-work mode", SingleTaskInWorkMode),
             ("multiple tasks in-work mode", MultipleTasksInWorkMode),
@@ -120,8 +122,8 @@ internal static class Program
             Assert(state.Tasks.All(task => task.Id != Guid.Empty), "Seed tasks need stable IDs.");
             Assert(state.Tasks.Select(task => task.Id).Distinct().Count() == 3, "Seed task IDs must be unique.");
             Assert(
-                state.OverlaySettings.OverlayMode == OverlayMode.AutoQuestTracker,
-                "New state should use AutoQuestTracker mode.");
+                state.OverlaySettings.OverlayMode == OverlayMode.Working,
+                "New state should use Working mode.");
         });
     }
 
@@ -1374,7 +1376,7 @@ internal static class Program
         {
             var store = new AppStateStore(directory);
             var state = store.Load();
-            state.OverlaySettings.OverlayMode = OverlayMode.PinnedExpanded;
+            state.OverlaySettings.OverlayMode = OverlayMode.Working;
 
             store.Save(state);
 
@@ -1382,10 +1384,10 @@ internal static class Program
             var loaded = new AppStateStore(directory).Load();
 
             Assert(
-                json.Contains("\"overlayMode\": \"pinnedExpanded\""),
+                json.Contains("\"overlayMode\": \"working\""),
                 "The unified overlay mode should be serialized.");
             Assert(
-                loaded.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded,
+                loaded.OverlaySettings.OverlayMode == OverlayMode.Working,
                 "Overlay mode should survive a save/load roundtrip.");
             Assert(
                 !json.Contains("\"collapsedMode\"") &&
@@ -1499,15 +1501,41 @@ internal static class Program
             var loaded = new AppStateStore(directory).Load();
 
             Assert(
-                loaded.OverlaySettings.OverlayMode == OverlayMode.AutoQuestTracker,
-                "Old state without mode flags should migrate to AutoQuestTracker.");
+                loaded.OverlaySettings.OverlayMode == OverlayMode.Working,
+                "Old state without mode flags should migrate to Working.");
+        });
+    }
+
+    private static void LegacyAutoModeFallback()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            store.Save(AppState.CreateDefault());
+            var legacyJson = File.ReadAllText(store.StatePath)
+                .Replace("\"overlayMode\": \"working\"", "\"overlayMode\": \"autoQuestTracker\"");
+            Assert(
+                legacyJson.Contains("\"overlayMode\": \"autoQuestTracker\""),
+                "Test setup should contain the legacy mode value.");
+            File.WriteAllText(store.StatePath, legacyJson);
+
+            var loaded = new AppStateStore(directory).Load();
+            var normalizedJson = File.ReadAllText(store.StatePath);
+
+            Assert(
+                loaded.OverlaySettings.OverlayMode == OverlayMode.Working,
+                "Legacy AutoQuestTracker state should fall back to Working.");
+            Assert(
+                normalizedJson.Contains("\"overlayMode\": \"working\"") &&
+                !normalizedJson.Contains("autoQuestTracker"),
+                "Legacy AutoQuestTracker fallback should be persisted.");
         });
     }
 
     private static void OverlayCollapseGuardBehavior()
     {
         var idle = new OverlayInteractionState(
-            OverlayMode: OverlayMode.AutoQuestTracker,
+            OverlayMode: OverlayMode.Working,
             TaskDetailsOpen: false,
             ContextMenuOpen: false,
             SettingsOpen: false,
@@ -1523,7 +1551,7 @@ internal static class Program
         Assert(ReminderService.IsDue(dueTask), "Test task should be due.");
         Assert(
             OverlayCollapseGuard.CanCollapse(idle),
-            "A REMIND task must not block AutoQuestTracker collapse.");
+            "A REMIND task must not block Working mode idle transition.");
         Assert(
             OverlayCollapseGuard.CanCollapse(
                 idle with { OverlayMode = OverlayMode.CollapsedHandle }),
@@ -1573,17 +1601,59 @@ internal static class Program
     private static void OverlayModeClickCycle()
     {
         Assert(
-            OverlayModeCycle.Next(OverlayMode.AutoQuestTracker) ==
+            OverlayModeCycle.Next(OverlayMode.Working) ==
             OverlayMode.CollapsedHandle,
-            "Auto quest tracker should cycle to collapsed handle.");
+            "Working should cycle to collapsed handle.");
         Assert(
             OverlayModeCycle.Next(OverlayMode.CollapsedHandle) ==
             OverlayMode.PinnedExpanded,
             "Collapsed handle should cycle to pinned expanded.");
         Assert(
             OverlayModeCycle.Next(OverlayMode.PinnedExpanded) ==
-            OverlayMode.AutoQuestTracker,
-            "Pinned expanded should cycle to auto quest tracker.");
+            OverlayMode.Working,
+            "Pinned expanded should cycle to Working.");
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.AutoQuestTracker) ==
+            OverlayMode.Working,
+            "Legacy AutoQuestTracker should cycle into Working.");
+    }
+
+    private static void WorkingModeTaskFiltering()
+    {
+        var now = DateTimeOffset.Parse("2026-06-27T10:00:00Z");
+        var todo = TaskItem.Create("TODO", now.AddMinutes(-4));
+        var focus = TaskItem.Create("FOCUS", now.AddMinutes(-3));
+        focus.Status = TaskStatus.InWork;
+        focus.InWork = true;
+        var waiting = TaskItem.Create("WAIT", now.AddMinutes(-2));
+        waiting.Status = TaskStatus.Waiting;
+        var remind = TaskItem.Create("REMIND", now.AddMinutes(-1));
+        remind.RemindAtUtc = now;
+        var done = TaskItem.Create("DONE", now);
+        done.Status = TaskStatus.Done;
+        done.Completed = true;
+        var tasks = new[] { todo, focus, waiting, remind, done };
+        var sourceIds = tasks.Select(task => task.Id).ToArray();
+        var ordered = ReminderAttentionService.OrderForOverlay(tasks, now).ToList();
+
+        var working = OverlayTaskFilter
+            .SelectForMode(ordered, OverlayMode.Working, now)
+            .ToList();
+
+        Assert(working.Count == 2, "Working should show only FOCUS and active REMIND tasks.");
+        Assert(working.Any(task => task.Id == focus.Id), "Working should include FOCUS tasks.");
+        Assert(working.Any(task => task.Id == remind.Id), "Working should preserve REMIND attention items.");
+        Assert(working.All(task => task.Id != todo.Id && task.Id != waiting.Id && task.Id != done.Id),
+            "Working should hide normal TODO, WAIT, and DONE tasks.");
+        Assert(
+            tasks.Select(task => task.Id).SequenceEqual(sourceIds),
+            "Working filtering must not mutate or reorder the source list.");
+
+        var noFocus = OverlayTaskFilter.SelectForMode(
+            new[] { todo, waiting },
+            OverlayMode.Working,
+            now);
+        Assert(!noFocus.Any(), "Working should return an empty projection without FOCUS or REMIND tasks.");
     }
 
     private static void HandleSurfaceOwnershipAcrossModes()
@@ -1591,9 +1661,10 @@ internal static class Program
         var handle = new OverlayBounds(1872, 0, 48, 20);
         var modes = new[]
         {
+            OverlayMode.Working,
             OverlayMode.CollapsedHandle,
             OverlayMode.PinnedExpanded,
-            OverlayMode.AutoQuestTracker,
+            OverlayMode.Working,
             OverlayMode.CollapsedHandle
         };
 
@@ -1617,9 +1688,9 @@ internal static class Program
 
         Assert(
             !OverlaySurfacePolicy.UseHandleWindowForMode(
-                OverlayMode.AutoQuestTracker,
+                OverlayMode.Working,
                 hasCollapsedAnchor: false),
-            "Auto mode should retain its fallback surface before an anchor exists.");
+            "Working should retain its fallback surface before an anchor exists.");
     }
 
     private static void SingleTaskInWorkMode()
