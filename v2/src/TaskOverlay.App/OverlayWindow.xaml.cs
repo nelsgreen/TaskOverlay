@@ -71,6 +71,7 @@ public partial class OverlayWindow : Window
     private bool _handlePanelRevealInProgress;
     private bool _settingsInteractionActive;
     private bool _workingPresentationReady = true;
+    private bool _workingBoundsPrepared;
     private int _modalInteractionCount;
     private int _handlePanelRevealGeneration;
     private int _modeTransitionGeneration;
@@ -563,6 +564,7 @@ public partial class OverlayWindow : Window
         CommitPresentationState(
             presentation,
             modeChanged || refreshPresentation || OverlayContent.Content is null);
+        PreparePresentationBounds(presentation);
         ApplyPresentationSurface(presentation);
     }
 
@@ -613,6 +615,7 @@ public partial class OverlayWindow : Window
                 }
             }
 
+            PreparePresentationBounds(entryPresentation);
             ApplyPresentationSurface(entryPresentation);
             KeepCurrentModeWithinWorkArea();
         }
@@ -656,7 +659,94 @@ public partial class OverlayWindow : Window
         }
 
         OverlayPanel.Visibility = Visibility.Visible;
-        ShowPositionedHandlePanel();
+        try
+        {
+            ShowPositionedHandlePanel();
+        }
+        finally
+        {
+            CompletePreparedWorkingBounds();
+        }
+    }
+
+    private void PreparePresentationBounds(
+        OverlayPresentationState presentation)
+    {
+        if (presentation.VisualBranch != OverlayVisualBranch.Working ||
+            !UsesHandleWindow)
+        {
+            RestoreAutomaticWindowSizing();
+            return;
+        }
+
+        if (_handleWindow is null || !_handleWindow.IsVisible)
+        {
+            RestoreCollapsedHandle();
+        }
+
+        if (_handleWindow is null)
+        {
+            return;
+        }
+
+        var workArea = _handleWindow.CurrentWorkArea;
+        ConfigureExpandedLayout(workArea);
+        if (OverlayContent.Content is not WorkingOverlayViewState viewState)
+        {
+            return;
+        }
+
+        OverlayContent.ApplyTemplate();
+        OverlayContent.InvalidateMeasure();
+        OverlayContent.Measure(
+            new Size(viewState.ContentWidth, double.PositiveInfinity));
+        var bounds = OverlayPanelBoundsPolicy.PlaceWorkingPanel(
+            _handleWindow.HandleBounds,
+            viewState.ContentWidth,
+            OverlayContent.DesiredSize.Height,
+            viewState.PanelMaxWidth,
+            workArea);
+
+        _adjustingBounds = true;
+        try
+        {
+            SizeToContent = System.Windows.SizeToContent.Manual;
+            Width = bounds.Width;
+            Height = bounds.Height;
+            Left = bounds.Left;
+            Top = bounds.Top;
+            _workingBoundsPrepared = true;
+            UpdateLayout();
+        }
+        finally
+        {
+            _adjustingBounds = false;
+        }
+    }
+
+    private void CompletePreparedWorkingBounds()
+    {
+        if (!_workingBoundsPrepared)
+        {
+            return;
+        }
+
+        RestoreAutomaticWindowSizing();
+        UpdateLayout();
+    }
+
+    private void RestoreAutomaticWindowSizing()
+    {
+        if (!_workingBoundsPrepared &&
+            SizeToContent == System.Windows.SizeToContent.WidthAndHeight)
+        {
+            return;
+        }
+
+        _workingBoundsPrepared = false;
+        SizeToContent = System.Windows.SizeToContent.WidthAndHeight;
+        ClearValue(WidthProperty);
+        ClearValue(HeightProperty);
     }
 
     private void HoverSurface_OnPreviewMouseLeftButtonDown(
@@ -1730,25 +1820,11 @@ public partial class OverlayWindow : Window
         OverlayPresentationState presentation,
         OverlayBounds workArea)
     {
-        var availableWidth = Math.Max(120, workArea.Width - (WorkAreaMargin * 2));
-        var availableHeight = Math.Max(80, workArea.Height - (WorkAreaMargin * 2));
-        var availableContentWidth = Math.Max(80, availableWidth - 30);
-        var desiredWidth = presentation.UseCompactLayout
-            ? OverlaySettings.ClampWorkingWindowWidth(
-                _state.OverlaySettings.WorkingWindowWidth)
-            : 420;
-        var contentWidth = presentation.UseCompactLayout
-            ? Math.Min(Math.Max(80, desiredWidth - 30), availableContentWidth)
-            : Math.Min(desiredWidth, availableContentWidth);
-        var maximumTaskHeight = Math.Max(40, availableHeight - 80);
-        var tasksMaxHeight = presentation.UseCompactLayout
-            ? Math.Min(
-                Math.Max(
-                    40,
-                    OverlaySettings.ClampWorkingWindowHeight(
-                        _state.OverlaySettings.WorkingWindowHeight) - 60),
-                maximumTaskHeight)
-            : maximumTaskHeight;
+        var metrics = OverlayPanelBoundsPolicy.ResolveLayout(
+            presentation,
+            _state.OverlaySettings,
+            workArea,
+            WorkAreaMargin);
         var emptyFontSize = presentation.UseCompactLayout
             ? Math.Max(
                 11,
@@ -1758,9 +1834,9 @@ public partial class OverlayWindow : Window
             : 13;
 
         return new OverlayLayout(
-            availableWidth,
-            contentWidth,
-            tasksMaxHeight,
+            metrics.PanelMaxWidth,
+            metrics.ContentWidth,
+            metrics.TasksMaxHeight,
             emptyFontSize);
     }
 

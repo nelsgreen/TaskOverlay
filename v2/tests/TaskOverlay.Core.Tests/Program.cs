@@ -57,6 +57,7 @@ internal static class Program
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
             ("working presentation settings", WorkingPresentationSettings),
+            ("working panel bounds", WorkingPanelBoundsBehavior),
             ("old collapsed mode migration", OldCollapsedModeMigration),
             ("old pinned mode migration", OldPinnedModeMigration),
             ("old overlay mode default", OldOverlayModeDefault),
@@ -1837,6 +1838,52 @@ internal static class Program
         Assert(
             PointerDragGesture.HasExceededThreshold(10, 10, 10, 4),
             "Vertical movement beyond the threshold should start dragging.");
+    }
+
+    private static void WorkingPanelBoundsBehavior()
+    {
+        var settings = new OverlaySettings();
+        var workArea = new OverlayBounds(0, 0, 1920, 1080);
+        var workingEntry = OverlayActiveStatePolicy.ForModeEntry(
+            OverlayModeCycle.Next(OverlayMode.CollapsedHandle));
+        var workingLayout = OverlayPanelBoundsPolicy.ResolveLayout(
+            workingEntry,
+            settings,
+            workArea,
+            workAreaMargin: 16);
+        var pinnedLayout = OverlayPanelBoundsPolicy.ResolveLayout(
+            OverlayActiveStatePolicy.ForModeEntry(OverlayMode.PinnedExpanded),
+            settings,
+            workArea,
+            workAreaMargin: 16);
+
+        Assert(
+            workingLayout.PanelWidth == OverlaySettings.DefaultWorkingWindowWidth &&
+            workingLayout.ContentWidth ==
+            OverlaySettings.DefaultWorkingWindowWidth -
+            OverlayPanelBoundsPolicy.HorizontalChrome,
+            "CollapsedHandle -> Working should resolve compact bounds before reveal.");
+        Assert(
+            pinnedLayout.PanelWidth == 450 && pinnedLayout.ContentWidth == 420,
+            "Pinned should retain its expanded panel bounds.");
+
+        var handle = new OverlayBounds(1880, 100, 40, 20);
+        var placed = OverlayPanelBoundsPolicy.PlaceWorkingPanel(
+            handle,
+            workingLayout.ContentWidth,
+            contentHeight: 180,
+            workingLayout.PanelMaxWidth,
+            workArea);
+        Assert(
+            placed.Width == OverlaySettings.DefaultWorkingWindowWidth &&
+            placed.Height == 180 + OverlayPanelBoundsPolicy.VerticalChrome,
+            "Prepared Working bounds should include panel chrome exactly once.");
+        Assert(
+            placed.Right == handle.Right && placed.Top == handle.Bottom,
+            "Right-edge Working placement should open inward from the handle.");
+        Assert(
+            handle == new OverlayBounds(1880, 100, 40, 20),
+            "Preparing Working bounds must not move the handle anchor.");
     }
 
     private static void WindowPlacementNegativeMonitorClamp()
