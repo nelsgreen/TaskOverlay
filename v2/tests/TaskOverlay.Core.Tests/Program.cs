@@ -54,6 +54,7 @@ internal static class Program
             ("quick task capture", QuickTaskCapture),
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
+            ("working presentation settings", WorkingPresentationSettings),
             ("old collapsed mode migration", OldCollapsedModeMigration),
             ("old pinned mode migration", OldPinnedModeMigration),
             ("old overlay mode default", OldOverlayModeDefault),
@@ -61,7 +62,9 @@ internal static class Program
             ("overlay collapse guard", OverlayCollapseGuardBehavior),
             ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
             ("overlay mode click cycle", OverlayModeClickCycle),
+            ("overlay mode shortcut policy", OverlayModeShortcutPolicyBehavior),
             ("working mode task filtering", WorkingModeTaskFiltering),
+            ("working mode focus badge", WorkingModeFocusBadge),
             ("handle surface ownership across modes", HandleSurfaceOwnershipAcrossModes),
             ("single task in-work mode", SingleTaskInWorkMode),
             ("multiple tasks in-work mode", MultipleTasksInWorkMode),
@@ -1396,6 +1399,53 @@ internal static class Program
         });
     }
 
+    private static void WorkingPresentationSettings()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.OverlaySettings.WorkingFontSize = 17.5;
+            state.OverlaySettings.WorkingWindowWidth = 360;
+            state.OverlaySettings.WorkingWindowHeight = 280;
+
+            store.Save(state);
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.WorkingFontSize == 17.5,
+                "Working font size should survive save/load.");
+            Assert(
+                loaded.OverlaySettings.WorkingWindowWidth == 360,
+                "Working window width should survive save/load.");
+            Assert(
+                loaded.OverlaySettings.WorkingWindowHeight == 280,
+                "Working window height should survive save/load.");
+        });
+
+        var invalid = new OverlaySettings
+        {
+            WorkingFontSize = 1,
+            WorkingWindowWidth = 5000,
+            WorkingWindowHeight = -10
+        };
+        Assert(
+            invalid.NormalizeWorkingPresentation(),
+            "Out-of-range Working presentation values should be normalized.");
+        Assert(
+            invalid.WorkingFontSize == OverlaySettings.MinimumWorkingFontSize,
+            "Working font size should clamp to its minimum.");
+        Assert(
+            invalid.WorkingWindowWidth == OverlaySettings.MaximumWorkingWindowWidth,
+            "Working width should clamp to its maximum.");
+        Assert(
+            invalid.WorkingWindowHeight == OverlaySettings.MinimumWorkingWindowHeight,
+            "Working height should clamp to its minimum.");
+        Assert(
+            !invalid.NormalizeWorkingPresentation(),
+            "Normalized Working presentation values should be idempotent.");
+    }
+
     private static void OldCollapsedModeMigration()
     {
         WithTemporaryDirectory(directory =>
@@ -1503,6 +1553,18 @@ internal static class Program
             Assert(
                 loaded.OverlaySettings.OverlayMode == OverlayMode.Working,
                 "Old state without mode flags should migrate to Working.");
+            Assert(
+                loaded.OverlaySettings.WorkingFontSize ==
+                OverlaySettings.DefaultWorkingFontSize,
+                "Old state should load the default Working font size.");
+            Assert(
+                loaded.OverlaySettings.WorkingWindowWidth ==
+                OverlaySettings.DefaultWorkingWindowWidth,
+                "Old state should load the default Working window width.");
+            Assert(
+                loaded.OverlaySettings.WorkingWindowHeight ==
+                OverlaySettings.DefaultWorkingWindowHeight,
+                "Old state should load the default Working window height.");
         });
     }
 
@@ -1602,20 +1664,68 @@ internal static class Program
     {
         Assert(
             OverlayModeCycle.Next(OverlayMode.Working) ==
-            OverlayMode.CollapsedHandle,
-            "Working should cycle to collapsed handle.");
-        Assert(
-            OverlayModeCycle.Next(OverlayMode.CollapsedHandle) ==
             OverlayMode.PinnedExpanded,
-            "Collapsed handle should cycle to pinned expanded.");
+            "Working should cycle to Pinned.");
         Assert(
             OverlayModeCycle.Next(OverlayMode.PinnedExpanded) ==
+            OverlayMode.CollapsedHandle,
+            "Pinned should cycle to collapsed handle.");
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.CollapsedHandle) ==
             OverlayMode.Working,
-            "Pinned expanded should cycle to Working.");
+            "Collapsed handle should cycle to Working.");
         Assert(
             OverlayModeCycle.Next(OverlayMode.AutoQuestTracker) ==
             OverlayMode.Working,
             "Legacy AutoQuestTracker should cycle into Working.");
+    }
+
+    private static void OverlayModeShortcutPolicyBehavior()
+    {
+        var cycle = OverlayModeShortcutPolicy.Resolve(
+            OverlayMode.Working,
+            OverlayModeShortcut.Cycle);
+        Assert(
+            cycle.Mode == OverlayMode.PinnedExpanded,
+            "Ctrl+Alt+M should follow the Working to Pinned cycle.");
+
+        Assert(
+            OverlayModeShortcutPolicy.Resolve(
+                OverlayMode.CollapsedHandle,
+                OverlayModeShortcut.Working).Mode == OverlayMode.Working,
+            "Ctrl+Alt+1 should select Working.");
+        Assert(
+            OverlayModeShortcutPolicy.Resolve(
+                OverlayMode.Working,
+                OverlayModeShortcut.Pinned).Mode == OverlayMode.PinnedExpanded,
+            "Ctrl+Alt+2 should select Pinned.");
+        Assert(
+            OverlayModeShortcutPolicy.Resolve(
+                OverlayMode.Working,
+                OverlayModeShortcut.CollapsedHandle).Mode ==
+            OverlayMode.CollapsedHandle,
+            "Ctrl+Alt+3 should select collapsed handle.");
+
+        foreach (var mode in new[] { OverlayMode.Working, OverlayMode.PinnedExpanded })
+        {
+            var collapse = OverlayModeShortcutPolicy.Resolve(
+                mode,
+                OverlayModeShortcut.CollapseOrToggle);
+            Assert(
+                collapse.Mode == OverlayMode.CollapsedHandle &&
+                collapse.EnsureVisible &&
+                !collapse.ToggleVisibility,
+                "Ctrl+Alt+T should collapse and reveal non-collapsed modes.");
+        }
+
+        var toggle = OverlayModeShortcutPolicy.Resolve(
+            OverlayMode.CollapsedHandle,
+            OverlayModeShortcut.CollapseOrToggle);
+        Assert(
+            toggle.Mode == OverlayMode.CollapsedHandle &&
+            toggle.ToggleVisibility &&
+            !toggle.EnsureVisible,
+            "Ctrl+Alt+T should retain visibility toggle behavior in collapsed mode.");
     }
 
     private static void WorkingModeTaskFiltering()
@@ -1654,6 +1764,34 @@ internal static class Program
             OverlayMode.Working,
             now);
         Assert(!noFocus.Any(), "Working should return an empty projection without FOCUS or REMIND tasks.");
+    }
+
+    private static void WorkingModeFocusBadge()
+    {
+        var now = DateTimeOffset.Parse("2026-06-27T10:00:00Z");
+        var focus = TaskItem.Create("Focused task", now);
+        focus.Status = TaskStatus.InWork;
+        focus.InWork = true;
+        focus.RemindAtUtc = now;
+
+        Assert(
+            !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.Working),
+            "Working should hide its redundant FOCUS badge.");
+        Assert(
+            OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.PinnedExpanded),
+            "Pinned should preserve the FOCUS badge.");
+        Assert(
+            OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.CollapsedHandle),
+            "Collapsed expansion should preserve the FOCUS badge.");
+        Assert(
+            ReminderAttentionService.ShouldShowNotification(focus, now),
+            "Hiding FOCUS in Working must not suppress active REMIND attention.");
     }
 
     private static void HandleSurfaceOwnershipAcrossModes()

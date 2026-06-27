@@ -12,7 +12,11 @@ internal enum GlobalHotkeyAction
     CreateSingleTask,
     CreateTaskWithDescription,
     QuickAddTask,
-    ToggleOverlay
+    ToggleOverlay,
+    CycleOverlayMode,
+    SelectWorkingMode,
+    SelectPinnedMode,
+    SelectCollapsedHandleMode
 }
 
 internal sealed class GlobalHotkeyManager : Forms.NativeWindow, IDisposable

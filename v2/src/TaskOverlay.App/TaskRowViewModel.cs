@@ -1,4 +1,5 @@
 using System;
+using System.Windows;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
@@ -20,6 +21,9 @@ internal sealed class TaskRowViewModel
         IsReminderDue = ReminderAttentionService.ShouldShowNotification(task, now);
         var workingMode = state.OverlaySettings.OverlayMode is
             OverlayMode.Working or OverlayMode.AutoQuestTracker;
+        ShowFocusBadge = OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+            task,
+            state.OverlaySettings.OverlayMode);
         ShowDescription = activeMode &&
                           !string.IsNullOrWhiteSpace(task.Description) &&
                           (workingMode
@@ -36,6 +40,18 @@ internal sealed class TaskRowViewModel
         TitleColorHex = quietIdleRow
             ? "#FFA1A1AA"
             : "#FFFFE878";
+        var workingFontSize = OverlaySettings.ClampWorkingFontSize(
+            state.OverlaySettings.WorkingFontSize);
+        TitleFontSize = workingMode ? workingFontSize : 20;
+        DescriptionFontSize = workingMode
+            ? Math.Max(10, workingFontSize - 4)
+            : 13;
+        RowMargin = workingMode
+            ? new Thickness(0, 1, 0, 1)
+            : new Thickness(0, 2, 0, 2);
+        RowPadding = workingMode
+            ? new Thickness(6, 3, 6, 3)
+            : new Thickness(8, 5, 8, 5);
     }
 
     public TaskItem Task { get; }
@@ -56,6 +72,11 @@ internal sealed class TaskRowViewModel
     public string WaitingForLabel => $"Waiting for: {Task.WaitingFor}";
     public bool ShowDescription { get; }
     public bool ShowWaitingFor { get; }
+    public bool ShowFocusBadge { get; }
     public double RowOpacity { get; }
     public string TitleColorHex { get; }
+    public double TitleFontSize { get; }
+    public double DescriptionFontSize { get; }
+    public Thickness RowMargin { get; }
+    public Thickness RowPadding { get; }
 }

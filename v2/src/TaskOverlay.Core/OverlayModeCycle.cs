@@ -6,9 +6,9 @@ public static class OverlayModeCycle
     {
         return current switch
         {
-            OverlayMode.Working => OverlayMode.CollapsedHandle,
-            OverlayMode.CollapsedHandle => OverlayMode.PinnedExpanded,
-            OverlayMode.PinnedExpanded => OverlayMode.Working,
+            OverlayMode.Working => OverlayMode.PinnedExpanded,
+            OverlayMode.PinnedExpanded => OverlayMode.CollapsedHandle,
+            OverlayMode.CollapsedHandle => OverlayMode.Working,
             _ => OverlayMode.Working
         };
     }

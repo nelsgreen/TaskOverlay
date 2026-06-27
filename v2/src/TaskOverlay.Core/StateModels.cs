@@ -178,8 +178,21 @@ public enum OverlayMode
 
 public sealed class OverlaySettings
 {
+    public const double DefaultWorkingFontSize = 16;
+    public const double MinimumWorkingFontSize = 12;
+    public const double MaximumWorkingFontSize = 24;
+    public const double DefaultWorkingWindowWidth = 320;
+    public const double MinimumWorkingWindowWidth = 240;
+    public const double MaximumWorkingWindowWidth = 600;
+    public const double DefaultWorkingWindowHeight = 240;
+    public const double MinimumWorkingWindowHeight = 120;
+    public const double MaximumWorkingWindowHeight = 800;
+
     public int ActiveToPassiveDelayMilliseconds { get; set; } = 500;
     public bool AlwaysOnTop { get; set; } = true;
+    public double WorkingFontSize { get; set; } = DefaultWorkingFontSize;
+    public double WorkingWindowWidth { get; set; } = DefaultWorkingWindowWidth;
+    public double WorkingWindowHeight { get; set; } = DefaultWorkingWindowHeight;
 
     [JsonPropertyName("overlayMode")]
     public OverlayMode? StoredOverlayMode { get; set; }
@@ -222,6 +235,42 @@ public sealed class OverlaySettings
         CollapsedMode = false;
         PinnedActiveMode = false;
         return changed;
+    }
+
+    public bool NormalizeWorkingPresentation()
+    {
+        var fontSize = ClampWorkingFontSize(WorkingFontSize);
+        var windowWidth = ClampWorkingWindowWidth(WorkingWindowWidth);
+        var windowHeight = ClampWorkingWindowHeight(WorkingWindowHeight);
+        var changed = WorkingFontSize != fontSize ||
+                      WorkingWindowWidth != windowWidth ||
+                      WorkingWindowHeight != windowHeight;
+
+        WorkingFontSize = fontSize;
+        WorkingWindowWidth = windowWidth;
+        WorkingWindowHeight = windowHeight;
+        return changed;
+    }
+
+    public static double ClampWorkingFontSize(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinimumWorkingFontSize, MaximumWorkingFontSize)
+            : DefaultWorkingFontSize;
+    }
+
+    public static double ClampWorkingWindowWidth(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinimumWorkingWindowWidth, MaximumWorkingWindowWidth)
+            : DefaultWorkingWindowWidth;
+    }
+
+    public static double ClampWorkingWindowHeight(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinimumWorkingWindowHeight, MaximumWorkingWindowHeight)
+            : DefaultWorkingWindowHeight;
     }
 }
 

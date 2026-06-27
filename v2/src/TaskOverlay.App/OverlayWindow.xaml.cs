@@ -1458,6 +1458,7 @@ public partial class OverlayWindow : Window
             _handleWindow?.RefreshSettings();
             RefreshTasks();
             UpdateHandleVisual();
+            KeepCurrentModeWithinWorkArea();
         }
     }
 
@@ -1587,10 +1588,32 @@ public partial class OverlayWindow : Window
         var availableWidth = Math.Max(120, workArea.Width - (WorkAreaMargin * 2));
         var availableHeight = Math.Max(80, workArea.Height - (WorkAreaMargin * 2));
         var availableContentWidth = Math.Max(80, availableWidth - 30);
+        var workingMode = _state.OverlaySettings.OverlayMode is
+            OverlayMode.Working or OverlayMode.AutoQuestTracker;
 
-        ContentStack.Width = Math.Min(420, availableContentWidth);
+        var desiredWidth = workingMode
+            ? OverlaySettings.ClampWorkingWindowWidth(
+                _state.OverlaySettings.WorkingWindowWidth)
+            : 420;
+        ContentStack.Width = workingMode
+            ? Math.Min(Math.Max(80, desiredWidth - 30), availableContentWidth)
+            : Math.Min(desiredWidth, availableContentWidth);
         OverlayPanel.MaxWidth = availableWidth;
-        TasksScroller.MaxHeight = Math.Max(40, availableHeight - 80);
+        var maximumTaskHeight = Math.Max(40, availableHeight - 80);
+        TasksScroller.MaxHeight = workingMode
+            ? Math.Min(
+                Math.Max(
+                    40,
+                    OverlaySettings.ClampWorkingWindowHeight(
+                        _state.OverlaySettings.WorkingWindowHeight) - 60),
+                maximumTaskHeight)
+            : maximumTaskHeight;
+        EmptyState.FontSize = workingMode
+            ? Math.Max(
+                11,
+                OverlaySettings.ClampWorkingFontSize(
+                    _state.OverlaySettings.WorkingFontSize) - 3)
+            : 13;
     }
 
     private void KeepCurrentModeWithinWorkArea()
@@ -2016,7 +2039,7 @@ public partial class OverlayWindow : Window
             CollapsedActivation.BorderBrush = PinnedHandleBorder;
             HandleIndicator.Fill = PinnedHandleForeground;
             CollapsedActivation.ToolTip =
-                "Pinned expanded. Click to return to collapsed handle.";
+                "Pinned. Click for collapsed handle.";
             ModeStatus.Text = "PINNED";
             return;
         }
@@ -2026,7 +2049,7 @@ public partial class OverlayWindow : Window
             CollapsedActivation.Background = CollapsedHandleBackground;
             CollapsedActivation.BorderBrush = CollapsedHandleBorder;
             HandleIndicator.Fill = CollapsedHandleForeground;
-            CollapsedActivation.ToolTip = "Collapsed. Click to pin expanded.";
+            CollapsedActivation.ToolTip = "Collapsed handle. Click for Working.";
             ModeStatus.Text = "COLLAPSED";
             return;
         }
@@ -2037,7 +2060,7 @@ public partial class OverlayWindow : Window
         var workingMode = _state.OverlaySettings.OverlayMode is
             OverlayMode.Working or OverlayMode.AutoQuestTracker;
         CollapsedActivation.ToolTip = workingMode
-            ? "Working. Click for collapsed handle; right-click to choose overlay mode."
+            ? "Working. Click for Pinned; right-click to choose overlay mode."
             : "Expanded. Click to pin; right-click to choose overlay mode.";
         ModeStatus.Text = workingMode ? "WORKING" : "ACTIVE";
     }

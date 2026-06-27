@@ -23,7 +23,7 @@
                 BorderThickness="1"
                 CornerRadius="8"
                 Cursor="SizeAll"
-                ToolTip="Collapsed. Click to pin expanded."
+                ToolTip="Collapsed handle. Click for Working."
                 PreviewMouseLeftButtonDown="HandleSurface_OnPreviewMouseLeftButtonDown"
                 PreviewMouseMove="HandleSurface_OnPreviewMouseMove"
                 PreviewMouseLeftButtonUp="HandleSurface_OnPreviewMouseLeftButtonUp"
@@ -35,12 +35,12 @@
                               Tag="Working"
                               IsCheckable="True"
                               Click="ModeMenuItem_OnClick" />
-                    <MenuItem Header="Collapsed handle"
-                              Tag="CollapsedHandle"
+                    <MenuItem Header="Pinned"
+                              Tag="PinnedExpanded"
                               IsCheckable="True"
                               Click="ModeMenuItem_OnClick" />
-                    <MenuItem Header="Pinned expanded"
-                              Tag="PinnedExpanded"
+                    <MenuItem Header="Collapsed handle"
+                              Tag="CollapsedHandle"
                               IsCheckable="True"
                               Click="ModeMenuItem_OnClick" />
                 </ContextMenu>

@@ -151,18 +151,18 @@ public partial class App : System.Windows.Application
         _workingModeMenuItem = CreateOverlayModeMenuItem(
             "Working",
             OverlayMode.Working);
+        _pinnedExpandedMenuItem = CreateOverlayModeMenuItem(
+            "Pinned",
+            OverlayMode.PinnedExpanded);
         _collapsedHandleMenuItem = CreateOverlayModeMenuItem(
             "Collapsed handle",
             OverlayMode.CollapsedHandle);
-        _pinnedExpandedMenuItem = CreateOverlayModeMenuItem(
-            "Pinned expanded",
-            OverlayMode.PinnedExpanded);
         _overlayModeMenuItem.DropDownItems.AddRange(
             new Forms.ToolStripItem[]
             {
                 _workingModeMenuItem,
-                _collapsedHandleMenuItem,
-                _pinnedExpandedMenuItem
+                _pinnedExpandedMenuItem,
+                _collapsedHandleMenuItem
             });
         _trayMenu.Items.Add(_overlayModeMenuItem);
         UpdateOverlayModeUi(_state?.OverlaySettings.OverlayMode ??
@@ -241,6 +241,26 @@ public partial class App : System.Windows.Application
             "Ctrl+Alt+Q",
             Forms.Keys.Q,
             GlobalHotkeyAction.QuickAddTask);
+        RegisterGlobalHotkey(
+            6,
+            "Ctrl+Alt+M",
+            Forms.Keys.M,
+            GlobalHotkeyAction.CycleOverlayMode);
+        RegisterGlobalHotkey(
+            7,
+            "Ctrl+Alt+1",
+            Forms.Keys.D1,
+            GlobalHotkeyAction.SelectWorkingMode);
+        RegisterGlobalHotkey(
+            8,
+            "Ctrl+Alt+2",
+            Forms.Keys.D2,
+            GlobalHotkeyAction.SelectPinnedMode);
+        RegisterGlobalHotkey(
+            9,
+            "Ctrl+Alt+3",
+            Forms.Keys.D3,
+            GlobalHotkeyAction.SelectCollapsedHandleMode);
     }
 
     private void RegisterGlobalHotkey(
@@ -290,14 +310,40 @@ public partial class App : System.Windows.Application
             case GlobalHotkeyAction.ToggleOverlay:
                 RunCommand(
                     "Hotkey",
-                    "Ctrl+Alt+T - Show/hide overlay",
-                    ToggleOverlay);
+                    "Ctrl+Alt+T - Collapse or show/hide overlay",
+                    () => ApplyOverlayModeShortcut(
+                        OverlayModeShortcut.CollapseOrToggle));
                 break;
             case GlobalHotkeyAction.QuickAddTask:
                 RunCommand(
                     "Hotkey",
                     "Ctrl+Alt+Q - Quick Add task",
                     ShowQuickAdd);
+                break;
+            case GlobalHotkeyAction.CycleOverlayMode:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+M - Cycle overlay mode",
+                    () => ApplyOverlayModeShortcut(OverlayModeShortcut.Cycle));
+                break;
+            case GlobalHotkeyAction.SelectWorkingMode:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+1 - Working mode",
+                    () => ApplyOverlayModeShortcut(OverlayModeShortcut.Working));
+                break;
+            case GlobalHotkeyAction.SelectPinnedMode:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+2 - Pinned mode",
+                    () => ApplyOverlayModeShortcut(OverlayModeShortcut.Pinned));
+                break;
+            case GlobalHotkeyAction.SelectCollapsedHandleMode:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+3 - Collapsed handle mode",
+                    () => ApplyOverlayModeShortcut(
+                        OverlayModeShortcut.CollapsedHandle));
                 break;
         }
     }
@@ -502,6 +548,28 @@ public partial class App : System.Windows.Application
         else
         {
             HideOverlay();
+        }
+    }
+
+    private void ApplyOverlayModeShortcut(OverlayModeShortcut shortcut)
+    {
+        if (_state is null)
+        {
+            return;
+        }
+
+        var result = OverlayModeShortcutPolicy.Resolve(
+            _state.OverlaySettings.OverlayMode,
+            shortcut);
+        SetOverlayMode(result.Mode);
+
+        if (result.EnsureVisible)
+        {
+            ShowOverlay();
+        }
+        else if (result.ToggleVisibility)
+        {
+            ToggleOverlay();
         }
     }
 
