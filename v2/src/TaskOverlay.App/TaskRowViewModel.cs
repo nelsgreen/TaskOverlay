@@ -9,7 +9,7 @@ internal sealed class TaskRowViewModel
     public TaskRowViewModel(
         AppState state,
         TaskItem task,
-        bool activeMode,
+        OverlayPresentationState presentation,
         DateTimeOffset? now = null)
     {
         Task = task;
@@ -19,12 +19,11 @@ internal sealed class TaskRowViewModel
             ? project!.ColorHex
             : ProjectColorPalette.Resolve(ProjectName, project?.Id ?? Guid.Empty);
         IsReminderDue = ReminderAttentionService.ShouldShowNotification(task, now);
-        var workingMode = state.OverlaySettings.OverlayMode is
-            OverlayMode.Working or OverlayMode.AutoQuestTracker;
+        var workingMode = presentation.IsWorking;
         ShowFocusBadge = OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
             task,
-            state.OverlaySettings.OverlayMode);
-        ShowDescription = activeMode &&
+            presentation);
+        ShowDescription = presentation.ShowDescriptions &&
                           !string.IsNullOrWhiteSpace(task.Description) &&
                           (workingMode
                               ? task.Status == TaskStatus.InWork
@@ -32,17 +31,17 @@ internal sealed class TaskRowViewModel
                                 task.InWork ||
                                 task.Status == TaskStatus.Waiting);
         ShowWaitingFor = !workingMode &&
-                         activeMode &&
+                         presentation.ShowDescriptions &&
                          task.Status == TaskStatus.Waiting &&
                          !string.IsNullOrWhiteSpace(task.WaitingFor);
-        var quietIdleRow = workingMode && !activeMode && !IsReminderDue;
+        var quietIdleRow = workingMode && !presentation.IsActive && !IsReminderDue;
         RowOpacity = quietIdleRow ? 0.58 : 1.0;
         TitleColorHex = quietIdleRow
             ? "#FFA1A1AA"
             : "#FFFFE878";
         var workingFontSize = OverlayTaskPresentationPolicy.GetWorkingFontSize(
             state.OverlaySettings,
-            activeMode);
+            presentation.IsActive);
         TitleFontSize = workingMode ? workingFontSize : 20;
         DescriptionFontSize = workingMode
             ? Math.Max(10, workingFontSize - 4)

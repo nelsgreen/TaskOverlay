@@ -17,9 +17,18 @@ public static class OverlayTaskPresentationPolicy
 
     public static bool ShouldShowFocusBadge(TaskItem task, OverlayMode mode)
     {
+        return ShouldShowFocusBadge(
+            task,
+            OverlayActiveStatePolicy.Resolve(mode, activeRequested: false));
+    }
+
+    public static bool ShouldShowFocusBadge(
+        TaskItem task,
+        OverlayPresentationState presentation)
+    {
         ArgumentNullException.ThrowIfNull(task);
 
         return task.Status == TaskStatus.InWork &&
-               mode is not OverlayMode.Working and not OverlayMode.AutoQuestTracker;
+               presentation.AllowFocusBadge;
     }
 }

@@ -1690,14 +1690,71 @@ internal static class Program
 
     private static void WorkingActivationPolicyBehavior()
     {
+        var workingEntry = OverlayActiveStatePolicy.ForModeEntry(OverlayMode.Working);
         Assert(
-            !OverlayActiveStatePolicy.AfterModeSwitch(OverlayMode.Working),
-            "Switching to Working should render idle first.");
+            workingEntry is
+            {
+                IsActive: false,
+                IsWorking: true,
+                ShowActiveChrome: false,
+                ShowDescriptions: false,
+                AllowFocusBadge: false,
+                UseCompactLayout: true
+            },
+            "Working entry should expose a complete idle presentation before rendering.");
+
+        var focusedTask = TaskItem.Create("Focused transition task");
+        focusedTask.Status = TaskStatus.InWork;
+        focusedTask.InWork = true;
         Assert(
-            OverlayActiveStatePolicy.AfterModeSwitch(OverlayMode.PinnedExpanded),
-            "Switching to Pinned should render active immediately.");
+            !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focusedTask,
+                workingEntry),
+            "Working entry should suppress FOCUS before rows are exposed.");
+
+        var workingHover = OverlayActiveStatePolicy.Resolve(
+            OverlayMode.Working,
+            activeRequested: true);
         Assert(
-            !OverlayActiveStatePolicy.AfterModeSwitch(OverlayMode.CollapsedHandle),
+            workingHover is
+            {
+                IsActive: true,
+                IsWorking: true,
+                ShowActiveChrome: true,
+                ShowDescriptions: true,
+                AllowFocusBadge: false,
+                UseCompactLayout: true
+            },
+            "Working hover should activate without weakening Working invariants.");
+        Assert(
+            !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focusedTask,
+                workingHover),
+            "Active Working should never expose a FOCUS chip.");
+
+        var pinnedEntry = OverlayActiveStatePolicy.ForModeEntry(
+            OverlayMode.PinnedExpanded);
+        Assert(
+            pinnedEntry is
+            {
+                IsActive: true,
+                IsWorking: false,
+                ShowActiveChrome: true,
+                ShowDescriptions: true,
+                AllowFocusBadge: true,
+                UseCompactLayout: false
+            },
+            "Switching to Pinned should restore its complete active presentation.");
+        Assert(
+            OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focusedTask,
+                pinnedEntry),
+            "Pinned entry should immediately restore FOCUS chips.");
+
+        var collapsedEntry = OverlayActiveStatePolicy.ForModeEntry(
+            OverlayMode.CollapsedHandle);
+        Assert(
+            !collapsedEntry.IsActive && !collapsedEntry.IsWorking,
             "Switching to CollapsedHandle should not render active immediately.");
 
         Assert(

@@ -66,8 +66,10 @@ public partial class OverlayWindow : Window
     private bool _handleContextInteractionActive;
     private bool _handlePanelRevealInProgress;
     private bool _settingsInteractionActive;
+    private bool _workingPresentationReady = true;
     private int _modalInteractionCount;
     private int _handlePanelRevealGeneration;
+    private int _modeTransitionGeneration;
     private readonly HashSet<ContextMenu> _openContextMenus = new();
     private DrawingPoint _dragStartCursorPixels;
     private double _dragStartLeft;
@@ -158,10 +160,11 @@ public partial class OverlayWindow : Window
         }
 
         var previousMode = _state.OverlaySettings.OverlayMode;
+        var transitionGeneration = ++_modeTransitionGeneration;
         StopModeTimers();
         ResetStaleInputState(closeContextMenus: false);
         _state.OverlaySettings.OverlayMode = mode;
-        var initialActiveState = OverlayActiveStatePolicy.AfterModeSwitch(mode);
+        var entryPresentation = OverlayActiveStatePolicy.ForModeEntry(mode);
 
         if (mode == OverlayMode.CollapsedHandle)
         {
@@ -178,34 +181,21 @@ public partial class OverlayWindow : Window
             {
                 RestoreCollapsedHandle();
             }
-
-            SetActiveMode(
-                initialActiveState,
-                force: true,
-                refreshPresentation: true);
         }
         else if (mode == OverlayMode.PinnedExpanded)
         {
             HideHandleWindow();
             _state.WindowPlacement.Left = Left;
             _state.WindowPlacement.Top = Top;
-            SetActiveMode(
-                initialActiveState,
-                force: true,
-                refreshPresentation: true);
         }
         else
         {
             HideHandleWindow();
             RestoreNormalPosition();
-            SetActiveMode(
-                initialActiveState,
-                force: true,
-                refreshPresentation: true);
         }
 
-        KeepCurrentModeWithinWorkArea();
-        ScheduleWorkingPointerReconciliation();
+        ApplyModeEntryPresentation(entryPresentation);
+        ScheduleWorkingPointerReconciliation(transitionGeneration);
 
         _saveState();
         _log($"Overlay mode changed: previous={previousMode}; current={mode}.");
@@ -226,7 +216,9 @@ public partial class OverlayWindow : Window
             var mode = _state.OverlaySettings.OverlayMode;
             var activeState = OverlayActiveStatePolicy.WhileSettingsOpen(
                 mode,
-                IsPointerOverOverlay());
+                mode is OverlayMode.Working or OverlayMode.AutoQuestTracker
+                    ? IsPointerInsideWorkingSurface()
+                    : IsPointerOverOverlay());
             SetActiveMode(
                 activeState,
                 force: mode is OverlayMode.Working or OverlayMode.AutoQuestTracker);
@@ -236,7 +228,7 @@ public partial class OverlayWindow : Window
         {
             if (_state.OverlaySettings.OverlayMode == OverlayMode.Working)
             {
-                SetActiveMode(IsPointerOverOverlay(), force: true);
+                SetActiveMode(IsPointerInsideWorkingSurface(), force: true);
                 ScheduleWorkingPointerReconciliation();
             }
             else
@@ -368,19 +360,11 @@ public partial class OverlayWindow : Window
         }
 
         RestoreWindowPlacement();
-
-        if (_state.OverlaySettings.OverlayMode == OverlayMode.CollapsedHandle)
-        {
-            SetActiveMode(false, force: true);
-        }
-        else if (_state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded)
-        {
-            SetActiveMode(true);
-        }
-        else
-        {
-            SetActiveMode(IsPointerOverOverlay(), force: true);
-        }
+        var transitionGeneration = ++_modeTransitionGeneration;
+        ApplyModeEntryPresentation(
+            OverlayActiveStatePolicy.ForModeEntry(
+                _state.OverlaySettings.OverlayMode));
+        ScheduleWorkingPointerReconciliation(transitionGeneration);
     }
 
     private void OverlayWindow_OnClosed(object? sender, EventArgs e)
@@ -572,31 +556,37 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        if (!active && !force && !CanCollapse())
+        var presentation = OverlayActiveStatePolicy.Resolve(
+            _state.OverlaySettings.OverlayMode,
+            active);
+        if (presentation.IsWorking && active && !_workingPresentationReady)
+        {
+            return;
+        }
+
+        if (!presentation.IsActive && !force && !CanCollapse())
         {
             UpdateHandleVisual();
             return;
         }
 
-        var modeChanged = _isActiveMode != active;
-        _isActiveMode = active;
+        var modeChanged = _isActiveMode != presentation.IsActive;
+        _isActiveMode = presentation.IsActive;
+        ApplyPresentationChrome(presentation);
         if (modeChanged || refreshPresentation)
         {
-            RefreshTasks();
+            RefreshTasks(presentation);
         }
 
         if (UsesHandleWindow)
         {
-            ApplyHandleWindowSurfaceState(active);
+            ApplyHandleWindowSurfaceState(presentation);
             return;
         }
 
         HideHandleWindow();
         CollapsedActivation.Visibility = Visibility.Visible;
         OverlayPanel.Visibility = Visibility.Visible;
-        OverlayPanel.Background = active ? ActiveBackground : Brushes.Transparent;
-        OverlayPanel.BorderBrush = active ? ActiveBorder : Brushes.Transparent;
-        ActiveChrome.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         EnsurePanelShown();
         var anchorScreen = GetCurrentScreen();
         ConfigureExpandedLayout(anchorScreen);
@@ -605,7 +595,38 @@ public partial class OverlayWindow : Window
         UpdateHandleVisual();
     }
 
-    private void ApplyHandleWindowSurfaceState(bool active)
+    private void ApplyPresentationChrome(OverlayPresentationState presentation)
+    {
+        OverlayPanel.Background = presentation.IsActive
+            ? ActiveBackground
+            : Brushes.Transparent;
+        OverlayPanel.BorderBrush = presentation.IsActive
+            ? ActiveBorder
+            : Brushes.Transparent;
+        ActiveChrome.Visibility = presentation.ShowActiveChrome
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void ApplyModeEntryPresentation(
+        OverlayPresentationState entryPresentation)
+    {
+        _workingPresentationReady = !entryPresentation.IsWorking;
+        try
+        {
+            SetActiveMode(
+                entryPresentation.IsActive,
+                force: true,
+                refreshPresentation: true);
+            KeepCurrentModeWithinWorkArea();
+        }
+        finally
+        {
+            _workingPresentationReady = true;
+        }
+    }
+
+    private void ApplyHandleWindowSurfaceState(OverlayPresentationState presentation)
     {
         if (_handleWindow is null || !_handleWindow.IsVisible)
         {
@@ -613,11 +634,10 @@ public partial class OverlayWindow : Window
         }
 
         CollapsedActivation.Visibility = Visibility.Collapsed;
-        var mode = _state.OverlaySettings.OverlayMode;
-        var panelVisible = mode switch
+        var panelVisible = presentation.Mode switch
         {
-            OverlayMode.CollapsedHandle => active,
-            OverlayMode.PinnedExpanded => active,
+            OverlayMode.CollapsedHandle => presentation.IsActive,
+            OverlayMode.PinnedExpanded => presentation.IsActive,
             _ => _handleWindow?.IsDragging != true
         };
         _handleWindow?.SetPanelVisible(panelVisible);
@@ -632,11 +652,8 @@ public partial class OverlayWindow : Window
         }
 
         OverlayPanel.Visibility = Visibility.Visible;
-        OverlayPanel.Background = active ? ActiveBackground : Brushes.Transparent;
-        OverlayPanel.BorderBrush = active ? ActiveBorder : Brushes.Transparent;
-        ActiveChrome.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         ShowPositionedHandlePanel();
-        ModeStatus.Text = mode switch
+        ModeStatus.Text = presentation.Mode switch
         {
             OverlayMode.PinnedExpanded => "PINNED",
             OverlayMode.Working => "WORKING",
@@ -1505,6 +1522,14 @@ public partial class OverlayWindow : Window
             return;
         }
 
+        RefreshTasks(
+            OverlayActiveStatePolicy.Resolve(
+                _state.OverlaySettings.OverlayMode,
+                _isActiveMode));
+    }
+
+    private void RefreshTasks(OverlayPresentationState presentation)
+    {
         _activeTasks.Clear();
         var now = DateTimeOffset.UtcNow;
         var orderedTasks = ReminderAttentionService.OrderForOverlay(
@@ -1512,17 +1537,17 @@ public partial class OverlayWindow : Window
             now);
         var visibleTasks = OverlayTaskFilter.SelectForMode(
             orderedTasks,
-            _state.OverlaySettings.OverlayMode,
+            presentation.Mode,
             now);
         foreach (var task in visibleTasks)
         {
-            _activeTasks.Add(new TaskRowViewModel(_state, task, _isActiveMode, now));
+            _activeTasks.Add(new TaskRowViewModel(_state, task, presentation, now));
         }
 
-        var workingMode = _state.OverlaySettings.OverlayMode is
-            OverlayMode.Working or OverlayMode.AutoQuestTracker;
-        EmptyState.Text = workingMode ? "No FOCUS tasks" : "No tasks";
-        EmptyState.Opacity = workingMode && !_isActiveMode ? 0.58 : 1.0;
+        EmptyState.Text = presentation.IsWorking ? "No FOCUS tasks" : "No tasks";
+        EmptyState.Opacity = presentation.IsWorking && !presentation.IsActive
+            ? 0.58
+            : 1.0;
         EmptyState.Visibility = _activeTasks.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -1623,8 +1648,10 @@ public partial class OverlayWindow : Window
         var availableWidth = Math.Max(120, workArea.Width - (WorkAreaMargin * 2));
         var availableHeight = Math.Max(80, workArea.Height - (WorkAreaMargin * 2));
         var availableContentWidth = Math.Max(80, availableWidth - 30);
-        var workingMode = _state.OverlaySettings.OverlayMode is
-            OverlayMode.Working or OverlayMode.AutoQuestTracker;
+        var presentation = OverlayActiveStatePolicy.Resolve(
+            _state.OverlaySettings.OverlayMode,
+            _isActiveMode);
+        var workingMode = presentation.UseCompactLayout;
 
         var desiredWidth = workingMode
             ? OverlaySettings.ClampWorkingWindowWidth(
@@ -2035,12 +2062,33 @@ public partial class OverlayWindow : Window
         return IsMouseOver || _handleWindow?.IsMouseOver == true;
     }
 
-    private void ScheduleWorkingPointerReconciliation()
+    private bool IsPointerInsideWorkingSurface()
+    {
+        if (!IsVisible ||
+            OverlayPanel.Visibility != Visibility.Visible ||
+            HoverSurface.ActualWidth <= 0 ||
+            HoverSurface.ActualHeight <= 0)
+        {
+            return false;
+        }
+
+        var pointer = Mouse.GetPosition(HoverSurface);
+        return pointer.X >= 0 &&
+               pointer.Y >= 0 &&
+               pointer.X < HoverSurface.ActualWidth &&
+               pointer.Y < HoverSurface.ActualHeight;
+    }
+
+    private void ScheduleWorkingPointerReconciliation(
+        int? requiredTransitionGeneration = null)
     {
         if (_state.OverlaySettings.OverlayMode != OverlayMode.Working)
         {
             return;
         }
+
+        var transitionGeneration = requiredTransitionGeneration ??
+                                   _modeTransitionGeneration;
 
         Dispatcher.BeginInvoke(
             DispatcherPriority.ContextIdle,
@@ -2048,12 +2096,14 @@ public partial class OverlayWindow : Window
             {
                 if (_isClosed ||
                     _isShuttingDown ||
+                    transitionGeneration != _modeTransitionGeneration ||
+                    !_workingPresentationReady ||
                     _state.OverlaySettings.OverlayMode != OverlayMode.Working)
                 {
                     return;
                 }
 
-                if (IsPointerOverOverlay())
+                if (IsPointerInsideWorkingSurface())
                 {
                     SetActiveMode(true, force: true);
                 }
