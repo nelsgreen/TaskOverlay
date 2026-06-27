@@ -311,6 +311,10 @@
             </StackPanel>
         </DataTemplate>
 
+        <DataTemplate DataType="{x:Type local:CollapsedOverlayViewState}">
+            <Grid Width="0" Height="0" />
+        </DataTemplate>
+
         <DataTemplate DataType="{x:Type local:ExpandedOverlayViewState}">
             <StackPanel Width="{Binding ContentWidth}">
                 <DockPanel LastChildFill="False"
@@ -347,6 +351,7 @@
 
     <Grid x:Name="HoverSurface"
           Background="Transparent"
+          IsHitTestVisible="{Binding Content.IsHostHitTestVisible, ElementName=OverlayContent}"
           MouseEnter="HoverSurface_OnMouseEnter"
           MouseLeave="HoverSurface_OnMouseLeave"
           PreviewMouseLeftButtonDown="HoverSurface_OnPreviewMouseLeftButtonDown"

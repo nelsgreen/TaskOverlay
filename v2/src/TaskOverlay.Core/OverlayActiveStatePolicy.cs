@@ -2,6 +2,7 @@ namespace TaskOverlay.Core;
 
 public enum OverlayVisualBranch
 {
+    Collapsed,
     Expanded,
     Working
 }
@@ -28,16 +29,20 @@ public static class OverlayActiveStatePolicy
         bool activeRequested)
     {
         var working = mode is OverlayMode.Working or OverlayMode.AutoQuestTracker;
+        var visualBranch = working
+            ? OverlayVisualBranch.Working
+            : mode == OverlayMode.CollapsedHandle && !activeRequested
+                ? OverlayVisualBranch.Collapsed
+                : OverlayVisualBranch.Expanded;
         return new OverlayPresentationState(
             mode,
             IsActive: activeRequested,
             IsWorking: working,
-            VisualBranch: working
-                ? OverlayVisualBranch.Working
-                : OverlayVisualBranch.Expanded,
-            ShowActiveChrome: activeRequested && !working,
+            VisualBranch: visualBranch,
+            ShowActiveChrome:
+                activeRequested && visualBranch == OverlayVisualBranch.Expanded,
             ShowDescriptions: activeRequested,
-            AllowFocusBadge: !working,
+            AllowFocusBadge: visualBranch == OverlayVisualBranch.Expanded,
             UseCompactLayout: working);
     }
 

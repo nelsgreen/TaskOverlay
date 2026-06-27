@@ -12,4 +12,10 @@ public static class OverlaySurfacePolicy
                    OverlayMode.CollapsedHandle or
                    OverlayMode.PinnedExpanded;
     }
+
+    public static bool KeepHostVisibleWhenPanelHidden(
+        OverlayPresentationState presentation)
+    {
+        return presentation.VisualBranch == OverlayVisualBranch.Collapsed;
+    }
 }

@@ -38,6 +38,8 @@ public abstract class OverlayViewState
     public double TasksMaxHeight { get; }
     public double EmptyFontSize { get; }
     public string ModeStatus { get; }
+    public bool IsHostHitTestVisible =>
+        Presentation.VisualBranch != OverlayVisualBranch.Collapsed;
     public string EmptyText => Presentation.IsWorking ? "No FOCUS tasks" : "No tasks";
     public double EmptyOpacity => Presentation.IsWorking && !Presentation.IsActive
         ? 0.58
@@ -65,6 +67,31 @@ public sealed class WorkingOverlayViewState : OverlayViewState
         : base(
             presentation,
             tasks,
+            panelBackground,
+            panelBorder,
+            panelMaxWidth,
+            contentWidth,
+            tasksMaxHeight,
+            emptyFontSize,
+            modeStatus)
+    {
+    }
+}
+
+public sealed class CollapsedOverlayViewState : OverlayViewState
+{
+    public CollapsedOverlayViewState(
+        OverlayPresentationState presentation,
+        Brush panelBackground,
+        Brush panelBorder,
+        double panelMaxWidth,
+        double contentWidth,
+        double tasksMaxHeight,
+        double emptyFontSize,
+        string modeStatus)
+        : base(
+            presentation,
+            System.Array.Empty<object>(),
             panelBackground,
             panelBorder,
             panelMaxWidth,

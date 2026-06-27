@@ -1764,8 +1764,40 @@ internal static class Program
         var collapsedEntry = OverlayActiveStatePolicy.ForModeEntry(
             OverlayMode.CollapsedHandle);
         Assert(
-            !collapsedEntry.IsActive && !collapsedEntry.IsWorking,
-            "Switching to CollapsedHandle should not render active immediately.");
+            collapsedEntry is
+            {
+                IsActive: false,
+                IsWorking: false,
+                VisualBranch: OverlayVisualBranch.Collapsed,
+                ShowActiveChrome: false,
+                AllowFocusBadge: false
+            },
+            "Inactive CollapsedHandle should use an empty structural branch.");
+        Assert(
+            OverlaySurfacePolicy.KeepHostVisibleWhenPanelHidden(collapsedEntry),
+            "Inactive CollapsedHandle should keep its empty host rendered.");
+
+        var collapsedHover = OverlayActiveStatePolicy.Resolve(
+            OverlayMode.CollapsedHandle,
+            activeRequested: true);
+        Assert(
+            collapsedHover is
+            {
+                IsActive: true,
+                VisualBranch: OverlayVisualBranch.Expanded,
+                ShowActiveChrome: true,
+                AllowFocusBadge: true
+            },
+            "Hover-expanded CollapsedHandle should retain the expanded presentation.");
+        Assert(
+            !OverlaySurfacePolicy.KeepHostVisibleWhenPanelHidden(collapsedHover),
+            "Expanded CollapsedHandle should not use the empty-host policy.");
+        Assert(
+            OverlayActiveStatePolicy.ForModeEntry(
+                OverlayModeCycle.Next(collapsedEntry.Mode)) == workingEntry &&
+            OverlayActiveStatePolicy.ForModeEntry(
+                OverlayModeCycle.Next(collapsedHover.Mode)) == workingEntry,
+            "Inactive and hover-expanded CollapsedHandle should converge on one Working entry state.");
 
         Assert(
             !OverlayActiveStatePolicy.WhileSettingsOpen(

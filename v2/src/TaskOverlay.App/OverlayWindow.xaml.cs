@@ -642,7 +642,16 @@ public partial class OverlayWindow : Window
         {
             CancelPendingHandlePanelReveal();
             OverlayPanel.Visibility = Visibility.Collapsed;
-            Hide();
+            if (OverlaySurfacePolicy.KeepHostVisibleWhenPanelHidden(presentation))
+            {
+                EnsurePanelShown();
+                UpdateLayout();
+            }
+            else
+            {
+                Hide();
+            }
+
             return;
         }
 
@@ -1527,17 +1536,19 @@ public partial class OverlayWindow : Window
         OverlayBounds workArea)
     {
         var now = DateTimeOffset.UtcNow;
-        var orderedTasks = ReminderAttentionService.OrderForOverlay(
-            _state.Tasks,
-            now);
-        var visibleTasks = OverlayTaskFilter.SelectForMode(
-            orderedTasks,
-            presentation.Mode,
-            now);
-        var rows = visibleTasks
-            .Select(task => new TaskRowViewModel(_state, task, presentation, now))
-            .Cast<object>()
-            .ToArray();
+        var rows = presentation.VisualBranch == OverlayVisualBranch.Collapsed
+            ? Array.Empty<object>()
+            : OverlayTaskFilter.SelectForMode(
+                    ReminderAttentionService.OrderForOverlay(_state.Tasks, now),
+                    presentation.Mode,
+                    now)
+                .Select(task => new TaskRowViewModel(
+                    _state,
+                    task,
+                    presentation,
+                    now))
+                .Cast<object>()
+                .ToArray();
         var layout = CalculateOverlayLayout(presentation, workArea);
         var panelBackground = presentation.IsActive
             ? ActiveBackground
@@ -1552,9 +1563,29 @@ public partial class OverlayWindow : Window
             _ => "ACTIVE"
         };
 
-        // A single Content replacement swaps the complete Working/Expanded tree.
-        OverlayContent.Content = presentation.VisualBranch == OverlayVisualBranch.Working
-            ? new WorkingOverlayViewState(
+        // A single Content replacement swaps the complete Collapsed/Working/Expanded tree.
+        OverlayContent.Content = presentation.VisualBranch switch
+        {
+            OverlayVisualBranch.Collapsed => new CollapsedOverlayViewState(
+                presentation,
+                panelBackground,
+                panelBorder,
+                layout.PanelMaxWidth,
+                layout.ContentWidth,
+                layout.TasksMaxHeight,
+                layout.EmptyFontSize,
+                modeStatus),
+            OverlayVisualBranch.Working => new WorkingOverlayViewState(
+                presentation,
+                rows,
+                panelBackground,
+                panelBorder,
+                layout.PanelMaxWidth,
+                layout.ContentWidth,
+                layout.TasksMaxHeight,
+                layout.EmptyFontSize,
+                modeStatus),
+            _ => new ExpandedOverlayViewState(
                 presentation,
                 rows,
                 panelBackground,
@@ -1564,16 +1595,7 @@ public partial class OverlayWindow : Window
                 layout.TasksMaxHeight,
                 layout.EmptyFontSize,
                 modeStatus)
-            : new ExpandedOverlayViewState(
-                presentation,
-                rows,
-                panelBackground,
-                panelBorder,
-                layout.PanelMaxWidth,
-                layout.ContentWidth,
-                layout.TasksMaxHeight,
-                layout.EmptyFontSize,
-                modeStatus);
+        };
     }
 
     private OverlayBounds ResolvePresentationWorkArea()
