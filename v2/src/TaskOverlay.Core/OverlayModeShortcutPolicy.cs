@@ -3,9 +3,6 @@ namespace TaskOverlay.Core;
 public enum OverlayModeShortcut
 {
     Cycle,
-    Working,
-    Pinned,
-    CollapsedHandle,
     CollapseOrToggle
 }
 
@@ -26,9 +23,6 @@ public static class OverlayModeShortcutPolicy
                 OverlayModeCycle.Next(current),
                 ToggleVisibility: false,
                 EnsureVisible: false),
-            OverlayModeShortcut.Working => Select(OverlayMode.Working),
-            OverlayModeShortcut.Pinned => Select(OverlayMode.PinnedExpanded),
-            OverlayModeShortcut.CollapsedHandle => Select(OverlayMode.CollapsedHandle),
             OverlayModeShortcut.CollapseOrToggle
                 when current == OverlayMode.CollapsedHandle =>
                 new OverlayModeShortcutResult(

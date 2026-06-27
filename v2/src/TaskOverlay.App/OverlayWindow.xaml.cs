@@ -140,6 +140,7 @@ public partial class OverlayWindow : Window
             _state.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded ||
             !CanCollapse();
         SetActiveMode(shouldExpand, force: !shouldExpand);
+        ScheduleWorkingPointerReconciliation();
     }
 
     public void SetOverlayMode(OverlayMode mode)
@@ -158,6 +159,7 @@ public partial class OverlayWindow : Window
 
         var previousMode = _state.OverlaySettings.OverlayMode;
         StopModeTimers();
+        ResetStaleInputState(closeContextMenus: false);
         _state.OverlaySettings.OverlayMode = mode;
 
         if (mode == OverlayMode.CollapsedHandle)
@@ -200,6 +202,10 @@ public partial class OverlayWindow : Window
             RestoreNormalPosition();
             SetActiveMode(IsMouseOver);
         }
+
+        RefreshTasks();
+        KeepCurrentModeWithinWorkArea();
+        ScheduleWorkingPointerReconciliation();
 
         _saveState();
         _log($"Overlay mode changed: previous={previousMode}; current={mode}.");
@@ -463,6 +469,7 @@ public partial class OverlayWindow : Window
 
         _collapsedExpandTimer.Stop();
         ScheduleCollapse();
+        ScheduleWorkingPointerReconciliation();
     }
 
     private void HandleWindow_OnHoverEntered()
@@ -485,6 +492,7 @@ public partial class OverlayWindow : Window
 
         _collapsedExpandTimer.Stop();
         ScheduleCollapse();
+        ScheduleWorkingPointerReconciliation();
     }
 
     private void HandleWindow_OnDragStateChanged(bool dragging)
@@ -500,6 +508,12 @@ public partial class OverlayWindow : Window
         {
             StartCollapsedExpansionOrActivate();
         }
+        else
+        {
+            ScheduleCollapse();
+        }
+
+        ScheduleWorkingPointerReconciliation();
     }
 
     private void HandleWindow_OnContextInteractionChanged(bool active)
@@ -739,6 +753,8 @@ public partial class OverlayWindow : Window
         {
             ScheduleCollapse();
         }
+
+        ScheduleWorkingPointerReconciliation();
     }
 
     private void CancelDrag()
@@ -1459,6 +1475,7 @@ public partial class OverlayWindow : Window
             RefreshTasks();
             UpdateHandleVisual();
             KeepCurrentModeWithinWorkArea();
+            ScheduleWorkingPointerReconciliation();
         }
     }
 
@@ -1611,8 +1628,9 @@ public partial class OverlayWindow : Window
         EmptyState.FontSize = workingMode
             ? Math.Max(
                 11,
-                OverlaySettings.ClampWorkingFontSize(
-                    _state.OverlaySettings.WorkingFontSize) - 3)
+                OverlayTaskPresentationPolicy.GetWorkingFontSize(
+                    _state.OverlaySettings,
+                    _isActiveMode) - 3)
             : 13;
     }
 
@@ -1997,6 +2015,35 @@ public partial class OverlayWindow : Window
     private bool IsPointerOverOverlay()
     {
         return IsMouseOver || _handleWindow?.IsMouseOver == true;
+    }
+
+    private void ScheduleWorkingPointerReconciliation()
+    {
+        if (_state.OverlaySettings.OverlayMode != OverlayMode.Working)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.ContextIdle,
+            new Action(() =>
+            {
+                if (_isClosed ||
+                    _isShuttingDown ||
+                    _state.OverlaySettings.OverlayMode != OverlayMode.Working)
+                {
+                    return;
+                }
+
+                if (IsPointerOverOverlay())
+                {
+                    SetActiveMode(true, force: true);
+                }
+                else if (CanCollapse())
+                {
+                    SetActiveMode(false, force: true);
+                }
+            }));
     }
 
     private void SetModalInteractionActive(bool active)

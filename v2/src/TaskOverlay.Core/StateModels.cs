@@ -178,7 +178,8 @@ public enum OverlayMode
 
 public sealed class OverlaySettings
 {
-    public const double DefaultWorkingFontSize = 16;
+    public const double DefaultWorkingIdleFontSize = 16;
+    public const double DefaultWorkingActiveFontSize = 19;
     public const double MinimumWorkingFontSize = 12;
     public const double MaximumWorkingFontSize = 24;
     public const double DefaultWorkingWindowWidth = 320;
@@ -190,7 +191,13 @@ public sealed class OverlaySettings
 
     public int ActiveToPassiveDelayMilliseconds { get; set; } = 500;
     public bool AlwaysOnTop { get; set; } = true;
-    public double WorkingFontSize { get; set; } = DefaultWorkingFontSize;
+    public double WorkingIdleFontSize { get; set; } = DefaultWorkingIdleFontSize;
+    public double WorkingActiveFontSize { get; set; } = DefaultWorkingActiveFontSize;
+
+    [JsonPropertyName("workingFontSize")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? LegacyWorkingFontSize { get; set; }
+
     public double WorkingWindowWidth { get; set; } = DefaultWorkingWindowWidth;
     public double WorkingWindowHeight { get; set; } = DefaultWorkingWindowHeight;
 
@@ -239,24 +246,37 @@ public sealed class OverlaySettings
 
     public bool NormalizeWorkingPresentation()
     {
-        var fontSize = ClampWorkingFontSize(WorkingFontSize);
+        var idleFontSize = ClampWorkingIdleFontSize(
+            LegacyWorkingFontSize ?? WorkingIdleFontSize);
+        var activeFontSize = ClampWorkingActiveFontSize(WorkingActiveFontSize);
         var windowWidth = ClampWorkingWindowWidth(WorkingWindowWidth);
         var windowHeight = ClampWorkingWindowHeight(WorkingWindowHeight);
-        var changed = WorkingFontSize != fontSize ||
+        var changed = LegacyWorkingFontSize is not null ||
+                      WorkingIdleFontSize != idleFontSize ||
+                      WorkingActiveFontSize != activeFontSize ||
                       WorkingWindowWidth != windowWidth ||
                       WorkingWindowHeight != windowHeight;
 
-        WorkingFontSize = fontSize;
+        WorkingIdleFontSize = idleFontSize;
+        WorkingActiveFontSize = activeFontSize;
+        LegacyWorkingFontSize = null;
         WorkingWindowWidth = windowWidth;
         WorkingWindowHeight = windowHeight;
         return changed;
     }
 
-    public static double ClampWorkingFontSize(double value)
+    public static double ClampWorkingIdleFontSize(double value)
     {
         return double.IsFinite(value)
             ? Math.Clamp(value, MinimumWorkingFontSize, MaximumWorkingFontSize)
-            : DefaultWorkingFontSize;
+            : DefaultWorkingIdleFontSize;
+    }
+
+    public static double ClampWorkingActiveFontSize(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinimumWorkingFontSize, MaximumWorkingFontSize)
+            : DefaultWorkingActiveFontSize;
     }
 
     public static double ClampWorkingWindowWidth(double value)

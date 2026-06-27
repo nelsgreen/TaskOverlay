@@ -40,8 +40,9 @@ internal sealed class TaskRowViewModel
         TitleColorHex = quietIdleRow
             ? "#FFA1A1AA"
             : "#FFFFE878";
-        var workingFontSize = OverlaySettings.ClampWorkingFontSize(
-            state.OverlaySettings.WorkingFontSize);
+        var workingFontSize = OverlayTaskPresentationPolicy.GetWorkingFontSize(
+            state.OverlaySettings,
+            activeMode);
         TitleFontSize = workingMode ? workingFontSize : 20;
         DescriptionFontSize = workingMode
             ? Math.Max(10, workingFontSize - 4)

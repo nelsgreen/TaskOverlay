@@ -2,22 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using TaskOverlay.Core;
 using Forms = System.Windows.Forms;
 
 namespace TaskOverlay.App;
-
-internal enum GlobalHotkeyAction
-{
-    CreateTasksFromLines,
-    CreateSingleTask,
-    CreateTaskWithDescription,
-    QuickAddTask,
-    ToggleOverlay,
-    CycleOverlayMode,
-    SelectWorkingMode,
-    SelectPinnedMode,
-    SelectCollapsedHandleMode
-}
 
 internal sealed class GlobalHotkeyManager : Forms.NativeWindow, IDisposable
 {
@@ -39,12 +27,12 @@ internal sealed class GlobalHotkeyManager : Forms.NativeWindow, IDisposable
         });
     }
 
-    public event Action<GlobalHotkeyAction>? HotkeyPressed;
+    public event Action<GlobalHotkeyCommand>? HotkeyPressed;
 
     public bool Register(
         int id,
-        Forms.Keys key,
-        GlobalHotkeyAction action,
+        uint virtualKey,
+        GlobalHotkeyCommand action,
         out string? error)
     {
         error = null;
@@ -62,7 +50,7 @@ internal sealed class GlobalHotkeyManager : Forms.NativeWindow, IDisposable
         }
 
         var modifiers = ModControl | ModAlt | ModNoRepeat;
-        if (!RegisterHotKey(Handle, id, modifiers, (uint)key))
+        if (!RegisterHotKey(Handle, id, modifiers, virtualKey))
         {
             var win32Error = Marshal.GetLastWin32Error();
             error = new Win32Exception(win32Error).Message;
@@ -121,5 +109,5 @@ internal sealed class GlobalHotkeyManager : Forms.NativeWindow, IDisposable
 
     private sealed record HotkeyRegistration(
         int Id,
-        GlobalHotkeyAction Action);
+        GlobalHotkeyCommand Action);
 }

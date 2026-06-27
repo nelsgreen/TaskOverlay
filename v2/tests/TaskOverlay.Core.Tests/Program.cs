@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.Core.Tests;
@@ -63,6 +65,7 @@ internal static class Program
             ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
             ("overlay mode click cycle", OverlayModeClickCycle),
             ("overlay mode shortcut policy", OverlayModeShortcutPolicyBehavior),
+            ("global hotkey bindings", GlobalHotkeyBindingBehavior),
             ("working mode task filtering", WorkingModeTaskFiltering),
             ("working mode focus badge", WorkingModeFocusBadge),
             ("handle surface ownership across modes", HandleSurfaceOwnershipAcrossModes),
@@ -1405,7 +1408,8 @@ internal static class Program
         {
             var store = new AppStateStore(directory);
             var state = store.Load();
-            state.OverlaySettings.WorkingFontSize = 17.5;
+            state.OverlaySettings.WorkingIdleFontSize = 17.5;
+            state.OverlaySettings.WorkingActiveFontSize = 21;
             state.OverlaySettings.WorkingWindowWidth = 360;
             state.OverlaySettings.WorkingWindowHeight = 280;
 
@@ -1413,8 +1417,11 @@ internal static class Program
             var loaded = new AppStateStore(directory).Load();
 
             Assert(
-                loaded.OverlaySettings.WorkingFontSize == 17.5,
-                "Working font size should survive save/load.");
+                loaded.OverlaySettings.WorkingIdleFontSize == 17.5,
+                "Working idle font size should survive save/load.");
+            Assert(
+                loaded.OverlaySettings.WorkingActiveFontSize == 21,
+                "Working active font size should survive save/load.");
             Assert(
                 loaded.OverlaySettings.WorkingWindowWidth == 360,
                 "Working window width should survive save/load.");
@@ -1425,7 +1432,8 @@ internal static class Program
 
         var invalid = new OverlaySettings
         {
-            WorkingFontSize = 1,
+            WorkingIdleFontSize = 1,
+            WorkingActiveFontSize = 100,
             WorkingWindowWidth = 5000,
             WorkingWindowHeight = -10
         };
@@ -1433,8 +1441,11 @@ internal static class Program
             invalid.NormalizeWorkingPresentation(),
             "Out-of-range Working presentation values should be normalized.");
         Assert(
-            invalid.WorkingFontSize == OverlaySettings.MinimumWorkingFontSize,
-            "Working font size should clamp to its minimum.");
+            invalid.WorkingIdleFontSize == OverlaySettings.MinimumWorkingFontSize,
+            "Working idle font size should clamp to its minimum.");
+        Assert(
+            invalid.WorkingActiveFontSize == OverlaySettings.MaximumWorkingFontSize,
+            "Working active font size should clamp to its maximum.");
         Assert(
             invalid.WorkingWindowWidth == OverlaySettings.MaximumWorkingWindowWidth,
             "Working width should clamp to its maximum.");
@@ -1444,6 +1455,34 @@ internal static class Program
         Assert(
             !invalid.NormalizeWorkingPresentation(),
             "Normalized Working presentation values should be idempotent.");
+
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            store.Save(AppState.CreateDefault());
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            var overlaySettings = root["overlaySettings"]!.AsObject();
+            overlaySettings.Remove("workingIdleFontSize");
+            overlaySettings.Remove("workingActiveFontSize");
+            overlaySettings["workingFontSize"] = 18;
+            File.WriteAllText(
+                store.StatePath,
+                root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+            var loaded = store.Load();
+            var normalizedJson = File.ReadAllText(store.StatePath);
+
+            Assert(
+                loaded.OverlaySettings.WorkingIdleFontSize == 18,
+                "Legacy Working font size should migrate to idle font size.");
+            Assert(
+                loaded.OverlaySettings.WorkingActiveFontSize ==
+                OverlaySettings.DefaultWorkingActiveFontSize,
+                "Legacy Working font migration should retain the active default.");
+            Assert(
+                !normalizedJson.Contains("\"workingFontSize\""),
+                "Legacy Working font setting should not be rewritten after migration.");
+        });
     }
 
     private static void OldCollapsedModeMigration()
@@ -1554,9 +1593,13 @@ internal static class Program
                 loaded.OverlaySettings.OverlayMode == OverlayMode.Working,
                 "Old state without mode flags should migrate to Working.");
             Assert(
-                loaded.OverlaySettings.WorkingFontSize ==
-                OverlaySettings.DefaultWorkingFontSize,
-                "Old state should load the default Working font size.");
+                loaded.OverlaySettings.WorkingIdleFontSize ==
+                OverlaySettings.DefaultWorkingIdleFontSize,
+                "Old state should load the default Working idle font size.");
+            Assert(
+                loaded.OverlaySettings.WorkingActiveFontSize ==
+                OverlaySettings.DefaultWorkingActiveFontSize,
+                "Old state should load the default Working active font size.");
             Assert(
                 loaded.OverlaySettings.WorkingWindowWidth ==
                 OverlaySettings.DefaultWorkingWindowWidth,
@@ -1687,24 +1730,21 @@ internal static class Program
             OverlayModeShortcut.Cycle);
         Assert(
             cycle.Mode == OverlayMode.PinnedExpanded,
-            "Ctrl+Alt+M should follow the Working to Pinned cycle.");
+            "Ctrl+Alt+1 should cycle Working to Pinned.");
 
+        cycle = OverlayModeShortcutPolicy.Resolve(
+            cycle.Mode,
+            OverlayModeShortcut.Cycle);
         Assert(
-            OverlayModeShortcutPolicy.Resolve(
-                OverlayMode.CollapsedHandle,
-                OverlayModeShortcut.Working).Mode == OverlayMode.Working,
-            "Ctrl+Alt+1 should select Working.");
-        Assert(
-            OverlayModeShortcutPolicy.Resolve(
-                OverlayMode.Working,
-                OverlayModeShortcut.Pinned).Mode == OverlayMode.PinnedExpanded,
-            "Ctrl+Alt+2 should select Pinned.");
-        Assert(
-            OverlayModeShortcutPolicy.Resolve(
-                OverlayMode.Working,
-                OverlayModeShortcut.CollapsedHandle).Mode ==
+            cycle.Mode ==
             OverlayMode.CollapsedHandle,
-            "Ctrl+Alt+3 should select collapsed handle.");
+            "Ctrl+Alt+1 should cycle Pinned to collapsed handle.");
+        cycle = OverlayModeShortcutPolicy.Resolve(
+            cycle.Mode,
+            OverlayModeShortcut.Cycle);
+        Assert(
+            cycle.Mode == OverlayMode.Working,
+            "Ctrl+Alt+1 should cycle collapsed handle to Working.");
 
         foreach (var mode in new[] { OverlayMode.Working, OverlayMode.PinnedExpanded })
         {
@@ -1726,6 +1766,41 @@ internal static class Program
             toggle.ToggleVisibility &&
             !toggle.EnsureVisible,
             "Ctrl+Alt+T should retain visibility toggle behavior in collapsed mode.");
+    }
+
+    private static void GlobalHotkeyBindingBehavior()
+    {
+        var bindings = GlobalHotkeyBindings.All;
+        var displayNames = bindings.Select(binding => binding.DisplayName).ToArray();
+
+        Assert(
+            displayNames.SequenceEqual(
+                new[] { "Ctrl+Alt+A", "Ctrl+Alt+Q", "Ctrl+Alt+T", "Ctrl+Alt+1" }),
+            "Only the final fixed hotkey set should be registered.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+A").Command ==
+            GlobalHotkeyCommand.CreateTaskWithDescription,
+            "Ctrl+Alt+A should create one clipboard task with description.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+Q").Command ==
+            GlobalHotkeyCommand.QuickAddTask,
+            "Ctrl+Alt+Q should retain Quick Add.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+T").Command ==
+            GlobalHotkeyCommand.CollapseOrToggleOverlay,
+            "Ctrl+Alt+T should retain collapse/toggle behavior.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+1").Command ==
+            GlobalHotkeyCommand.CycleOverlayMode,
+            "Ctrl+Alt+1 should cycle overlay modes.");
+        Assert(
+            displayNames.All(name =>
+                name is not "Ctrl+Alt+M" and
+                not "Ctrl+Alt+2" and
+                not "Ctrl+Alt+3" and
+                not "Ctrl+Alt+D" and
+                not "Ctrl+Alt+S"),
+            "Removed mode and clipboard hotkeys must not be registered.");
     }
 
     private static void WorkingModeTaskFiltering()
@@ -1759,6 +1834,28 @@ internal static class Program
             tasks.Select(task => task.Id).SequenceEqual(sourceIds),
             "Working filtering must not mutate or reorder the source list.");
 
+        var pinned = OverlayTaskFilter
+            .SelectForMode(ordered, OverlayMode.PinnedExpanded, now)
+            .ToList();
+        Assert(
+            pinned.Count == ordered.Count,
+            "Switching Working to Pinned should immediately restore the full task set.");
+        Assert(
+            OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.PinnedExpanded),
+            "Switching Working to Pinned should immediately restore the FOCUS badge.");
+
+        var returnedToWorking = OverlayTaskFilter
+            .SelectForMode(pinned, OverlayMode.Working, now)
+            .ToList();
+        Assert(
+            returnedToWorking.Count == 2 &&
+            !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.Working),
+            "Switching Pinned to Working should immediately restore filtering and badge suppression.");
+
         var noFocus = OverlayTaskFilter.SelectForMode(
             new[] { todo, waiting },
             OverlayMode.Working,
@@ -1773,6 +1870,11 @@ internal static class Program
         focus.Status = TaskStatus.InWork;
         focus.InWork = true;
         focus.RemindAtUtc = now;
+        var settings = new OverlaySettings
+        {
+            WorkingIdleFontSize = 15,
+            WorkingActiveFontSize = 20
+        };
 
         Assert(
             !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
@@ -1792,6 +1894,16 @@ internal static class Program
         Assert(
             ReminderAttentionService.ShouldShowNotification(focus, now),
             "Hiding FOCUS in Working must not suppress active REMIND attention.");
+        Assert(
+            OverlayTaskPresentationPolicy.GetWorkingFontSize(
+                settings,
+                activeMode: false) == 15,
+            "Idle Working should use its idle font size.");
+        Assert(
+            OverlayTaskPresentationPolicy.GetWorkingFontSize(
+                settings,
+                activeMode: true) == 20,
+            "Active Working should use its active font size.");
     }
 
     private static void HandleSurfaceOwnershipAcrossModes()

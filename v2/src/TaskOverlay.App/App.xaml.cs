@@ -216,134 +216,62 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        RegisterGlobalHotkey(
-            1,
-            "Ctrl+Alt+A",
-            Forms.Keys.A,
-            GlobalHotkeyAction.CreateTasksFromLines);
-        RegisterGlobalHotkey(
-            2,
-            "Ctrl+Alt+S",
-            Forms.Keys.S,
-            GlobalHotkeyAction.CreateSingleTask);
-        RegisterGlobalHotkey(
-            3,
-            "Ctrl+Alt+D",
-            Forms.Keys.D,
-            GlobalHotkeyAction.CreateTaskWithDescription);
-        RegisterGlobalHotkey(
-            4,
-            "Ctrl+Alt+T",
-            Forms.Keys.T,
-            GlobalHotkeyAction.ToggleOverlay);
-        RegisterGlobalHotkey(
-            5,
-            "Ctrl+Alt+Q",
-            Forms.Keys.Q,
-            GlobalHotkeyAction.QuickAddTask);
-        RegisterGlobalHotkey(
-            6,
-            "Ctrl+Alt+M",
-            Forms.Keys.M,
-            GlobalHotkeyAction.CycleOverlayMode);
-        RegisterGlobalHotkey(
-            7,
-            "Ctrl+Alt+1",
-            Forms.Keys.D1,
-            GlobalHotkeyAction.SelectWorkingMode);
-        RegisterGlobalHotkey(
-            8,
-            "Ctrl+Alt+2",
-            Forms.Keys.D2,
-            GlobalHotkeyAction.SelectPinnedMode);
-        RegisterGlobalHotkey(
-            9,
-            "Ctrl+Alt+3",
-            Forms.Keys.D3,
-            GlobalHotkeyAction.SelectCollapsedHandleMode);
+        foreach (var binding in GlobalHotkeyBindings.All)
+        {
+            RegisterGlobalHotkey(binding);
+        }
     }
 
-    private void RegisterGlobalHotkey(
-        int id,
-        string displayName,
-        Forms.Keys key,
-        GlobalHotkeyAction action)
+    private void RegisterGlobalHotkey(GlobalHotkeyBinding binding)
     {
         if (_hotkeyManager is null)
         {
             return;
         }
 
-        if (_hotkeyManager.Register(id, key, action, out var error))
+        if (_hotkeyManager.Register(
+                binding.Id,
+                binding.VirtualKey,
+                binding.Command,
+                out var error))
         {
-            _diagnostics?.Log($"Global hotkey registered: {displayName}.");
+            _diagnostics?.Log($"Global hotkey registered: {binding.DisplayName}.");
         }
         else
         {
             _diagnostics?.Log(
-                $"Global hotkey registration failed: {displayName}; {error}");
+                $"Global hotkey registration failed: {binding.DisplayName}; {error}");
         }
     }
 
-    private void HotkeyManager_OnHotkeyPressed(GlobalHotkeyAction action)
+    private void HotkeyManager_OnHotkeyPressed(GlobalHotkeyCommand action)
     {
         switch (action)
         {
-            case GlobalHotkeyAction.CreateTasksFromLines:
+            case GlobalHotkeyCommand.CreateTaskWithDescription:
                 RunCommand(
                     "Hotkey",
-                    "Ctrl+Alt+A - Create tasks from clipboard lines",
-                    CreateTasksFromClipboardLines);
-                break;
-            case GlobalHotkeyAction.CreateSingleTask:
-                RunCommand(
-                    "Hotkey",
-                    "Ctrl+Alt+S - Create one task from clipboard",
-                    CreateOneTaskFromClipboard);
-                break;
-            case GlobalHotkeyAction.CreateTaskWithDescription:
-                RunCommand(
-                    "Hotkey",
-                    "Ctrl+Alt+D - Create one task with description",
+                    "Ctrl+Alt+A - Create one task with description",
                     CreateOneTaskWithDescription);
                 break;
-            case GlobalHotkeyAction.ToggleOverlay:
+            case GlobalHotkeyCommand.CollapseOrToggleOverlay:
                 RunCommand(
                     "Hotkey",
                     "Ctrl+Alt+T - Collapse or show/hide overlay",
                     () => ApplyOverlayModeShortcut(
                         OverlayModeShortcut.CollapseOrToggle));
                 break;
-            case GlobalHotkeyAction.QuickAddTask:
+            case GlobalHotkeyCommand.QuickAddTask:
                 RunCommand(
                     "Hotkey",
                     "Ctrl+Alt+Q - Quick Add task",
                     ShowQuickAdd);
                 break;
-            case GlobalHotkeyAction.CycleOverlayMode:
+            case GlobalHotkeyCommand.CycleOverlayMode:
                 RunCommand(
                     "Hotkey",
-                    "Ctrl+Alt+M - Cycle overlay mode",
+                    "Ctrl+Alt+1 - Cycle overlay mode",
                     () => ApplyOverlayModeShortcut(OverlayModeShortcut.Cycle));
-                break;
-            case GlobalHotkeyAction.SelectWorkingMode:
-                RunCommand(
-                    "Hotkey",
-                    "Ctrl+Alt+1 - Working mode",
-                    () => ApplyOverlayModeShortcut(OverlayModeShortcut.Working));
-                break;
-            case GlobalHotkeyAction.SelectPinnedMode:
-                RunCommand(
-                    "Hotkey",
-                    "Ctrl+Alt+2 - Pinned mode",
-                    () => ApplyOverlayModeShortcut(OverlayModeShortcut.Pinned));
-                break;
-            case GlobalHotkeyAction.SelectCollapsedHandleMode:
-                RunCommand(
-                    "Hotkey",
-                    "Ctrl+Alt+3 - Collapsed handle mode",
-                    () => ApplyOverlayModeShortcut(
-                        OverlayModeShortcut.CollapsedHandle));
                 break;
         }
     }
