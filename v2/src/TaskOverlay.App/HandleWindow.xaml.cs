@@ -352,7 +352,18 @@ public partial class HandleWindow : Window
             HandleSurface.BorderBrush = PinnedBorder;
             HandleIndicator.Fill = PinnedForeground;
             HandleSurface.ToolTip =
-                "Pinned expanded. Click to return to auto quest tracker.";
+                "Pinned. Click for collapsed handle; right-click to choose overlay mode.";
+            return;
+        }
+
+        if (_state.OverlaySettings.OverlayMode is
+            OverlayMode.Working or OverlayMode.AutoQuestTracker)
+        {
+            HandleSurface.Background = ExpandedBackground;
+            HandleSurface.BorderBrush = ExpandedBorder;
+            HandleIndicator.Fill = ExpandedForeground;
+            HandleSurface.ToolTip =
+                "Working. Click for Pinned; right-click to choose overlay mode.";
             return;
         }
 
@@ -360,7 +371,7 @@ public partial class HandleWindow : Window
         HandleSurface.BorderBrush = panelVisible ? ExpandedBorder : CollapsedBorder;
         HandleIndicator.Fill = panelVisible ? ExpandedForeground : CollapsedForeground;
         HandleSurface.ToolTip = panelVisible
-            ? "Expanded. Click to pin; right-click to choose overlay mode."
-            : "Collapsed. Click to pin expanded.";
+            ? "Collapsed handle expanded. Click for Working."
+            : "Collapsed handle. Click for Working.";
     }
 }

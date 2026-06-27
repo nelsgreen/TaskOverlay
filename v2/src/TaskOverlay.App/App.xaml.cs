@@ -21,7 +21,7 @@ public partial class App : System.Windows.Application
     private Drawing.Icon? _trayApplicationIcon;
     private Forms.ContextMenuStrip? _trayMenu;
     private Forms.ToolStripMenuItem? _overlayModeMenuItem;
-    private Forms.ToolStripMenuItem? _autoQuestTrackerMenuItem;
+    private Forms.ToolStripMenuItem? _workingModeMenuItem;
     private Forms.ToolStripMenuItem? _collapsedHandleMenuItem;
     private Forms.ToolStripMenuItem? _pinnedExpandedMenuItem;
     private GlobalHotkeyManager? _hotkeyManager;
@@ -148,25 +148,25 @@ public partial class App : System.Windows.Application
         _trayMenu.Items.Add("Show overlay", null, (_, _) => RunCommand("Tray", "Show overlay", ShowOverlay));
         _trayMenu.Items.Add("Hide overlay", null, (_, _) => RunCommand("Tray", "Hide overlay", HideOverlay));
         _overlayModeMenuItem = new Forms.ToolStripMenuItem("Overlay mode");
-        _autoQuestTrackerMenuItem = CreateOverlayModeMenuItem(
-            "Auto quest tracker",
-            OverlayMode.AutoQuestTracker);
+        _workingModeMenuItem = CreateOverlayModeMenuItem(
+            "Working",
+            OverlayMode.Working);
+        _pinnedExpandedMenuItem = CreateOverlayModeMenuItem(
+            "Pinned",
+            OverlayMode.PinnedExpanded);
         _collapsedHandleMenuItem = CreateOverlayModeMenuItem(
             "Collapsed handle",
             OverlayMode.CollapsedHandle);
-        _pinnedExpandedMenuItem = CreateOverlayModeMenuItem(
-            "Pinned expanded",
-            OverlayMode.PinnedExpanded);
         _overlayModeMenuItem.DropDownItems.AddRange(
             new Forms.ToolStripItem[]
             {
-                _autoQuestTrackerMenuItem,
-                _collapsedHandleMenuItem,
-                _pinnedExpandedMenuItem
+                _workingModeMenuItem,
+                _pinnedExpandedMenuItem,
+                _collapsedHandleMenuItem
             });
         _trayMenu.Items.Add(_overlayModeMenuItem);
         UpdateOverlayModeUi(_state?.OverlaySettings.OverlayMode ??
-                            OverlayMode.AutoQuestTracker);
+                            OverlayMode.Working);
         _trayMenu.Items.Add(
             "Open Tree Manager",
             null,
@@ -216,88 +216,62 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        RegisterGlobalHotkey(
-            1,
-            "Ctrl+Alt+A",
-            Forms.Keys.A,
-            GlobalHotkeyAction.CreateTasksFromLines);
-        RegisterGlobalHotkey(
-            2,
-            "Ctrl+Alt+S",
-            Forms.Keys.S,
-            GlobalHotkeyAction.CreateSingleTask);
-        RegisterGlobalHotkey(
-            3,
-            "Ctrl+Alt+D",
-            Forms.Keys.D,
-            GlobalHotkeyAction.CreateTaskWithDescription);
-        RegisterGlobalHotkey(
-            4,
-            "Ctrl+Alt+T",
-            Forms.Keys.T,
-            GlobalHotkeyAction.ToggleOverlay);
-        RegisterGlobalHotkey(
-            5,
-            "Ctrl+Alt+Q",
-            Forms.Keys.Q,
-            GlobalHotkeyAction.QuickAddTask);
+        foreach (var binding in GlobalHotkeyBindings.All)
+        {
+            RegisterGlobalHotkey(binding);
+        }
     }
 
-    private void RegisterGlobalHotkey(
-        int id,
-        string displayName,
-        Forms.Keys key,
-        GlobalHotkeyAction action)
+    private void RegisterGlobalHotkey(GlobalHotkeyBinding binding)
     {
         if (_hotkeyManager is null)
         {
             return;
         }
 
-        if (_hotkeyManager.Register(id, key, action, out var error))
+        if (_hotkeyManager.Register(
+                binding.Id,
+                binding.VirtualKey,
+                binding.Command,
+                out var error))
         {
-            _diagnostics?.Log($"Global hotkey registered: {displayName}.");
+            _diagnostics?.Log($"Global hotkey registered: {binding.DisplayName}.");
         }
         else
         {
             _diagnostics?.Log(
-                $"Global hotkey registration failed: {displayName}; {error}");
+                $"Global hotkey registration failed: {binding.DisplayName}; {error}");
         }
     }
 
-    private void HotkeyManager_OnHotkeyPressed(GlobalHotkeyAction action)
+    private void HotkeyManager_OnHotkeyPressed(GlobalHotkeyCommand action)
     {
         switch (action)
         {
-            case GlobalHotkeyAction.CreateTasksFromLines:
+            case GlobalHotkeyCommand.CreateTaskWithDescription:
                 RunCommand(
                     "Hotkey",
-                    "Ctrl+Alt+A - Create tasks from clipboard lines",
-                    CreateTasksFromClipboardLines);
-                break;
-            case GlobalHotkeyAction.CreateSingleTask:
-                RunCommand(
-                    "Hotkey",
-                    "Ctrl+Alt+S - Create one task from clipboard",
-                    CreateOneTaskFromClipboard);
-                break;
-            case GlobalHotkeyAction.CreateTaskWithDescription:
-                RunCommand(
-                    "Hotkey",
-                    "Ctrl+Alt+D - Create one task with description",
+                    "Ctrl+Alt+A - Create one task with description",
                     CreateOneTaskWithDescription);
                 break;
-            case GlobalHotkeyAction.ToggleOverlay:
+            case GlobalHotkeyCommand.CollapseOrToggleOverlay:
                 RunCommand(
                     "Hotkey",
-                    "Ctrl+Alt+T - Show/hide overlay",
-                    ToggleOverlay);
+                    "Ctrl+Alt+T - Collapse or show/hide overlay",
+                    () => ApplyOverlayModeShortcut(
+                        OverlayModeShortcut.CollapseOrToggle));
                 break;
-            case GlobalHotkeyAction.QuickAddTask:
+            case GlobalHotkeyCommand.QuickAddTask:
                 RunCommand(
                     "Hotkey",
                     "Ctrl+Alt+Q - Quick Add task",
                     ShowQuickAdd);
+                break;
+            case GlobalHotkeyCommand.CycleOverlayMode:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+1 - Cycle overlay mode",
+                    () => ApplyOverlayModeShortcut(OverlayModeShortcut.Cycle));
                 break;
         }
     }
@@ -505,8 +479,35 @@ public partial class App : System.Windows.Application
         }
     }
 
+    private void ApplyOverlayModeShortcut(OverlayModeShortcut shortcut)
+    {
+        if (_state is null)
+        {
+            return;
+        }
+
+        var result = OverlayModeShortcutPolicy.Resolve(
+            _state.OverlaySettings.OverlayMode,
+            shortcut);
+        SetOverlayMode(result.Mode);
+
+        if (result.EnsureVisible)
+        {
+            ShowOverlay();
+        }
+        else if (result.ToggleVisibility)
+        {
+            ToggleOverlay();
+        }
+    }
+
     private void SetOverlayMode(OverlayMode mode)
     {
+        if (mode == OverlayMode.AutoQuestTracker)
+        {
+            mode = OverlayMode.Working;
+        }
+
         if (_state is null || _state.OverlaySettings.OverlayMode == mode)
         {
             return;
@@ -837,7 +838,7 @@ public partial class App : System.Windows.Application
 
     private void UpdateOverlayModeUi(OverlayMode mode)
     {
-        SetModeMenuCheck(_autoQuestTrackerMenuItem, mode, OverlayMode.AutoQuestTracker);
+        SetModeMenuCheck(_workingModeMenuItem, mode, OverlayMode.Working);
         SetModeMenuCheck(_collapsedHandleMenuItem, mode, OverlayMode.CollapsedHandle);
         SetModeMenuCheck(_pinnedExpandedMenuItem, mode, OverlayMode.PinnedExpanded);
 
@@ -978,7 +979,7 @@ public partial class App : System.Windows.Application
             {
                 foreach (var item in new[]
                 {
-                    _autoQuestTrackerMenuItem,
+                    _workingModeMenuItem,
                     _collapsedHandleMenuItem,
                     _pinnedExpandedMenuItem
                 })
@@ -989,7 +990,7 @@ public partial class App : System.Windows.Application
                     }
                 }
 
-                _autoQuestTrackerMenuItem = null;
+                _workingModeMenuItem = null;
                 _collapsedHandleMenuItem = null;
                 _pinnedExpandedMenuItem = null;
                 _overlayModeMenuItem = null;

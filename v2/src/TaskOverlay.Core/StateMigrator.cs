@@ -75,6 +75,18 @@ public static class StateMigrator
             changed = true;
         }
 
+        if (state.OverlaySettings is not null &&
+            state.OverlaySettings.NormalizeOverlayMode())
+        {
+            changed = true;
+        }
+
+        if (state.OverlaySettings is not null &&
+            state.OverlaySettings.NormalizeWorkingPresentation())
+        {
+            changed = true;
+        }
+
         var defaultProject = state.Projects.FirstOrDefault(project =>
             string.Equals(project.Name, ProjectItem.DefaultName, StringComparison.OrdinalIgnoreCase));
         if (defaultProject is null)

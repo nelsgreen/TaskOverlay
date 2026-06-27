@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.Core.Tests;
@@ -54,12 +56,20 @@ internal static class Program
             ("quick task capture", QuickTaskCapture),
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
+            ("working presentation settings", WorkingPresentationSettings),
+            ("working panel bounds", WorkingPanelBoundsBehavior),
             ("old collapsed mode migration", OldCollapsedModeMigration),
             ("old pinned mode migration", OldPinnedModeMigration),
             ("old overlay mode default", OldOverlayModeDefault),
+            ("legacy auto mode fallback", LegacyAutoModeFallback),
             ("overlay collapse guard", OverlayCollapseGuardBehavior),
+            ("working activation policy", WorkingActivationPolicyBehavior),
             ("pointer click versus drag threshold", PointerClickVersusDragThreshold),
             ("overlay mode click cycle", OverlayModeClickCycle),
+            ("overlay mode shortcut policy", OverlayModeShortcutPolicyBehavior),
+            ("global hotkey bindings", GlobalHotkeyBindingBehavior),
+            ("working mode task filtering", WorkingModeTaskFiltering),
+            ("working mode focus badge", WorkingModeFocusBadge),
             ("handle surface ownership across modes", HandleSurfaceOwnershipAcrossModes),
             ("single task in-work mode", SingleTaskInWorkMode),
             ("multiple tasks in-work mode", MultipleTasksInWorkMode),
@@ -120,8 +130,8 @@ internal static class Program
             Assert(state.Tasks.All(task => task.Id != Guid.Empty), "Seed tasks need stable IDs.");
             Assert(state.Tasks.Select(task => task.Id).Distinct().Count() == 3, "Seed task IDs must be unique.");
             Assert(
-                state.OverlaySettings.OverlayMode == OverlayMode.AutoQuestTracker,
-                "New state should use AutoQuestTracker mode.");
+                state.OverlaySettings.OverlayMode == OverlayMode.Working,
+                "New state should use Working mode.");
         });
     }
 
@@ -1374,7 +1384,7 @@ internal static class Program
         {
             var store = new AppStateStore(directory);
             var state = store.Load();
-            state.OverlaySettings.OverlayMode = OverlayMode.PinnedExpanded;
+            state.OverlaySettings.OverlayMode = OverlayMode.Working;
 
             store.Save(state);
 
@@ -1382,15 +1392,98 @@ internal static class Program
             var loaded = new AppStateStore(directory).Load();
 
             Assert(
-                json.Contains("\"overlayMode\": \"pinnedExpanded\""),
+                json.Contains("\"overlayMode\": \"working\""),
                 "The unified overlay mode should be serialized.");
             Assert(
-                loaded.OverlaySettings.OverlayMode == OverlayMode.PinnedExpanded,
+                loaded.OverlaySettings.OverlayMode == OverlayMode.Working,
                 "Overlay mode should survive a save/load roundtrip.");
             Assert(
                 !json.Contains("\"collapsedMode\"") &&
                 !json.Contains("\"pinnedActiveMode\""),
                 "Legacy mode flags should not be written after normalization.");
+        });
+    }
+
+    private static void WorkingPresentationSettings()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.OverlaySettings.WorkingIdleFontSize = 17.5;
+            state.OverlaySettings.WorkingActiveFontSize = 21;
+            state.OverlaySettings.WorkingWindowWidth = 360;
+            state.OverlaySettings.WorkingWindowHeight = 280;
+
+            store.Save(state);
+            var loaded = new AppStateStore(directory).Load();
+
+            Assert(
+                loaded.OverlaySettings.WorkingIdleFontSize == 17.5,
+                "Working idle font size should survive save/load.");
+            Assert(
+                loaded.OverlaySettings.WorkingActiveFontSize == 21,
+                "Working active font size should survive save/load.");
+            Assert(
+                loaded.OverlaySettings.WorkingWindowWidth == 360,
+                "Working window width should survive save/load.");
+            Assert(
+                loaded.OverlaySettings.WorkingWindowHeight == 280,
+                "Working window height should survive save/load.");
+        });
+
+        var invalid = new OverlaySettings
+        {
+            WorkingIdleFontSize = 1,
+            WorkingActiveFontSize = 100,
+            WorkingWindowWidth = 5000,
+            WorkingWindowHeight = -10
+        };
+        Assert(
+            invalid.NormalizeWorkingPresentation(),
+            "Out-of-range Working presentation values should be normalized.");
+        Assert(
+            invalid.WorkingIdleFontSize == OverlaySettings.MinimumWorkingFontSize,
+            "Working idle font size should clamp to its minimum.");
+        Assert(
+            invalid.WorkingActiveFontSize == OverlaySettings.MaximumWorkingFontSize,
+            "Working active font size should clamp to its maximum.");
+        Assert(
+            invalid.WorkingWindowWidth == OverlaySettings.MaximumWorkingWindowWidth,
+            "Working width should clamp to its maximum.");
+        Assert(
+            invalid.WorkingWindowHeight == OverlaySettings.MinimumWorkingWindowHeight,
+            "Working height should clamp to its minimum.");
+        Assert(
+            !invalid.NormalizeWorkingPresentation(),
+            "Normalized Working presentation values should be idempotent.");
+
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            store.Save(AppState.CreateDefault());
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            var overlaySettings = root["overlaySettings"]!.AsObject();
+            overlaySettings.Remove("workingIdleFontSize");
+            overlaySettings.Remove("workingActiveFontSize");
+            overlaySettings["workingFontSize"] = 18;
+            File.WriteAllText(
+                store.StatePath,
+                root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+            var loaded = store.Load();
+            var normalizedJson = File.ReadAllText(store.StatePath);
+
+            Assert(
+                loaded.OverlaySettings.WorkingIdleFontSize == 18,
+                "Legacy Working font size should migrate to idle font size.");
+            Assert(
+                loaded.OverlaySettings.WorkingActiveFontSize ==
+                OverlaySettings.DefaultWorkingActiveFontSize,
+                "Legacy Working font migration should retain the active default.");
+            Assert(
+                !normalizedJson.Contains("\"workingFontSize\""),
+                "Legacy Working font setting should not be rewritten after migration.");
         });
     }
 
@@ -1499,15 +1592,57 @@ internal static class Program
             var loaded = new AppStateStore(directory).Load();
 
             Assert(
-                loaded.OverlaySettings.OverlayMode == OverlayMode.AutoQuestTracker,
-                "Old state without mode flags should migrate to AutoQuestTracker.");
+                loaded.OverlaySettings.OverlayMode == OverlayMode.Working,
+                "Old state without mode flags should migrate to Working.");
+            Assert(
+                loaded.OverlaySettings.WorkingIdleFontSize ==
+                OverlaySettings.DefaultWorkingIdleFontSize,
+                "Old state should load the default Working idle font size.");
+            Assert(
+                loaded.OverlaySettings.WorkingActiveFontSize ==
+                OverlaySettings.DefaultWorkingActiveFontSize,
+                "Old state should load the default Working active font size.");
+            Assert(
+                loaded.OverlaySettings.WorkingWindowWidth ==
+                OverlaySettings.DefaultWorkingWindowWidth,
+                "Old state should load the default Working window width.");
+            Assert(
+                loaded.OverlaySettings.WorkingWindowHeight ==
+                OverlaySettings.DefaultWorkingWindowHeight,
+                "Old state should load the default Working window height.");
+        });
+    }
+
+    private static void LegacyAutoModeFallback()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            store.Save(AppState.CreateDefault());
+            var legacyJson = File.ReadAllText(store.StatePath)
+                .Replace("\"overlayMode\": \"working\"", "\"overlayMode\": \"autoQuestTracker\"");
+            Assert(
+                legacyJson.Contains("\"overlayMode\": \"autoQuestTracker\""),
+                "Test setup should contain the legacy mode value.");
+            File.WriteAllText(store.StatePath, legacyJson);
+
+            var loaded = new AppStateStore(directory).Load();
+            var normalizedJson = File.ReadAllText(store.StatePath);
+
+            Assert(
+                loaded.OverlaySettings.OverlayMode == OverlayMode.Working,
+                "Legacy AutoQuestTracker state should fall back to Working.");
+            Assert(
+                normalizedJson.Contains("\"overlayMode\": \"working\"") &&
+                !normalizedJson.Contains("autoQuestTracker"),
+                "Legacy AutoQuestTracker fallback should be persisted.");
         });
     }
 
     private static void OverlayCollapseGuardBehavior()
     {
         var idle = new OverlayInteractionState(
-            OverlayMode: OverlayMode.AutoQuestTracker,
+            OverlayMode: OverlayMode.Working,
             TaskDetailsOpen: false,
             ContextMenuOpen: false,
             SettingsOpen: false,
@@ -1523,18 +1658,28 @@ internal static class Program
         Assert(ReminderService.IsDue(dueTask), "Test task should be due.");
         Assert(
             OverlayCollapseGuard.CanCollapse(idle),
-            "A REMIND task must not block AutoQuestTracker collapse.");
+            "A REMIND task must not block Working mode idle transition.");
+        Assert(
+            OverlayCollapseGuard.CanCollapse(idle with { SettingsOpen = true }),
+            "Settings should not block Working from returning to idle.");
         Assert(
             OverlayCollapseGuard.CanCollapse(
                 idle with { OverlayMode = OverlayMode.CollapsedHandle }),
             "A REMIND task must not block CollapsedHandle collapse.");
+        Assert(
+            !OverlayCollapseGuard.CanCollapse(
+                idle with
+                {
+                    OverlayMode = OverlayMode.CollapsedHandle,
+                    SettingsOpen = true
+                }),
+            "Settings should preserve the existing CollapsedHandle interaction guard.");
 
         var blockers = new[]
         {
             idle with { OverlayMode = OverlayMode.PinnedExpanded },
             idle with { TaskDetailsOpen = true },
             idle with { ContextMenuOpen = true },
-            idle with { SettingsOpen = true },
             idle with { ModalDialogOpen = true },
             idle with { Dragging = true }
         };
@@ -1542,6 +1687,144 @@ internal static class Program
         Assert(
             blockers.All(state => !OverlayCollapseGuard.CanCollapse(state)),
             "Every active interaction should prevent overlay collapse.");
+    }
+
+    private static void WorkingActivationPolicyBehavior()
+    {
+        var workingEntry = OverlayActiveStatePolicy.ForModeEntry(OverlayMode.Working);
+        Assert(
+            workingEntry is
+            {
+                IsActive: false,
+                IsWorking: true,
+                VisualBranch: OverlayVisualBranch.Working,
+                ShowActiveChrome: false,
+                ShowDescriptions: false,
+                AllowFocusBadge: false,
+                UseCompactLayout: true
+            },
+            "Working entry should expose a complete idle presentation before rendering.");
+
+        var focusedTask = TaskItem.Create("Focused transition task");
+        focusedTask.Status = TaskStatus.InWork;
+        focusedTask.InWork = true;
+        Assert(
+            !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focusedTask,
+                workingEntry),
+            "Working entry should suppress FOCUS before rows are exposed.");
+
+        var workingHover = OverlayActiveStatePolicy.Resolve(
+            OverlayMode.Working,
+            activeRequested: true);
+        Assert(
+            workingHover is
+            {
+                IsActive: true,
+                IsWorking: true,
+                VisualBranch: OverlayVisualBranch.Working,
+                ShowActiveChrome: false,
+                ShowDescriptions: true,
+                AllowFocusBadge: false,
+                UseCompactLayout: true
+            },
+            "Working hover should activate without adding expanded-only visuals.");
+        Assert(
+            !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focusedTask,
+                workingHover),
+            "Active Working should never expose a FOCUS chip.");
+
+        var pinnedEntry = OverlayActiveStatePolicy.ForModeEntry(
+            OverlayMode.PinnedExpanded);
+        Assert(
+            pinnedEntry is
+            {
+                IsActive: true,
+                IsWorking: false,
+                VisualBranch: OverlayVisualBranch.Expanded,
+                ShowActiveChrome: true,
+                ShowDescriptions: true,
+                AllowFocusBadge: true,
+                UseCompactLayout: false
+            },
+            "Switching to Pinned should restore its complete active presentation.");
+        Assert(
+            OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focusedTask,
+                pinnedEntry),
+            "Pinned entry should immediately restore FOCUS chips.");
+
+        Assert(
+            workingEntry.VisualBranch != pinnedEntry.VisualBranch,
+            "Working and Pinned should use distinct visual branches.");
+        Assert(
+            !workingEntry.ShowActiveChrome && !workingHover.ShowActiveChrome,
+            "Working should never request the expanded active header.");
+
+        var collapsedEntry = OverlayActiveStatePolicy.ForModeEntry(
+            OverlayMode.CollapsedHandle);
+        Assert(
+            collapsedEntry is
+            {
+                IsActive: false,
+                IsWorking: false,
+                VisualBranch: OverlayVisualBranch.Collapsed,
+                ShowActiveChrome: false,
+                AllowFocusBadge: false
+            },
+            "Inactive CollapsedHandle should use an empty structural branch.");
+        Assert(
+            OverlaySurfacePolicy.KeepHostVisibleWhenPanelHidden(collapsedEntry),
+            "Inactive CollapsedHandle should keep its empty host rendered.");
+
+        var collapsedHover = OverlayActiveStatePolicy.Resolve(
+            OverlayMode.CollapsedHandle,
+            activeRequested: true);
+        Assert(
+            collapsedHover is
+            {
+                IsActive: true,
+                VisualBranch: OverlayVisualBranch.Expanded,
+                ShowActiveChrome: true,
+                AllowFocusBadge: true
+            },
+            "Hover-expanded CollapsedHandle should retain the expanded presentation.");
+        Assert(
+            !OverlaySurfacePolicy.KeepHostVisibleWhenPanelHidden(collapsedHover),
+            "Expanded CollapsedHandle should not use the empty-host policy.");
+        Assert(
+            OverlayActiveStatePolicy.ForModeEntry(
+                OverlayModeCycle.Next(collapsedEntry.Mode)) == workingEntry &&
+            OverlayActiveStatePolicy.ForModeEntry(
+                OverlayModeCycle.Next(collapsedHover.Mode)) == workingEntry,
+            "Inactive and hover-expanded CollapsedHandle should converge on one Working entry state.");
+
+        Assert(
+            !OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.Working,
+                pointerInside: false),
+            "Opening Settings away from Working should preserve idle presentation.");
+        Assert(
+            OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.Working,
+                pointerInside: true),
+            "Working should still activate on real hover while Settings is open.");
+        Assert(
+            !OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.Working,
+                pointerInside: false),
+            "Working should return to idle after pointer leave while Settings is open.");
+        Assert(
+            OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.PinnedExpanded,
+                pointerInside: false),
+            "Settings should preserve Pinned active behavior.");
+        Assert(
+            OverlayActiveStatePolicy.WhileSettingsOpen(
+                OverlayMode.CollapsedHandle,
+                pointerInside: false),
+            "Settings should preserve the existing CollapsedHandle active interaction.");
     }
 
     private static void PointerClickVersusDragThreshold()
@@ -1555,6 +1838,52 @@ internal static class Program
         Assert(
             PointerDragGesture.HasExceededThreshold(10, 10, 10, 4),
             "Vertical movement beyond the threshold should start dragging.");
+    }
+
+    private static void WorkingPanelBoundsBehavior()
+    {
+        var settings = new OverlaySettings();
+        var workArea = new OverlayBounds(0, 0, 1920, 1080);
+        var workingEntry = OverlayActiveStatePolicy.ForModeEntry(
+            OverlayModeCycle.Next(OverlayMode.CollapsedHandle));
+        var workingLayout = OverlayPanelBoundsPolicy.ResolveLayout(
+            workingEntry,
+            settings,
+            workArea,
+            workAreaMargin: 16);
+        var pinnedLayout = OverlayPanelBoundsPolicy.ResolveLayout(
+            OverlayActiveStatePolicy.ForModeEntry(OverlayMode.PinnedExpanded),
+            settings,
+            workArea,
+            workAreaMargin: 16);
+
+        Assert(
+            workingLayout.PanelWidth == OverlaySettings.DefaultWorkingWindowWidth &&
+            workingLayout.ContentWidth ==
+            OverlaySettings.DefaultWorkingWindowWidth -
+            OverlayPanelBoundsPolicy.HorizontalChrome,
+            "CollapsedHandle -> Working should resolve compact bounds before reveal.");
+        Assert(
+            pinnedLayout.PanelWidth == 450 && pinnedLayout.ContentWidth == 420,
+            "Pinned should retain its expanded panel bounds.");
+
+        var handle = new OverlayBounds(1880, 100, 40, 20);
+        var placed = OverlayPanelBoundsPolicy.PlaceWorkingPanel(
+            handle,
+            workingLayout.ContentWidth,
+            contentHeight: 180,
+            workingLayout.PanelMaxWidth,
+            workArea);
+        Assert(
+            placed.Width == OverlaySettings.DefaultWorkingWindowWidth &&
+            placed.Height == 180 + OverlayPanelBoundsPolicy.VerticalChrome,
+            "Prepared Working bounds should include panel chrome exactly once.");
+        Assert(
+            placed.Right == handle.Right && placed.Top == handle.Bottom,
+            "Right-edge Working placement should open inward from the handle.");
+        Assert(
+            handle == new OverlayBounds(1880, 100, 40, 20),
+            "Preparing Working bounds must not move the handle anchor.");
     }
 
     private static void WindowPlacementNegativeMonitorClamp()
@@ -1573,17 +1902,214 @@ internal static class Program
     private static void OverlayModeClickCycle()
     {
         Assert(
-            OverlayModeCycle.Next(OverlayMode.AutoQuestTracker) ==
-            OverlayMode.CollapsedHandle,
-            "Auto quest tracker should cycle to collapsed handle.");
-        Assert(
-            OverlayModeCycle.Next(OverlayMode.CollapsedHandle) ==
+            OverlayModeCycle.Next(OverlayMode.Working) ==
             OverlayMode.PinnedExpanded,
-            "Collapsed handle should cycle to pinned expanded.");
+            "Working should cycle to Pinned.");
         Assert(
             OverlayModeCycle.Next(OverlayMode.PinnedExpanded) ==
-            OverlayMode.AutoQuestTracker,
-            "Pinned expanded should cycle to auto quest tracker.");
+            OverlayMode.CollapsedHandle,
+            "Pinned should cycle to collapsed handle.");
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.CollapsedHandle) ==
+            OverlayMode.Working,
+            "Collapsed handle should cycle to Working.");
+        Assert(
+            OverlayModeCycle.Next(OverlayMode.AutoQuestTracker) ==
+            OverlayMode.Working,
+            "Legacy AutoQuestTracker should cycle into Working.");
+
+        var mouseTarget = OverlayModeCycle.Next(OverlayMode.CollapsedHandle);
+        var hotkeyTarget = OverlayModeShortcutPolicy.Resolve(
+            OverlayMode.CollapsedHandle,
+            OverlayModeShortcut.Cycle).Mode;
+        Assert(
+            mouseTarget == hotkeyTarget &&
+            OverlayActiveStatePolicy.ForModeEntry(mouseTarget).VisualBranch ==
+            OverlayVisualBranch.Working,
+            "Mouse and Ctrl+Alt+1 cycles should resolve the same Working entry policy.");
+    }
+
+    private static void OverlayModeShortcutPolicyBehavior()
+    {
+        var cycle = OverlayModeShortcutPolicy.Resolve(
+            OverlayMode.Working,
+            OverlayModeShortcut.Cycle);
+        Assert(
+            cycle.Mode == OverlayMode.PinnedExpanded,
+            "Ctrl+Alt+1 should cycle Working to Pinned.");
+
+        cycle = OverlayModeShortcutPolicy.Resolve(
+            cycle.Mode,
+            OverlayModeShortcut.Cycle);
+        Assert(
+            cycle.Mode ==
+            OverlayMode.CollapsedHandle,
+            "Ctrl+Alt+1 should cycle Pinned to collapsed handle.");
+        cycle = OverlayModeShortcutPolicy.Resolve(
+            cycle.Mode,
+            OverlayModeShortcut.Cycle);
+        Assert(
+            cycle.Mode == OverlayMode.Working,
+            "Ctrl+Alt+1 should cycle collapsed handle to Working.");
+
+        foreach (var mode in new[] { OverlayMode.Working, OverlayMode.PinnedExpanded })
+        {
+            var collapse = OverlayModeShortcutPolicy.Resolve(
+                mode,
+                OverlayModeShortcut.CollapseOrToggle);
+            Assert(
+                collapse.Mode == OverlayMode.CollapsedHandle &&
+                collapse.EnsureVisible &&
+                !collapse.ToggleVisibility,
+                "Ctrl+Alt+T should collapse and reveal non-collapsed modes.");
+        }
+
+        var toggle = OverlayModeShortcutPolicy.Resolve(
+            OverlayMode.CollapsedHandle,
+            OverlayModeShortcut.CollapseOrToggle);
+        Assert(
+            toggle.Mode == OverlayMode.CollapsedHandle &&
+            toggle.ToggleVisibility &&
+            !toggle.EnsureVisible,
+            "Ctrl+Alt+T should retain visibility toggle behavior in collapsed mode.");
+    }
+
+    private static void GlobalHotkeyBindingBehavior()
+    {
+        var bindings = GlobalHotkeyBindings.All;
+        var displayNames = bindings.Select(binding => binding.DisplayName).ToArray();
+
+        Assert(
+            displayNames.SequenceEqual(
+                new[] { "Ctrl+Alt+A", "Ctrl+Alt+Q", "Ctrl+Alt+T", "Ctrl+Alt+1" }),
+            "Only the final fixed hotkey set should be registered.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+A").Command ==
+            GlobalHotkeyCommand.CreateTaskWithDescription,
+            "Ctrl+Alt+A should create one clipboard task with description.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+Q").Command ==
+            GlobalHotkeyCommand.QuickAddTask,
+            "Ctrl+Alt+Q should retain Quick Add.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+T").Command ==
+            GlobalHotkeyCommand.CollapseOrToggleOverlay,
+            "Ctrl+Alt+T should retain collapse/toggle behavior.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+1").Command ==
+            GlobalHotkeyCommand.CycleOverlayMode,
+            "Ctrl+Alt+1 should cycle overlay modes.");
+        Assert(
+            displayNames.All(name =>
+                name is not "Ctrl+Alt+M" and
+                not "Ctrl+Alt+2" and
+                not "Ctrl+Alt+3" and
+                not "Ctrl+Alt+D" and
+                not "Ctrl+Alt+S"),
+            "Removed mode and clipboard hotkeys must not be registered.");
+    }
+
+    private static void WorkingModeTaskFiltering()
+    {
+        var now = DateTimeOffset.Parse("2026-06-27T10:00:00Z");
+        var todo = TaskItem.Create("TODO", now.AddMinutes(-4));
+        var focus = TaskItem.Create("FOCUS", now.AddMinutes(-3));
+        focus.Status = TaskStatus.InWork;
+        focus.InWork = true;
+        var waiting = TaskItem.Create("WAIT", now.AddMinutes(-2));
+        waiting.Status = TaskStatus.Waiting;
+        var remind = TaskItem.Create("REMIND", now.AddMinutes(-1));
+        remind.RemindAtUtc = now;
+        var done = TaskItem.Create("DONE", now);
+        done.Status = TaskStatus.Done;
+        done.Completed = true;
+        var tasks = new[] { todo, focus, waiting, remind, done };
+        var sourceIds = tasks.Select(task => task.Id).ToArray();
+        var ordered = ReminderAttentionService.OrderForOverlay(tasks, now).ToList();
+
+        var working = OverlayTaskFilter
+            .SelectForMode(ordered, OverlayMode.Working, now)
+            .ToList();
+
+        Assert(working.Count == 2, "Working should show only FOCUS and active REMIND tasks.");
+        Assert(working.Any(task => task.Id == focus.Id), "Working should include FOCUS tasks.");
+        Assert(working.Any(task => task.Id == remind.Id), "Working should preserve REMIND attention items.");
+        Assert(working.All(task => task.Id != todo.Id && task.Id != waiting.Id && task.Id != done.Id),
+            "Working should hide normal TODO, WAIT, and DONE tasks.");
+        Assert(
+            tasks.Select(task => task.Id).SequenceEqual(sourceIds),
+            "Working filtering must not mutate or reorder the source list.");
+
+        var pinned = OverlayTaskFilter
+            .SelectForMode(ordered, OverlayMode.PinnedExpanded, now)
+            .ToList();
+        Assert(
+            pinned.Count == ordered.Count,
+            "Switching Working to Pinned should immediately restore the full task set.");
+        Assert(
+            OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.PinnedExpanded),
+            "Switching Working to Pinned should immediately restore the FOCUS badge.");
+
+        var returnedToWorking = OverlayTaskFilter
+            .SelectForMode(pinned, OverlayMode.Working, now)
+            .ToList();
+        Assert(
+            returnedToWorking.Count == 2 &&
+            !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.Working),
+            "Switching Pinned to Working should immediately restore filtering and badge suppression.");
+
+        var noFocus = OverlayTaskFilter.SelectForMode(
+            new[] { todo, waiting },
+            OverlayMode.Working,
+            now);
+        Assert(!noFocus.Any(), "Working should return an empty projection without FOCUS or REMIND tasks.");
+    }
+
+    private static void WorkingModeFocusBadge()
+    {
+        var now = DateTimeOffset.Parse("2026-06-27T10:00:00Z");
+        var focus = TaskItem.Create("Focused task", now);
+        focus.Status = TaskStatus.InWork;
+        focus.InWork = true;
+        focus.RemindAtUtc = now;
+        var settings = new OverlaySettings
+        {
+            WorkingIdleFontSize = 15,
+            WorkingActiveFontSize = 20
+        };
+
+        Assert(
+            !OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.Working),
+            "Working should hide its redundant FOCUS badge.");
+        Assert(
+            OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.PinnedExpanded),
+            "Pinned should preserve the FOCUS badge.");
+        Assert(
+            OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
+                focus,
+                OverlayMode.CollapsedHandle),
+            "Collapsed expansion should preserve the FOCUS badge.");
+        Assert(
+            ReminderAttentionService.ShouldShowNotification(focus, now),
+            "Hiding FOCUS in Working must not suppress active REMIND attention.");
+        Assert(
+            OverlayTaskPresentationPolicy.GetWorkingFontSize(
+                settings,
+                activeMode: false) == 15,
+            "Idle Working should use its idle font size.");
+        Assert(
+            OverlayTaskPresentationPolicy.GetWorkingFontSize(
+                settings,
+                activeMode: true) == 20,
+            "Active Working should use its active font size.");
     }
 
     private static void HandleSurfaceOwnershipAcrossModes()
@@ -1591,9 +2117,10 @@ internal static class Program
         var handle = new OverlayBounds(1872, 0, 48, 20);
         var modes = new[]
         {
+            OverlayMode.Working,
             OverlayMode.CollapsedHandle,
             OverlayMode.PinnedExpanded,
-            OverlayMode.AutoQuestTracker,
+            OverlayMode.Working,
             OverlayMode.CollapsedHandle
         };
 
@@ -1617,9 +2144,9 @@ internal static class Program
 
         Assert(
             !OverlaySurfacePolicy.UseHandleWindowForMode(
-                OverlayMode.AutoQuestTracker,
+                OverlayMode.Working,
                 hasCollapsedAnchor: false),
-            "Auto mode should retain its fallback surface before an anchor exists.");
+            "Working should retain its fallback surface before an anchor exists.");
     }
 
     private static void SingleTaskInWorkMode()

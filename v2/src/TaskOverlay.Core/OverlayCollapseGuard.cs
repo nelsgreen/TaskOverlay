@@ -7,7 +7,8 @@ public static class OverlayCollapseGuard
         return state.OverlayMode != OverlayMode.PinnedExpanded &&
                !state.TaskDetailsOpen &&
                !state.ContextMenuOpen &&
-               !state.SettingsOpen &&
+               (!state.SettingsOpen ||
+                state.OverlayMode is OverlayMode.Working or OverlayMode.AutoQuestTracker) &&
                !state.ModalDialogOpen &&
                !state.Dragging;
     }

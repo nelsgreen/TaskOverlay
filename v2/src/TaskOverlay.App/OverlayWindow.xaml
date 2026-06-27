@@ -1,6 +1,7 @@
 <Window x:Class="TaskOverlay.App.OverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:TaskOverlay.App"
         Title="TaskOverlay v2"
         Icon="Assets/app.ico"
         AllowsTransparency="True"
@@ -10,8 +11,347 @@
         ShowInTaskbar="False"
         SizeToContent="WidthAndHeight"
         Topmost="True">
+    <Window.Resources>
+        <Style x:Key="TaskRowBorderStyle" TargetType="Border">
+            <Setter Property="Background" Value="Transparent" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding InWork}" Value="True">
+                    <Setter Property="Background" Value="#332563EB" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsWaiting}" Value="True">
+                    <Setter Property="Background" Value="#334B2E16" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsReminderDue}" Value="True">
+                    <Setter Property="Background" Value="#665B1D1D" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <DataTemplate x:Key="ProjectBadgeTemplate">
+            <Button Margin="0,0,5,0"
+                    Padding="0"
+                    Background="{Binding ProjectColorHex}"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    FocusVisualStyle="{x:Null}"
+                    ToolTip="Click to change project"
+                    Click="ProjectBadge_OnClick">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border Padding="5,1"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="3">
+                            <ContentPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Button.Template>
+                <TextBlock Foreground="#FFFFFFFF"
+                           FontSize="9"
+                           FontWeight="SemiBold"
+                           MaxWidth="110"
+                           Text="{Binding ProjectName}"
+                           TextTrimming="CharacterEllipsis" />
+            </Button>
+        </DataTemplate>
+
+        <DataTemplate x:Key="FocusBadgeTemplate">
+            <Border Margin="0,0,5,0"
+                    Padding="5,1"
+                    Background="#FF2563EB"
+                    CornerRadius="3">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowFocusBadge}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Foreground="#FFFFFFFF"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Text="FOCUS" />
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="WaitingBadgeTemplate">
+            <Border Margin="0,0,5,0"
+                    Padding="5,1"
+                    Background="#FFB45309"
+                    CornerRadius="3">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsWaiting}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Foreground="#FFFFFFFF"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Text="WAIT" />
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ReminderBadgeTemplate">
+            <Button Padding="0"
+                    Background="#FFDC2626"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    FocusVisualStyle="{x:Null}"
+                    ToolTip="Click to snooze, complete, or clear"
+                    Click="DueBadge_OnClick">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsReminderDue}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border Padding="6,1"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="3">
+                            <ContentPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Button.Template>
+                <Button.ContextMenu>
+                    <ContextMenu Opened="TaskContextMenu_OnOpened"
+                                 Closed="TaskContextMenu_OnClosed"
+                                 DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                        <MenuItem Header="Focus" Click="FocusReminderMenuItem_OnClick" />
+                        <MenuItem Header="Snooze 30m" Click="Snooze30MenuItem_OnClick" />
+                        <MenuItem Header="Snooze 1h" Click="Snooze1HourMenuItem_OnClick" />
+                        <MenuItem Header="Still waiting" Click="StillWaitingMenuItem_OnClick" />
+                        <Separator />
+                        <MenuItem Header="Mark done" Click="CompleteTaskMenuItem_OnClick" />
+                        <MenuItem Header="Open details" Click="EditTaskMenuItem_OnClick" />
+                        <MenuItem Header="Clear reminder" Click="ClearReminderMenuItem_OnClick" />
+                    </ContextMenu>
+                </Button.ContextMenu>
+                <TextBlock Foreground="#FFFFFFFF"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Text="REMIND" />
+            </Button>
+        </DataTemplate>
+
+        <DataTemplate x:Key="TaskBodyTemplate">
+            <Button Padding="0,2"
+                    HorizontalContentAlignment="Stretch"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    FocusVisualStyle="{x:Null}"
+                    Click="TaskBody_OnClick">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border Padding="{TemplateBinding Padding}"
+                                Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Stretch" />
+                        </Border>
+                    </ControlTemplate>
+                </Button.Template>
+                <StackPanel>
+                    <TextBlock VerticalAlignment="Center"
+                               Foreground="{Binding TitleColorHex}"
+                               FontSize="{Binding TitleFontSize}"
+                               FontWeight="SemiBold"
+                               Text="{Binding Title}"
+                               TextTrimming="CharacterEllipsis"
+                               TextWrapping="Wrap" />
+                    <TextBlock Margin="0,5,0,2"
+                               Foreground="#FFD4D4D8"
+                               FontSize="{Binding DescriptionFontSize}"
+                               Text="{Binding Description}"
+                               TextTrimming="CharacterEllipsis"
+                               TextWrapping="Wrap">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ShowDescription}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBlock Margin="0,3,0,1"
+                               Foreground="#FFFBBF24"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Text="{Binding WaitingForLabel}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ShowWaitingFor}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+            </Button>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ExpandedTaskRowTemplate">
+            <Border Margin="{Binding RowMargin}"
+                    Padding="{Binding RowPadding}"
+                    Opacity="{Binding RowOpacity}"
+                    BorderThickness="0"
+                    CornerRadius="6"
+                    Style="{StaticResource TaskRowBorderStyle}"
+                    ContextMenuOpening="TaskRow_OnContextMenuOpening">
+                <Border.ContextMenu>
+                    <ContextMenu Opened="TaskContextMenu_OnOpened"
+                                 Closed="TaskContextMenu_OnClosed"
+                                 DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}" />
+                </Border.ContextMenu>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Ellipse Grid.Column="0"
+                             Width="8"
+                             Height="8"
+                             Margin="0,7,8,0"
+                             VerticalAlignment="Top"
+                             Fill="{Binding StatusDotColorHex}"
+                             ToolTip="Status indicator" />
+                    <StackPanel Grid.Column="1">
+                        <WrapPanel Margin="0,0,0,3">
+                            <ContentControl Content="{Binding}"
+                                            ContentTemplate="{StaticResource ProjectBadgeTemplate}" />
+                            <ContentControl Content="{Binding}"
+                                            ContentTemplate="{StaticResource FocusBadgeTemplate}" />
+                            <ContentControl Content="{Binding}"
+                                            ContentTemplate="{StaticResource WaitingBadgeTemplate}" />
+                            <ContentControl Content="{Binding}"
+                                            ContentTemplate="{StaticResource ReminderBadgeTemplate}" />
+                        </WrapPanel>
+                        <ContentControl Content="{Binding}"
+                                        ContentTemplate="{StaticResource TaskBodyTemplate}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="WorkingTaskRowTemplate">
+            <Border Margin="{Binding RowMargin}"
+                    Padding="{Binding RowPadding}"
+                    Opacity="{Binding RowOpacity}"
+                    BorderThickness="0"
+                    CornerRadius="6"
+                    Style="{StaticResource TaskRowBorderStyle}"
+                    ContextMenuOpening="TaskRow_OnContextMenuOpening">
+                <Border.ContextMenu>
+                    <ContextMenu Opened="TaskContextMenu_OnOpened"
+                                 Closed="TaskContextMenu_OnClosed"
+                                 DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}" />
+                </Border.ContextMenu>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Ellipse Grid.Column="0"
+                             Width="8"
+                             Height="8"
+                             Margin="0,7,8,0"
+                             VerticalAlignment="Top"
+                             Fill="{Binding StatusDotColorHex}"
+                             ToolTip="Status indicator" />
+                    <StackPanel Grid.Column="1">
+                        <WrapPanel Margin="0,0,0,3">
+                            <ContentControl Content="{Binding}"
+                                            ContentTemplate="{StaticResource ProjectBadgeTemplate}" />
+                            <ContentControl Content="{Binding}"
+                                            ContentTemplate="{StaticResource WaitingBadgeTemplate}" />
+                            <ContentControl Content="{Binding}"
+                                            ContentTemplate="{StaticResource ReminderBadgeTemplate}" />
+                        </WrapPanel>
+                        <ContentControl Content="{Binding}"
+                                        ContentTemplate="{StaticResource TaskBodyTemplate}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type local:WorkingOverlayViewState}">
+            <StackPanel Width="{Binding ContentWidth}">
+                <ScrollViewer MaxHeight="{Binding TasksMaxHeight}"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Margin="8,6"
+                                   Foreground="#FFA1A1AA"
+                                   FontSize="{Binding EmptyFontSize}"
+                                   FontWeight="SemiBold"
+                                   Opacity="{Binding EmptyOpacity}"
+                                   Text="{Binding EmptyText}"
+                                   Visibility="{Binding EmptyVisibility}" />
+                        <ItemsControl ItemsSource="{Binding Tasks}"
+                                      ItemTemplate="{StaticResource WorkingTaskRowTemplate}" />
+                    </StackPanel>
+                </ScrollViewer>
+            </StackPanel>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type local:CollapsedOverlayViewState}">
+            <Grid Width="0" Height="0" />
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type local:ExpandedOverlayViewState}">
+            <StackPanel Width="{Binding ContentWidth}">
+                <DockPanel LastChildFill="False"
+                           Margin="2,0,2,10"
+                           Visibility="{Binding ActiveHeaderVisibility}">
+                    <TextBlock DockPanel.Dock="Left"
+                               Foreground="#FFF4F4F5"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Text="TASKOVERLAY V2 PROTOTYPE" />
+                    <TextBlock DockPanel.Dock="Right"
+                               Foreground="#FFA1A1AA"
+                               FontSize="11"
+                               Text="{Binding ModeStatus}" />
+                </DockPanel>
+                <ScrollViewer MaxHeight="{Binding TasksMaxHeight}"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Margin="8,6"
+                                   Foreground="#FFA1A1AA"
+                                   FontSize="{Binding EmptyFontSize}"
+                                   FontWeight="SemiBold"
+                                   Opacity="{Binding EmptyOpacity}"
+                                   Text="{Binding EmptyText}"
+                                   Visibility="{Binding EmptyVisibility}" />
+                        <ItemsControl ItemsSource="{Binding Tasks}"
+                                      ItemTemplate="{StaticResource ExpandedTaskRowTemplate}" />
+                    </StackPanel>
+                </ScrollViewer>
+            </StackPanel>
+        </DataTemplate>
+    </Window.Resources>
+
     <Grid x:Name="HoverSurface"
           Background="Transparent"
+          IsHitTestVisible="{Binding Content.IsHostHitTestVisible, ElementName=OverlayContent}"
           MouseEnter="HoverSurface_OnMouseEnter"
           MouseLeave="HoverSurface_OnMouseLeave"
           PreviewMouseLeftButtonDown="HoverSurface_OnPreviewMouseLeftButtonDown"
@@ -42,16 +382,16 @@
             <Border.ContextMenu>
                 <ContextMenu Opened="HandleModeContextMenu_OnOpened"
                              Closed="HandleModeContextMenu_OnClosed">
-                    <MenuItem Header="Auto quest tracker"
-                              Tag="AutoQuestTracker"
+                    <MenuItem Header="Working"
+                              Tag="Working"
+                              IsCheckable="True"
+                              Click="HandleModeMenuItem_OnClick" />
+                    <MenuItem Header="Pinned"
+                              Tag="PinnedExpanded"
                               IsCheckable="True"
                               Click="HandleModeMenuItem_OnClick" />
                     <MenuItem Header="Collapsed handle"
                               Tag="CollapsedHandle"
-                              IsCheckable="True"
-                              Click="HandleModeMenuItem_OnClick" />
-                    <MenuItem Header="Pinned expanded"
-                              Tag="PinnedExpanded"
                               IsCheckable="True"
                               Click="HandleModeMenuItem_OnClick" />
                 </ContextMenu>
@@ -69,260 +409,12 @@
         <Border x:Name="OverlayPanel"
                 Grid.Row="1"
                 Padding="14"
-                Background="Transparent"
-                BorderBrush="Transparent"
+                Background="{Binding Content.PanelBackground, ElementName=OverlayContent}"
+                BorderBrush="{Binding Content.PanelBorder, ElementName=OverlayContent}"
                 BorderThickness="1"
-                CornerRadius="10">
-            <StackPanel x:Name="ContentStack"
-                        Width="420">
-                <DockPanel x:Name="ActiveChrome"
-                           LastChildFill="False"
-                           Margin="2,0,2,10"
-                           Visibility="Collapsed">
-                    <TextBlock DockPanel.Dock="Left"
-                               Foreground="#FFF4F4F5"
-                               FontSize="12"
-                               FontWeight="SemiBold"
-                               Text="TASKOVERLAY V2 PROTOTYPE" />
-                    <TextBlock x:Name="ModeStatus"
-                               DockPanel.Dock="Right"
-                               Foreground="#FFA1A1AA"
-                               FontSize="11"
-                               Text="ACTIVE" />
-                </DockPanel>
-
-                <ScrollViewer x:Name="TasksScroller"
-                              HorizontalScrollBarVisibility="Disabled"
-                              VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="ActiveTasks">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Margin="0,2"
-                                        Padding="8,5"
-                                        BorderThickness="0"
-                                        CornerRadius="6"
-                                        ContextMenuOpening="TaskRow_OnContextMenuOpening">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="Background"
-                                                    Value="Transparent" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding InWork}"
-                                                             Value="True">
-                                                    <Setter Property="Background"
-                                                            Value="#332563EB" />
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding IsWaiting}"
-                                                             Value="True">
-                                                    <Setter Property="Background"
-                                                            Value="#334B2E16" />
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding IsReminderDue}"
-                                                             Value="True">
-                                                    <Setter Property="Background"
-                                                            Value="#665B1D1D" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
-                                    <Border.ContextMenu>
-                                        <ContextMenu Opened="TaskContextMenu_OnOpened"
-                                                     Closed="TaskContextMenu_OnClosed"
-                                                     DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}" />
-                                    </Border.ContextMenu>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-
-                                        <Ellipse Grid.Column="0"
-                                                 Width="8"
-                                                 Height="8"
-                                                 Margin="0,7,8,0"
-                                                 VerticalAlignment="Top"
-                                                 Fill="{Binding StatusDotColorHex}"
-                                                 ToolTip="Status indicator" />
-
-                                        <StackPanel Grid.Column="1">
-                                            <WrapPanel Margin="0,0,0,3">
-                                                    <Button Margin="0,0,5,0"
-                                                            Padding="0"
-                                                            Background="{Binding ProjectColorHex}"
-                                                            BorderThickness="0"
-                                                            Cursor="Hand"
-                                                            FocusVisualStyle="{x:Null}"
-                                                            ToolTip="Click to change project"
-                                                            Click="ProjectBadge_OnClick">
-                                                        <Button.Template>
-                                                            <ControlTemplate TargetType="Button">
-                                                                <Border Padding="5,1"
-                                                                        Background="{TemplateBinding Background}"
-                                                                        CornerRadius="3">
-                                                                    <ContentPresenter />
-                                                                </Border>
-                                                            </ControlTemplate>
-                                                        </Button.Template>
-                                                        <TextBlock Foreground="#FFFFFFFF"
-                                                                   FontSize="9"
-                                                                   FontWeight="SemiBold"
-                                                                   MaxWidth="110"
-                                                                   Text="{Binding ProjectName}"
-                                                                   TextTrimming="CharacterEllipsis" />
-                                                    </Button>
-                                                    <Border Margin="0,0,5,0"
-                                                            Padding="5,1"
-                                                            Background="#FF2563EB"
-                                                            CornerRadius="3">
-                                                        <Border.Style>
-                                                            <Style TargetType="Border">
-                                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding InWork}" Value="True">
-                                                                        <Setter Property="Visibility" Value="Visible" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </Border.Style>
-                                                        <TextBlock Foreground="#FFFFFFFF"
-                                                                   FontSize="9"
-                                                                   FontWeight="Bold"
-                                                                   Text="FOCUS" />
-                                                    </Border>
-                                                    <Border Margin="0,0,5,0"
-                                                            Padding="5,1"
-                                                            Background="#FFB45309"
-                                                            CornerRadius="3">
-                                                        <Border.Style>
-                                                            <Style TargetType="Border">
-                                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding IsWaiting}" Value="True">
-                                                                        <Setter Property="Visibility" Value="Visible" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </Border.Style>
-                                                        <TextBlock Foreground="#FFFFFFFF"
-                                                                   FontSize="9"
-                                                                   FontWeight="Bold"
-                                                                   Text="WAIT" />
-                                                    </Border>
-                                                    <Button Padding="0"
-                                                            Background="#FFDC2626"
-                                                            BorderThickness="0"
-                                                            Cursor="Hand"
-                                                            FocusVisualStyle="{x:Null}"
-                                                            ToolTip="Click to snooze, complete, or clear"
-                                                            Click="DueBadge_OnClick">
-                                                        <Button.Style>
-                                                            <Style TargetType="Button">
-                                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding IsReminderDue}" Value="True">
-                                                                        <Setter Property="Visibility" Value="Visible" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </Button.Style>
-                                                        <Button.Template>
-                                                            <ControlTemplate TargetType="Button">
-                                                                <Border Padding="6,1"
-                                                                        Background="{TemplateBinding Background}"
-                                                                        CornerRadius="3">
-                                                                    <ContentPresenter />
-                                                                </Border>
-                                                            </ControlTemplate>
-                                                        </Button.Template>
-                                                        <Button.ContextMenu>
-                                                            <ContextMenu Opened="TaskContextMenu_OnOpened"
-                                                                         Closed="TaskContextMenu_OnClosed"
-                                                                         DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                                <MenuItem Header="Focus" Click="FocusReminderMenuItem_OnClick" />
-                                                                <MenuItem Header="Snooze 30m" Click="Snooze30MenuItem_OnClick" />
-                                                                <MenuItem Header="Snooze 1h" Click="Snooze1HourMenuItem_OnClick" />
-                                                                <MenuItem Header="Still waiting" Click="StillWaitingMenuItem_OnClick" />
-                                                                <Separator />
-                                                                <MenuItem Header="Mark done" Click="CompleteTaskMenuItem_OnClick" />
-                                                                <MenuItem Header="Open details" Click="EditTaskMenuItem_OnClick" />
-                                                                <MenuItem Header="Clear reminder" Click="ClearReminderMenuItem_OnClick" />
-                                                            </ContextMenu>
-                                                        </Button.ContextMenu>
-                                                        <TextBlock Foreground="#FFFFFFFF"
-                                                                   FontSize="9"
-                                                                   FontWeight="Bold"
-                                                                   Text="REMIND" />
-                                                    </Button>
-                                            </WrapPanel>
-                                            <Button Padding="0,2"
-                                                    HorizontalContentAlignment="Stretch"
-                                                    Background="Transparent"
-                                                    BorderThickness="0"
-                                                    Cursor="Hand"
-                                                    FocusVisualStyle="{x:Null}"
-                                                    Click="TaskBody_OnClick">
-                                                <Button.Template>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Border Padding="{TemplateBinding Padding}"
-                                                                Background="Transparent">
-                                                            <ContentPresenter HorizontalAlignment="Stretch" />
-                                                        </Border>
-                                                    </ControlTemplate>
-                                                </Button.Template>
-                                                <StackPanel>
-                                                <TextBlock VerticalAlignment="Center"
-                                                           Foreground="#FFFFE878"
-                                                           FontSize="20"
-                                                           FontWeight="SemiBold"
-                                                           Text="{Binding Title}"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           TextWrapping="Wrap" />
-                                                <TextBlock Margin="0,5,0,2"
-                                                           Foreground="#FFD4D4D8"
-                                                           FontSize="13"
-                                                           Text="{Binding Description}"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           TextWrapping="Wrap">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Visibility"
-                                                                    Value="Collapsed" />
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding ShowDescription}"
-                                                                             Value="True">
-                                                                    <Setter Property="Visibility"
-                                                                            Value="Visible" />
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-                                                <TextBlock Margin="0,3,0,1"
-                                                           Foreground="#FFFBBF24"
-                                                           FontSize="12"
-                                                           FontWeight="SemiBold"
-                                                           Text="{Binding WaitingForLabel}">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding ShowWaitingFor}" Value="True">
-                                                                    <Setter Property="Visibility" Value="Visible" />
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-                                                </StackPanel>
-                                            </Button>
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </StackPanel>
+                CornerRadius="10"
+                MaxWidth="{Binding Content.PanelMaxWidth, ElementName=OverlayContent}">
+            <ContentControl x:Name="OverlayContent" />
         </Border>
     </Grid>
 </Window>

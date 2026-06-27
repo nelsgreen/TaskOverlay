@@ -6,9 +6,10 @@ public static class OverlayModeCycle
     {
         return current switch
         {
-            OverlayMode.AutoQuestTracker => OverlayMode.CollapsedHandle,
-            OverlayMode.CollapsedHandle => OverlayMode.PinnedExpanded,
-            _ => OverlayMode.AutoQuestTracker
+            OverlayMode.Working => OverlayMode.PinnedExpanded,
+            OverlayMode.PinnedExpanded => OverlayMode.CollapsedHandle,
+            OverlayMode.CollapsedHandle => OverlayMode.Working,
+            _ => OverlayMode.Working
         };
     }
 }

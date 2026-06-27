@@ -26,6 +26,10 @@ public sealed class AppState
         {
             CreatedAtUtc = timestamp,
             UpdatedAtUtc = timestamp,
+            OverlaySettings = new OverlaySettings
+            {
+                OverlayMode = global::TaskOverlay.Core.OverlayMode.Working
+            },
             Projects = { defaultProject },
             Tasks =
             {
@@ -168,13 +172,34 @@ public enum OverlayMode
 {
     AutoQuestTracker,
     CollapsedHandle,
-    PinnedExpanded
+    PinnedExpanded,
+    Working
 }
 
 public sealed class OverlaySettings
 {
+    public const double DefaultWorkingIdleFontSize = 16;
+    public const double DefaultWorkingActiveFontSize = 19;
+    public const double MinimumWorkingFontSize = 12;
+    public const double MaximumWorkingFontSize = 24;
+    public const double DefaultWorkingWindowWidth = 320;
+    public const double MinimumWorkingWindowWidth = 240;
+    public const double MaximumWorkingWindowWidth = 600;
+    public const double DefaultWorkingWindowHeight = 240;
+    public const double MinimumWorkingWindowHeight = 120;
+    public const double MaximumWorkingWindowHeight = 800;
+
     public int ActiveToPassiveDelayMilliseconds { get; set; } = 500;
     public bool AlwaysOnTop { get; set; } = true;
+    public double WorkingIdleFontSize { get; set; } = DefaultWorkingIdleFontSize;
+    public double WorkingActiveFontSize { get; set; } = DefaultWorkingActiveFontSize;
+
+    [JsonPropertyName("workingFontSize")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? LegacyWorkingFontSize { get; set; }
+
+    public double WorkingWindowWidth { get; set; } = DefaultWorkingWindowWidth;
+    public double WorkingWindowHeight { get; set; } = DefaultWorkingWindowHeight;
 
     [JsonPropertyName("overlayMode")]
     public OverlayMode? StoredOverlayMode { get; set; }
@@ -183,7 +208,7 @@ public sealed class OverlaySettings
     public OverlayMode OverlayMode
     {
         get => StoredOverlayMode ??
-               global::TaskOverlay.Core.OverlayMode.AutoQuestTracker;
+               global::TaskOverlay.Core.OverlayMode.Working;
         set => StoredOverlayMode = value;
     }
 
@@ -197,16 +222,75 @@ public sealed class OverlaySettings
     public Guid? LastSelectedProjectId { get; set; }
     public bool MvpProjectsSeeded { get; set; }
 
-    public void NormalizeOverlayMode()
+    public bool NormalizeOverlayMode()
     {
-        OverlayMode = StoredOverlayMode ??
-                      (PinnedActiveMode
-                          ? global::TaskOverlay.Core.OverlayMode.PinnedExpanded
-                          : CollapsedMode
-                              ? global::TaskOverlay.Core.OverlayMode.CollapsedHandle
-                              : global::TaskOverlay.Core.OverlayMode.AutoQuestTracker);
+        var normalizedMode = StoredOverlayMode ??
+                             (PinnedActiveMode
+                                 ? global::TaskOverlay.Core.OverlayMode.PinnedExpanded
+                                 : CollapsedMode
+                                     ? global::TaskOverlay.Core.OverlayMode.CollapsedHandle
+                                     : global::TaskOverlay.Core.OverlayMode.Working);
+        if (normalizedMode == global::TaskOverlay.Core.OverlayMode.AutoQuestTracker)
+        {
+            normalizedMode = global::TaskOverlay.Core.OverlayMode.Working;
+        }
+
+        var changed = StoredOverlayMode != normalizedMode ||
+                      CollapsedMode ||
+                      PinnedActiveMode;
+        OverlayMode = normalizedMode;
         CollapsedMode = false;
         PinnedActiveMode = false;
+        return changed;
+    }
+
+    public bool NormalizeWorkingPresentation()
+    {
+        var idleFontSize = ClampWorkingIdleFontSize(
+            LegacyWorkingFontSize ?? WorkingIdleFontSize);
+        var activeFontSize = ClampWorkingActiveFontSize(WorkingActiveFontSize);
+        var windowWidth = ClampWorkingWindowWidth(WorkingWindowWidth);
+        var windowHeight = ClampWorkingWindowHeight(WorkingWindowHeight);
+        var changed = LegacyWorkingFontSize is not null ||
+                      WorkingIdleFontSize != idleFontSize ||
+                      WorkingActiveFontSize != activeFontSize ||
+                      WorkingWindowWidth != windowWidth ||
+                      WorkingWindowHeight != windowHeight;
+
+        WorkingIdleFontSize = idleFontSize;
+        WorkingActiveFontSize = activeFontSize;
+        LegacyWorkingFontSize = null;
+        WorkingWindowWidth = windowWidth;
+        WorkingWindowHeight = windowHeight;
+        return changed;
+    }
+
+    public static double ClampWorkingIdleFontSize(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinimumWorkingFontSize, MaximumWorkingFontSize)
+            : DefaultWorkingIdleFontSize;
+    }
+
+    public static double ClampWorkingActiveFontSize(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinimumWorkingFontSize, MaximumWorkingFontSize)
+            : DefaultWorkingActiveFontSize;
+    }
+
+    public static double ClampWorkingWindowWidth(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinimumWorkingWindowWidth, MaximumWorkingWindowWidth)
+            : DefaultWorkingWindowWidth;
+    }
+
+    public static double ClampWorkingWindowHeight(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinimumWorkingWindowHeight, MaximumWorkingWindowHeight)
+            : DefaultWorkingWindowHeight;
     }
 }
 

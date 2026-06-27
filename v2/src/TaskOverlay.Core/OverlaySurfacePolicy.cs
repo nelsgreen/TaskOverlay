@@ -7,8 +7,15 @@ public static class OverlaySurfacePolicy
         bool hasCollapsedAnchor)
     {
         return hasCollapsedAnchor &&
-               mode is OverlayMode.AutoQuestTracker or
+               mode is OverlayMode.Working or
+                   OverlayMode.AutoQuestTracker or
                    OverlayMode.CollapsedHandle or
                    OverlayMode.PinnedExpanded;
+    }
+
+    public static bool KeepHostVisibleWhenPanelHidden(
+        OverlayPresentationState presentation)
+    {
+        return presentation.VisualBranch == OverlayVisualBranch.Collapsed;
     }
 }
