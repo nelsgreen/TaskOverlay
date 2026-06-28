@@ -7,7 +7,7 @@ using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
 
-public partial class TaskDetailsWindow : Window
+public partial class TaskDetailsView : UserControl
 {
     private static readonly IReadOnlyList<TaskStatusOption> DetailStatuses =
         new[]
@@ -31,11 +31,10 @@ public partial class TaskDetailsWindow : Window
         };
 
     private readonly TaskItem _task;
-    private readonly AppState _state;
     private readonly Action<TaskItem, TaskEditValues> _saveTask;
     private readonly Action<TaskItem> _deleteTask;
-    private readonly Action _saveState;
     private readonly Action<bool> _modalInteractionChanged;
+    private readonly Action _closeShell;
     private readonly DateTimeOffset? _originalRemindAtUtc;
     private readonly int? _originalRepeatMinutes;
     private readonly ReminderPreset _originalReminderPreset;
@@ -47,21 +46,19 @@ public partial class TaskDetailsWindow : Window
     private bool _updatingReminderControls;
     private bool _reminderScheduleEdited;
 
-    public TaskDetailsWindow(
+    public TaskDetailsView(
         AppState state,
         TaskItem task,
         Action<TaskItem, TaskEditValues> saveTask,
         Action<TaskItem> deleteTask,
-        Action saveState,
         Action<bool> modalInteractionChanged,
-        WindowNavigationActions navigation)
+        Action closeShell)
     {
-        _state = state;
         _task = task;
         _saveTask = saveTask;
         _deleteTask = deleteTask;
-        _saveState = saveState;
         _modalInteractionChanged = modalInteractionChanged;
+        _closeShell = closeShell;
         _originalRemindAtUtc = task.RemindAtUtc;
         _originalRepeatMinutes = task.RemindEveryMinutes;
         _originalReminderPreset = ReminderService.DetectPreset(task);
@@ -74,12 +71,6 @@ public partial class TaskDetailsWindow : Window
 
         _initializing = true;
         InitializeComponent();
-        UtilityWindowSizeManager.Restore(
-            this,
-            state.WindowPlacement,
-            UtilityWindowKind.TaskDetails);
-        WindowSwitcher.Configure(navigation, AppWindowKind.TaskDetails);
-        Activated += (_, _) => WindowSwitcher.RefreshAvailability();
 
         TitleTextBox.Text = task.Title;
         DescriptionTextBox.Text = task.Description;
@@ -116,23 +107,12 @@ public partial class TaskDetailsWindow : Window
 
     public Guid TaskId => _task.Id;
 
-    public void PrepareToShow()
+    public void OnActivated()
     {
-        WindowSwitcher.RefreshAvailability();
-        Activate();
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        if (UtilityWindowSizeManager.Capture(
-                this,
-                _state.WindowPlacement,
-                UtilityWindowKind.TaskDetails))
+        if (!IsKeyboardFocusWithin)
         {
-            _saveState();
+            TitleTextBox.Focus();
         }
-
-        base.OnClosed(e);
     }
 
     private void StatusListBox_OnSelectionChanged(
@@ -416,7 +396,7 @@ public partial class TaskDetailsWindow : Window
                 remindAtUtc,
                 repeatMinutes,
                 replaceSchedule));
-        Close();
+        _closeShell();
     }
 
     private bool TryBuildReminderTime(out DateTimeOffset? remindAtUtc)
@@ -451,14 +431,14 @@ public partial class TaskDetailsWindow : Window
 
     private void CancelButton_OnClick(object sender, RoutedEventArgs e)
     {
-        Close();
+        _closeShell();
     }
 
     private void DeleteButton_OnClick(object sender, RoutedEventArgs e)
     {
         var result = ShowModalMessage(
             () => MessageBox.Show(
-                this,
+                Window.GetWindow(this),
                 $"Delete \"{_task.Title}\"?",
                 "Delete task",
                 MessageBoxButton.YesNo,
@@ -470,7 +450,7 @@ public partial class TaskDetailsWindow : Window
         }
 
         _deleteTask(_task);
-        Close();
+        _closeShell();
     }
 
     private void UpdateWaitingField()
@@ -493,7 +473,7 @@ public partial class TaskDetailsWindow : Window
     {
         ShowModalMessage(
             () => MessageBox.Show(
-                this,
+                Window.GetWindow(this),
                 message,
                 "TaskOverlay",
                 MessageBoxButton.OK,

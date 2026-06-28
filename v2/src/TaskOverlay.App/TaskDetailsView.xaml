@@ -1,18 +1,9 @@
-<Window x:Class="TaskOverlay.App.TaskDetailsWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:local="clr-namespace:TaskOverlay.App"
-        Title="Task details"
-        Icon="Assets/app.ico"
-        Width="620"
-        Height="760"
-        MinWidth="560"
-        MinHeight="620"
-        Background="#FF111318"
-        FontFamily="Segoe UI"
-        WindowStartupLocation="CenterOwner"
-        ShowInTaskbar="False">
-    <Window.Resources>
+<UserControl x:Class="TaskOverlay.App.TaskDetailsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="#FF111318"
+             FontFamily="Segoe UI">
+    <UserControl.Resources>
         <Style x:Key="SectionCardStyle" TargetType="Border">
             <Setter Property="Padding" Value="12" />
             <Setter Property="Background" Value="#FF1A1D24" />
@@ -211,21 +202,16 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Background" Value="Transparent" />
         </Style>
-    </Window.Resources>
+    </UserControl.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <local:WindowSwitcherControl x:Name="WindowSwitcher"
-                                     Grid.Row="0"
-                                     Margin="16,12,16,0" />
-
-        <Border Grid.Row="1"
+        <Border Grid.Row="0"
                 Padding="16,12"
                 Background="#FF181B21"
                 BorderBrush="#FF30343D"
@@ -249,7 +235,7 @@
             </DockPanel>
         </Border>
 
-        <ScrollViewer Grid.Row="2"
+        <ScrollViewer Grid.Row="1"
                       HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="16,12,16,14">
@@ -476,7 +462,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="3"
+        <Border Grid.Row="2"
                 Padding="16,10"
                 Background="#FF181B21"
                 BorderBrush="#FF30343D"
@@ -502,4 +488,4 @@
             </DockPanel>
         </Border>
     </Grid>
-</Window>
+</UserControl>

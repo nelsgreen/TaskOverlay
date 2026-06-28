@@ -10,7 +10,7 @@ namespace TaskOverlay.App;
 
 internal sealed record SettingsHotkeyItem(string Label, string Key);
 
-public partial class SettingsWindow : Window
+public partial class SettingsView : UserControl
 {
     private static readonly IReadOnlyList<GlobalHotkeyCommand> HotkeyOrder =
         new[]
@@ -25,45 +25,43 @@ public partial class SettingsWindow : Window
     private readonly Action _saveState;
     private readonly Action _settingsChanged;
     private readonly SettingsWindowActions _actions;
+    private readonly Action _closeShell;
     private bool _updatingControls;
     private bool _workingSettingsDirty;
 
-    public SettingsWindow(
+    public SettingsView(
         AppState state,
         Action saveState,
         Action settingsChanged,
         SettingsWindowActions actions,
-        WindowNavigationActions navigation)
+        Action closeShell)
     {
         _state = state;
         _saveState = saveState;
         _settingsChanged = settingsChanged;
         _actions = actions;
+        _closeShell = closeShell;
 
         _updatingControls = true;
         InitializeComponent();
-        UtilityWindowSizeManager.Restore(
-            this,
-            state.WindowPlacement,
-            UtilityWindowKind.Settings);
-        WindowSwitcher.Configure(navigation, AppWindowKind.Settings);
         ModeListBox.ItemsSource = OverlayModeDisplay.UserModes;
         HotkeyItems.ItemsSource = BuildHotkeyItems();
         _updatingControls = false;
-        Activated += (_, _) => WindowSwitcher.RefreshAvailability();
         UpdateFromSettings();
     }
 
-    public void PrepareToShow()
+    public void OnActivated()
     {
         UpdateFromSettings();
-        Focus();
+        if (!IsKeyboardFocusWithin)
+        {
+            ModeListBox.Focus();
+        }
     }
 
-    public void HideForNavigation()
+    public void OnDeactivated()
     {
         CommitWorkingPresentationSettings();
-        Hide();
     }
 
     public void UpdateFromSettings()
@@ -82,7 +80,6 @@ public partial class SettingsWindow : Window
             WorkingWindowHeightSlider.Value =
                 _state.OverlaySettings.WorkingWindowHeight;
             UpdateValueLabels();
-            WindowSwitcher.RefreshAvailability();
         }
         finally
         {
@@ -212,26 +209,7 @@ public partial class SettingsWindow : Window
 
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)
     {
-        Close();
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        CommitWorkingPresentationSettings();
-        if (CaptureWindowSize())
-        {
-            _saveState();
-        }
-
-        base.OnClosed(e);
-    }
-
-    public bool CaptureWindowSize()
-    {
-        return UtilityWindowSizeManager.Capture(
-            this,
-            _state.WindowPlacement,
-            UtilityWindowKind.Settings);
+        _closeShell();
     }
 
     private static IReadOnlyList<SettingsHotkeyItem> BuildHotkeyItems()

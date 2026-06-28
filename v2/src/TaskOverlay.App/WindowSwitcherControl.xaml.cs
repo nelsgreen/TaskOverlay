@@ -1,3 +1,4 @@
+using System;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -5,23 +6,23 @@ namespace TaskOverlay.App;
 
 public partial class WindowSwitcherControl : UserControl
 {
-    private WindowNavigationActions? _navigation;
     private AppWindowKind _currentWindow;
+
+    public event Action<AppWindowKind>? TabRequested;
 
     public WindowSwitcherControl()
     {
         InitializeComponent();
-        Loaded += (_, _) => RefreshAvailability();
     }
 
-    public void Configure(
-        WindowNavigationActions navigation,
-        AppWindowKind currentWindow)
+    public void SetState(AppWindowKind currentWindow, bool canShowTaskDetails)
     {
-        _navigation = navigation;
         _currentWindow = currentWindow;
         ApplyCurrentSelection();
-        RefreshAvailability();
+        TaskDetailsButton.IsEnabled = canShowTaskDetails;
+        TaskDetailsButton.ToolTip = TaskDetailsButton.IsEnabled
+            ? "Open the current task details"
+            : "Open a task first to use Task Details";
     }
 
     private void ApplyCurrentSelection()
@@ -29,16 +30,6 @@ public partial class WindowSwitcherControl : UserControl
         QuickAddButton.IsChecked = _currentWindow == AppWindowKind.QuickAdd;
         TaskDetailsButton.IsChecked = _currentWindow == AppWindowKind.TaskDetails;
         SettingsButton.IsChecked = _currentWindow == AppWindowKind.Settings;
-    }
-
-    public void RefreshAvailability()
-    {
-        TaskDetailsButton.IsEnabled =
-            _currentWindow == AppWindowKind.TaskDetails ||
-            _navigation?.CanShowTaskDetails == true;
-        TaskDetailsButton.ToolTip = TaskDetailsButton.IsEnabled
-            ? "Open the current task details"
-            : "Open a task first to use Task Details";
     }
 
     private void QuickAddButton_OnClick(object sender, RoutedEventArgs e) =>
@@ -53,9 +44,9 @@ public partial class WindowSwitcherControl : UserControl
     private void Navigate(AppWindowKind target)
     {
         ApplyCurrentSelection();
-        if (target != _currentWindow && _navigation?.Show(target) != true)
+        if (target != _currentWindow)
         {
-            ApplyCurrentSelection();
+            TabRequested?.Invoke(target);
         }
     }
 }

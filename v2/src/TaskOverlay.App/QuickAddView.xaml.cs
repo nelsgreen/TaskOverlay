@@ -8,27 +8,19 @@ using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
 
-public partial class QuickAddWindow : Window
+public partial class QuickAddView : UserControl
 {
-    private readonly AppState _state;
     private readonly Func<QuickTaskValues, bool> _addTask;
-    private readonly Action _saveState;
+    private readonly Action _closeShell;
 
-    public QuickAddWindow(
+    public QuickAddView(
         AppState state,
         Func<QuickTaskValues, bool> addTask,
-        Action saveState,
-        WindowNavigationActions navigation)
+        Action closeShell)
     {
-        _state = state;
         _addTask = addTask;
-        _saveState = saveState;
+        _closeShell = closeShell;
         InitializeComponent();
-        UtilityWindowSizeManager.Restore(
-            this,
-            state.WindowPlacement,
-            UtilityWindowKind.QuickAdd);
-        WindowSwitcher.Configure(navigation, AppWindowKind.QuickAdd);
 
         var projects = state.Projects
             .OrderBy(project => project.SortOrder)
@@ -41,14 +33,12 @@ public partial class QuickAddWindow : Window
         StatusListBox.SelectedIndex = 0;
         ReminderListBox.ItemsSource = TaskAttentionUiOptions.QuickAddReminderPresets;
         ReminderListBox.SelectedIndex = 0;
-        Activated += (_, _) => WindowSwitcher.RefreshAvailability();
         UpdatePlaceholders();
         UpdateWaitingField();
     }
 
-    public void PrepareToShow()
+    public void OnActivated()
     {
-        WindowSwitcher.RefreshAvailability();
         Dispatcher.BeginInvoke(
             DispatcherPriority.Input,
             new Action(() =>
@@ -63,24 +53,6 @@ public partial class QuickAddWindow : Window
                 TitleTextBox.CaretIndex = TitleTextBox.Text.Length;
                 UpdatePlaceholders();
             }));
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        if (CaptureWindowSize())
-        {
-            _saveState();
-        }
-
-        base.OnClosed(e);
-    }
-
-    public bool CaptureWindowSize()
-    {
-        return UtilityWindowSizeManager.Capture(
-            this,
-            _state.WindowPlacement,
-            UtilityWindowKind.QuickAdd);
     }
 
     private void StatusListBox_OnSelectionChanged(
@@ -121,12 +93,12 @@ public partial class QuickAddWindow : Window
             return;
         }
 
-        Close();
+        _closeShell();
     }
 
     private void CancelButton_OnClick(object sender, RoutedEventArgs e)
     {
-        Close();
+        _closeShell();
     }
 
     private void UpdateWaitingField()

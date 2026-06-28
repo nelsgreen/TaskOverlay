@@ -57,9 +57,9 @@ internal static class Program
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
             ("working presentation settings", WorkingPresentationSettings),
-            ("utility window size persistence", UtilityWindowSizePersistence),
-            ("old utility window size compatibility", OldUtilityWindowSizeCompatibility),
-            ("invalid utility window size repair", InvalidUtilityWindowSizeRepair),
+            ("utility shell geometry persistence", UtilityShellGeometryPersistence),
+            ("old utility shell geometry compatibility", OldUtilityShellGeometryCompatibility),
+            ("invalid utility shell geometry repair", InvalidUtilityShellGeometryRepair),
             ("single WPF instance guard", SingleWpfInstanceGuard),
             ("working panel bounds", WorkingPanelBoundsBehavior),
             ("old collapsed mode migration", OldCollapsedModeMigration),
@@ -2014,35 +2014,31 @@ internal static class Program
             "Removed mode and clipboard hotkeys must not be registered.");
     }
 
-    private static void UtilityWindowSizePersistence()
+    private static void UtilityShellGeometryPersistence()
     {
         WithTemporaryDirectory(directory =>
         {
             var store = new AppStateStore(directory);
             var state = store.Load();
-            state.WindowPlacement.QuickAddSize =
-                UtilityWindowSizePolicy.Capture(UtilityWindowKind.QuickAdd, 710, 810);
-            state.WindowPlacement.TaskDetailsSize =
-                UtilityWindowSizePolicy.Capture(UtilityWindowKind.TaskDetails, 730, 840);
-            state.WindowPlacement.SettingsSize =
-                UtilityWindowSizePolicy.Capture(UtilityWindowKind.Settings, 760, 900);
+            state.WindowPlacement.UtilityShellPlacement =
+                UtilityShellGeometryPolicy.Capture(120, 80, 900, 850);
 
             store.Save(state);
             var loaded = store.Load();
 
             Assert(
-                loaded.WindowPlacement.QuickAddSize is { Width: 710, Height: 810 },
-                "Quick Add size should survive save/load.");
-            Assert(
-                loaded.WindowPlacement.TaskDetailsSize is { Width: 730, Height: 840 },
-                "Task Details size should survive save/load.");
-            Assert(
-                loaded.WindowPlacement.SettingsSize is { Width: 760, Height: 900 },
-                "Settings size should survive save/load.");
+                loaded.WindowPlacement.UtilityShellPlacement is
+                {
+                    Left: 120,
+                    Top: 80,
+                    Width: 900,
+                    Height: 850
+                },
+                "The shared utility shell geometry should survive save/load.");
         });
     }
 
-    private static void OldUtilityWindowSizeCompatibility()
+    private static void OldUtilityShellGeometryCompatibility()
     {
         WithTemporaryDirectory(directory =>
         {
@@ -2050,80 +2046,54 @@ internal static class Program
             store.Save(AppState.CreateDefault());
             var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
             var placement = root["windowPlacement"]!.AsObject();
-            placement.Remove("quickAddSize");
-            placement.Remove("taskDetailsSize");
-            placement.Remove("settingsSize");
+            placement.Remove("utilityShellPlacement");
             File.WriteAllText(
                 store.StatePath,
                 root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
             var loaded = store.Load();
-            var quickAdd = UtilityWindowSizePolicy.Resolve(
-                UtilityWindowKind.QuickAdd,
-                loaded.WindowPlacement.QuickAddSize);
-            var taskDetails = UtilityWindowSizePolicy.Resolve(
-                UtilityWindowKind.TaskDetails,
-                loaded.WindowPlacement.TaskDetailsSize);
-            var settings = UtilityWindowSizePolicy.Resolve(
-                UtilityWindowKind.Settings,
-                loaded.WindowPlacement.SettingsSize);
+            var geometry = UtilityShellGeometryPolicy.Resolve(
+                loaded.WindowPlacement.UtilityShellPlacement,
+                new OverlayBounds(0, 0, 1920, 1080));
 
             Assert(
-                quickAdd == new ResolvedWindowSize(620, 740),
-                "Old state should use the Quick Add default size.");
-            Assert(
-                taskDetails == new ResolvedWindowSize(620, 760),
-                "Old state should use the Task Details default size.");
-            Assert(
-                settings == new ResolvedWindowSize(680, 820),
-                "Old state should use the Settings default size.");
+                geometry == new ResolvedUtilityShellGeometry(620, 130, 680, 820),
+                "Old state should center the shared utility shell at its safe default size.");
         });
     }
 
-    private static void InvalidUtilityWindowSizeRepair()
+    private static void InvalidUtilityShellGeometryRepair()
     {
         WithTemporaryDirectory(directory =>
         {
             var store = new AppStateStore(directory);
             var state = store.Load();
-            state.WindowPlacement.QuickAddSize = new WindowSizeState
+            state.WindowPlacement.UtilityShellPlacement =
+                new UtilityShellPlacementState
             {
+                Left = -5000,
+                Top = 9000,
                 Width = -200,
                 Height = 5000
-            };
-            state.WindowPlacement.TaskDetailsSize = new WindowSizeState
-            {
-                Width = 9000,
-                Height = 1
-            };
-            state.WindowPlacement.SettingsSize = new WindowSizeState
-            {
-                Width = 0,
-                Height = 10000
             };
 
             store.Save(state);
             var loaded = store.Load();
+            var geometry = UtilityShellGeometryPolicy.Resolve(
+                loaded.WindowPlacement.UtilityShellPlacement,
+                new OverlayBounds(0, 0, 1920, 1080));
 
             Assert(
-                loaded.WindowPlacement.QuickAddSize is { Width: 560, Height: 1000 },
-                "Quick Add size should clamp to safe bounds.");
-            Assert(
-                loaded.WindowPlacement.TaskDetailsSize is { Width: 1200, Height: 620 },
-                "Task Details size should clamp to safe bounds.");
-            Assert(
-                loaded.WindowPlacement.SettingsSize is { Width: 600, Height: 1100 },
-                "Settings size should clamp to safe bounds.");
+                geometry == new ResolvedUtilityShellGeometry(16, 16, 600, 1048),
+                "Invalid shell size and position should clamp inside the work area.");
         });
 
-        var constrained = UtilityWindowSizePolicy.Resolve(
-            UtilityWindowKind.Settings,
-            savedSize: null,
-            availableWidth: 640,
-            availableHeight: 700);
+        var constrained = UtilityShellGeometryPolicy.Resolve(
+            saved: null,
+            workArea: new OverlayBounds(0, 0, 640, 700));
         Assert(
-            constrained == new ResolvedWindowSize(640, 700),
-            "Default utility size should fit the available work area.");
+            constrained == new ResolvedUtilityShellGeometry(16, 16, 608, 668),
+            "Default shell geometry should fit a constrained work area.");
     }
 
     private static void SingleWpfInstanceGuard()

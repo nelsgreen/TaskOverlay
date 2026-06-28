@@ -300,13 +300,13 @@ public sealed class WindowPlacement
     public double? Top { get; set; }
     public double? CollapsedLeft { get; set; }
     public double? CollapsedTop { get; set; }
-    public WindowSizeState? QuickAddSize { get; set; }
-    public WindowSizeState? TaskDetailsSize { get; set; }
-    public WindowSizeState? SettingsSize { get; set; }
+    public UtilityShellPlacementState? UtilityShellPlacement { get; set; }
 }
 
-public sealed class WindowSizeState
+public sealed class UtilityShellPlacementState
 {
-    public double Width { get; set; }
-    public double Height { get; set; }
+    public double? Left { get; set; }
+    public double? Top { get; set; }
+    public double? Width { get; set; }
+    public double? Height { get; set; }
 }

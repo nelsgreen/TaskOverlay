@@ -88,7 +88,7 @@ public static class StateMigrator
         }
 
         if (state.WindowPlacement is not null &&
-            UtilityWindowSizePolicy.Normalize(state.WindowPlacement))
+            UtilityShellGeometryPolicy.Normalize(state.WindowPlacement))
         {
             changed = true;
         }
