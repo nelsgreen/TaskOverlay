@@ -31,8 +31,10 @@ public partial class TaskDetailsWindow : Window
         };
 
     private readonly TaskItem _task;
+    private readonly AppState _state;
     private readonly Action<TaskItem, TaskEditValues> _saveTask;
     private readonly Action<TaskItem> _deleteTask;
+    private readonly Action _saveState;
     private readonly Action<bool> _modalInteractionChanged;
     private readonly DateTimeOffset? _originalRemindAtUtc;
     private readonly int? _originalRepeatMinutes;
@@ -50,12 +52,15 @@ public partial class TaskDetailsWindow : Window
         TaskItem task,
         Action<TaskItem, TaskEditValues> saveTask,
         Action<TaskItem> deleteTask,
+        Action saveState,
         Action<bool> modalInteractionChanged,
         WindowNavigationActions navigation)
     {
+        _state = state;
         _task = task;
         _saveTask = saveTask;
         _deleteTask = deleteTask;
+        _saveState = saveState;
         _modalInteractionChanged = modalInteractionChanged;
         _originalRemindAtUtc = task.RemindAtUtc;
         _originalRepeatMinutes = task.RemindEveryMinutes;
@@ -69,6 +74,10 @@ public partial class TaskDetailsWindow : Window
 
         _initializing = true;
         InitializeComponent();
+        UtilityWindowSizeManager.Restore(
+            this,
+            state.WindowPlacement,
+            UtilityWindowKind.TaskDetails);
         WindowSwitcher.Configure(navigation, AppWindowKind.TaskDetails);
         Activated += (_, _) => WindowSwitcher.RefreshAvailability();
 
@@ -103,6 +112,27 @@ public partial class TaskDetailsWindow : Window
         _initializing = false;
         UpdateWaitingField();
         UpdateReminderVisibility();
+    }
+
+    public Guid TaskId => _task.Id;
+
+    public void PrepareToShow()
+    {
+        WindowSwitcher.RefreshAvailability();
+        Activate();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        if (UtilityWindowSizeManager.Capture(
+                this,
+                _state.WindowPlacement,
+                UtilityWindowKind.TaskDetails))
+        {
+            _saveState();
+        }
+
+        base.OnClosed(e);
     }
 
     private void StatusListBox_OnSelectionChanged(

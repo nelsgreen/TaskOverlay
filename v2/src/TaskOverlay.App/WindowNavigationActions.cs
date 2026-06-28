@@ -11,38 +11,29 @@ public enum AppWindowKind
 
 public sealed class WindowNavigationActions
 {
-    private readonly Action _showQuickAdd;
-    private readonly Action _showSettings;
-    private readonly Func<bool> _showTaskDetails;
-    private readonly Func<bool> _canShowTaskDetails;
+    private readonly Func<AppWindowKind, bool> _switchWindow;
+    private readonly Func<AppWindowKind, bool> _canShowWindow;
+    private readonly Action _prepareForTaskDetailsOpen;
 
     public WindowNavigationActions(
-        Action showQuickAdd,
-        Action showSettings,
-        Func<bool> showTaskDetails,
-        Func<bool> canShowTaskDetails)
+        Func<AppWindowKind, bool> switchWindow,
+        Func<AppWindowKind, bool> canShowWindow,
+        Action prepareForTaskDetailsOpen)
     {
-        _showQuickAdd = showQuickAdd;
-        _showSettings = showSettings;
-        _showTaskDetails = showTaskDetails;
-        _canShowTaskDetails = canShowTaskDetails;
+        _switchWindow = switchWindow;
+        _canShowWindow = canShowWindow;
+        _prepareForTaskDetailsOpen = prepareForTaskDetailsOpen;
     }
 
-    public bool CanShowTaskDetails => _canShowTaskDetails();
+    public bool CanShowTaskDetails => _canShowWindow(AppWindowKind.TaskDetails);
 
-    public void Show(AppWindowKind window)
+    public bool Show(AppWindowKind window)
     {
-        switch (window)
-        {
-            case AppWindowKind.QuickAdd:
-                _showQuickAdd();
-                break;
-            case AppWindowKind.TaskDetails:
-                _showTaskDetails();
-                break;
-            case AppWindowKind.Settings:
-                _showSettings();
-                break;
-        }
+        return _canShowWindow(window) && _switchWindow(window);
+    }
+
+    public void PrepareForTaskDetailsOpen()
+    {
+        _prepareForTaskDetailsOpen();
     }
 }

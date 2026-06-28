@@ -132,8 +132,9 @@ public partial class OverlayWindow : Window
     public bool IsClosed => _isClosed;
     public bool IsOverlayVisible =>
         _overlayVisible && (IsVisible || _handleWindow?.IsVisible == true);
-    public bool HasOpenTaskDetails =>
-        _taskDetailsWindow is not null && _taskDetailsWindow.IsVisible;
+    public bool HasTaskDetailsContext =>
+        _taskDetailsWindow is not null &&
+        _state.Tasks.Any(task => task.Id == _taskDetailsWindow.TaskId);
     private bool UsesHandleWindow =>
         OverlaySurfacePolicy.UseHandleWindowForMode(
             _state.OverlaySettings.OverlayMode,
@@ -262,15 +263,33 @@ public partial class OverlayWindow : Window
         OpenTaskDetails(task);
     }
 
-    public bool ActivateTaskDetails()
+    public bool ShowTaskDetailsContext()
     {
-        if (!HasOpenTaskDetails)
+        if (!HasTaskDetailsContext || _taskDetailsWindow is null)
         {
             return false;
         }
 
-        _taskDetailsWindow!.Activate();
+        StopModeTimers();
+        SetActiveMode(true);
+        if (!_taskDetailsWindow.IsVisible)
+        {
+            _taskDetailsWindow.Show();
+        }
+
+        _taskDetailsWindow.PrepareToShow();
         return true;
+    }
+
+    public void HideTaskDetailsForNavigation()
+    {
+        if (_taskDetailsWindow?.IsVisible != true)
+        {
+            return;
+        }
+
+        _taskDetailsWindow.Hide();
+        ScheduleCollapse();
     }
 
     public void HideSafely()
@@ -1555,10 +1574,17 @@ public partial class OverlayWindow : Window
     {
         if (_taskDetailsWindow is not null)
         {
-            _taskDetailsWindow.Activate();
-            return;
+            if (_taskDetailsWindow.TaskId == task.Id)
+            {
+                _windowNavigation.PrepareForTaskDetailsOpen();
+                ShowTaskDetailsContext();
+                return;
+            }
+
+            _taskDetailsWindow.Close();
         }
 
+        _windowNavigation.PrepareForTaskDetailsOpen();
         StopModeTimers();
         SetActiveMode(true);
         _taskDetailsWindow = new TaskDetailsWindow(
@@ -1566,6 +1592,7 @@ public partial class OverlayWindow : Window
             task,
             SaveTaskEdits,
             DeleteTask,
+            _saveState,
             SetModalInteractionActive,
             _windowNavigation)
         {

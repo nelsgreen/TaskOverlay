@@ -29,11 +29,19 @@ public partial class App : System.Windows.Application
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
     private WindowNavigationActions? _windowNavigation;
+    private SingleInstanceGuard? _singleInstanceGuard;
     private DispatcherTimer? _reminderTimer;
     private volatile bool _isShuttingDown;
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        _singleInstanceGuard = SingleInstanceGuard.TryAcquire();
+        if (_singleInstanceGuard is null)
+        {
+            Shutdown();
+            return;
+        }
+
         InitializeDiagnostics();
         RegisterExceptionHandlers();
         _diagnostics!.Log("Application startup.");
@@ -53,11 +61,10 @@ public partial class App : System.Windows.Application
             }
 
             _windowNavigation = new WindowNavigationActions(
-                ShowQuickAdd,
-                ShowSettings,
-                ActivateTaskDetails,
-                CanActivateTaskDetails);
-            _overlayWindow = CreateOverlayWindow();
+                SwitchUtilityWindow,
+                CanShowUtilityWindow,
+                PrepareForTaskDetailsOpen);
+            _overlayWindow = GetOrCreateOverlayWindow();
             _overlayWindow.Show();
 
             CreateTrayIcon();
@@ -78,6 +85,7 @@ public partial class App : System.Windows.Application
         {
             _isShuttingDown = true;
             _diagnostics?.Log("Application exit started outside the tray shutdown path.");
+            CaptureUtilityWindowSizes();
             StopOverlayAndPersist();
         }
 
@@ -96,6 +104,8 @@ public partial class App : System.Windows.Application
         DisposeTrayIcon();
         UnregisterExceptionHandlers();
         _diagnostics?.Log("Application shutdown completed.");
+        _singleInstanceGuard?.Dispose();
+        _singleInstanceGuard = null;
         base.OnExit(e);
     }
 
@@ -436,10 +446,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        if (_overlayWindow is null || _overlayWindow.IsClosed)
-        {
-            _overlayWindow = CreateOverlayWindow();
-        }
+        _overlayWindow = GetOrCreateOverlayWindow();
 
         if (!_overlayWindow.IsLoaded)
         {
@@ -533,9 +540,14 @@ public partial class App : System.Windows.Application
 
     private void ShowQuickAdd()
     {
+        SwitchUtilityWindow(AppWindowKind.QuickAdd);
+    }
+
+    private bool ShowQuickAddCore()
+    {
         if (_isShuttingDown || _state is null)
         {
-            return;
+            return false;
         }
 
         if (_quickAddWindow is null)
@@ -543,12 +555,19 @@ public partial class App : System.Windows.Application
             _quickAddWindow = new QuickAddWindow(
                 _state,
                 AddQuickTask,
+                PersistState,
                 RequireWindowNavigation());
             _quickAddWindow.Closed += QuickAddWindow_OnClosed;
         }
 
-        _quickAddWindow.Show();
+        if (!_quickAddWindow.IsVisible)
+        {
+            _quickAddWindow.Show();
+        }
+
         _quickAddWindow.Activate();
+        _quickAddWindow.PrepareToShow();
+        return true;
     }
 
     private bool AddQuickTask(QuickTaskValues values)
@@ -641,16 +660,21 @@ public partial class App : System.Windows.Application
 
     private void ShowSettings()
     {
+        SwitchUtilityWindow(AppWindowKind.Settings);
+    }
+
+    private bool ShowSettingsCore()
+    {
         if (_isShuttingDown)
         {
-            return;
+            return false;
         }
 
         if (_settingsWindow is null)
         {
             if (_state is null)
             {
-                return;
+                return false;
             }
 
             _settingsWindow = new SettingsWindow(
@@ -667,9 +691,14 @@ public partial class App : System.Windows.Application
         }
 
         _overlayWindow?.SetSettingsInteractionActive(true);
-        _settingsWindow.UpdateFromSettings();
-        _settingsWindow.Show();
+        if (!_settingsWindow.IsVisible)
+        {
+            _settingsWindow.Show();
+        }
+
+        _settingsWindow.PrepareToShow();
         _settingsWindow.Activate();
+        return true;
     }
 
     private void ShowTreeManager()
@@ -719,11 +748,16 @@ public partial class App : System.Windows.Application
         _overlayWindow?.SetSettingsInteractionActive(false);
     }
 
-    private OverlayWindow CreateOverlayWindow()
+    private OverlayWindow GetOrCreateOverlayWindow()
     {
         if (_state is null)
         {
             throw new InvalidOperationException("Cannot create overlay before state is loaded.");
+        }
+
+        if (_overlayWindow is { IsClosed: false })
+        {
+            return _overlayWindow;
         }
 
         var overlay = new OverlayWindow(
@@ -741,14 +775,59 @@ public partial class App : System.Windows.Application
             "Window navigation is not initialized.");
     }
 
-    private bool CanActivateTaskDetails()
+    private bool CanShowUtilityWindow(AppWindowKind target)
     {
-        return _overlayWindow?.HasOpenTaskDetails == true;
+        if (_isShuttingDown || _state is null)
+        {
+            return false;
+        }
+
+        return target != AppWindowKind.TaskDetails ||
+               _overlayWindow?.HasTaskDetailsContext == true;
     }
 
-    private bool ActivateTaskDetails()
+    private bool SwitchUtilityWindow(AppWindowKind target)
     {
-        return _overlayWindow?.ActivateTaskDetails() == true;
+        if (!CanShowUtilityWindow(target))
+        {
+            return false;
+        }
+
+        HideUtilityWindowsExcept(target);
+        return target switch
+        {
+            AppWindowKind.QuickAdd => ShowQuickAddCore(),
+            AppWindowKind.Settings => ShowSettingsCore(),
+            AppWindowKind.TaskDetails =>
+                _overlayWindow?.ShowTaskDetailsContext() == true,
+            _ => false
+        };
+    }
+
+    private void PrepareForTaskDetailsOpen()
+    {
+        HideUtilityWindowsExcept(AppWindowKind.TaskDetails);
+    }
+
+    private void HideUtilityWindowsExcept(AppWindowKind target)
+    {
+        if (target != AppWindowKind.QuickAdd &&
+            _quickAddWindow?.IsVisible == true)
+        {
+            _quickAddWindow.Hide();
+        }
+
+        if (target != AppWindowKind.Settings &&
+            _settingsWindow?.IsVisible == true)
+        {
+            _settingsWindow.HideForNavigation();
+            _overlayWindow?.SetSettingsInteractionActive(false);
+        }
+
+        if (target != AppWindowKind.TaskDetails)
+        {
+            _overlayWindow?.HideTaskDetailsForNavigation();
+        }
     }
 
     private void OpenFolder(string? path)
@@ -929,6 +1008,7 @@ public partial class App : System.Windows.Application
         _diagnostics?.Log($"Application shutdown started. Reason: {reason}");
 
         StopReminderTimer();
+        CaptureUtilityWindowSizes();
         StopOverlayAndPersist();
         DisposeGlobalHotkeys();
         DisposeTrayIcon();
@@ -972,6 +1052,12 @@ public partial class App : System.Windows.Application
         }
 
         PersistState(allowDuringShutdown: true);
+    }
+
+    private void CaptureUtilityWindowSizes()
+    {
+        _quickAddWindow?.CaptureWindowSize();
+        _settingsWindow?.CaptureWindowSize();
     }
 
     private void PersistState()

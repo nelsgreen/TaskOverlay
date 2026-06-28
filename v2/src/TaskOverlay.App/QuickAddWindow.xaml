@@ -4,10 +4,10 @@
         xmlns:local="clr-namespace:TaskOverlay.App"
         Title="Quick Add task"
         Icon="Assets/app.ico"
-        Width="560"
-        Height="660"
-        MinWidth="500"
-        MinHeight="580"
+        Width="620"
+        Height="740"
+        MinWidth="560"
+        MinHeight="640"
         Background="{StaticResource AppWindowBrush}"
         FontFamily="Segoe UI"
         WindowStartupLocation="CenterScreen"
@@ -65,7 +65,9 @@
                              FontSize="15"
                              FontWeight="SemiBold"
                              MaxLength="500"
-                             TextChanged="InputTextBox_OnTextChanged" />
+                             TextChanged="InputTextBox_OnTextChanged"
+                             GotKeyboardFocus="InputTextBox_OnKeyboardFocusChanged"
+                             LostKeyboardFocus="InputTextBox_OnKeyboardFocusChanged" />
                     <TextBlock x:Name="TitlePlaceholder"
                                Margin="12,0"
                                VerticalAlignment="Center"
@@ -160,7 +162,9 @@
                                      TextWrapping="Wrap"
                                      VerticalContentAlignment="Top"
                                      VerticalScrollBarVisibility="Auto"
-                                     TextChanged="InputTextBox_OnTextChanged" />
+                                     TextChanged="InputTextBox_OnTextChanged"
+                                     GotKeyboardFocus="InputTextBox_OnKeyboardFocusChanged"
+                                     LostKeyboardFocus="InputTextBox_OnKeyboardFocusChanged" />
                             <TextBlock x:Name="DescriptionPlaceholder"
                                        Margin="12,9"
                                        VerticalAlignment="Top"

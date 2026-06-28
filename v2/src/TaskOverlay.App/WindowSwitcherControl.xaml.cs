@@ -20,10 +20,15 @@ public partial class WindowSwitcherControl : UserControl
     {
         _navigation = navigation;
         _currentWindow = currentWindow;
-        QuickAddButton.IsChecked = currentWindow == AppWindowKind.QuickAdd;
-        TaskDetailsButton.IsChecked = currentWindow == AppWindowKind.TaskDetails;
-        SettingsButton.IsChecked = currentWindow == AppWindowKind.Settings;
+        ApplyCurrentSelection();
         RefreshAvailability();
+    }
+
+    private void ApplyCurrentSelection()
+    {
+        QuickAddButton.IsChecked = _currentWindow == AppWindowKind.QuickAdd;
+        TaskDetailsButton.IsChecked = _currentWindow == AppWindowKind.TaskDetails;
+        SettingsButton.IsChecked = _currentWindow == AppWindowKind.Settings;
     }
 
     public void RefreshAvailability()
@@ -47,9 +52,10 @@ public partial class WindowSwitcherControl : UserControl
 
     private void Navigate(AppWindowKind target)
     {
-        if (target != _currentWindow)
+        ApplyCurrentSelection();
+        if (target != _currentWindow && _navigation?.Show(target) != true)
         {
-            _navigation?.Show(target);
+            ApplyCurrentSelection();
         }
     }
 }

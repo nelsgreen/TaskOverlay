@@ -42,12 +42,28 @@ public partial class SettingsWindow : Window
 
         _updatingControls = true;
         InitializeComponent();
+        UtilityWindowSizeManager.Restore(
+            this,
+            state.WindowPlacement,
+            UtilityWindowKind.Settings);
         WindowSwitcher.Configure(navigation, AppWindowKind.Settings);
         ModeListBox.ItemsSource = OverlayModeDisplay.UserModes;
         HotkeyItems.ItemsSource = BuildHotkeyItems();
         _updatingControls = false;
         Activated += (_, _) => WindowSwitcher.RefreshAvailability();
         UpdateFromSettings();
+    }
+
+    public void PrepareToShow()
+    {
+        UpdateFromSettings();
+        Focus();
+    }
+
+    public void HideForNavigation()
+    {
+        CommitWorkingPresentationSettings();
+        Hide();
     }
 
     public void UpdateFromSettings()
@@ -202,7 +218,20 @@ public partial class SettingsWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         CommitWorkingPresentationSettings();
+        if (CaptureWindowSize())
+        {
+            _saveState();
+        }
+
         base.OnClosed(e);
+    }
+
+    public bool CaptureWindowSize()
+    {
+        return UtilityWindowSizeManager.Capture(
+            this,
+            _state.WindowPlacement,
+            UtilityWindowKind.Settings);
     }
 
     private static IReadOnlyList<SettingsHotkeyItem> BuildHotkeyItems()

@@ -87,6 +87,12 @@ public static class StateMigrator
             changed = true;
         }
 
+        if (state.WindowPlacement is not null &&
+            UtilityWindowSizePolicy.Normalize(state.WindowPlacement))
+        {
+            changed = true;
+        }
+
         var defaultProject = state.Projects.FirstOrDefault(project =>
             string.Equals(project.Name, ProjectItem.DefaultName, StringComparison.OrdinalIgnoreCase));
         if (defaultProject is null)

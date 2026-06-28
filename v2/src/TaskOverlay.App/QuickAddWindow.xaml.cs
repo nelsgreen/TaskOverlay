@@ -2,21 +2,32 @@ using System;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
 
 public partial class QuickAddWindow : Window
 {
+    private readonly AppState _state;
     private readonly Func<QuickTaskValues, bool> _addTask;
+    private readonly Action _saveState;
 
     public QuickAddWindow(
         AppState state,
         Func<QuickTaskValues, bool> addTask,
+        Action saveState,
         WindowNavigationActions navigation)
     {
+        _state = state;
         _addTask = addTask;
+        _saveState = saveState;
         InitializeComponent();
+        UtilityWindowSizeManager.Restore(
+            this,
+            state.WindowPlacement,
+            UtilityWindowKind.QuickAdd);
         WindowSwitcher.Configure(navigation, AppWindowKind.QuickAdd);
 
         var projects = state.Projects
@@ -30,10 +41,46 @@ public partial class QuickAddWindow : Window
         StatusListBox.SelectedIndex = 0;
         ReminderListBox.ItemsSource = TaskAttentionUiOptions.QuickAddReminderPresets;
         ReminderListBox.SelectedIndex = 0;
-        Loaded += (_, _) => TitleTextBox.Focus();
         Activated += (_, _) => WindowSwitcher.RefreshAvailability();
         UpdatePlaceholders();
         UpdateWaitingField();
+    }
+
+    public void PrepareToShow()
+    {
+        WindowSwitcher.RefreshAvailability();
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            new Action(() =>
+            {
+                if (!IsVisible)
+                {
+                    return;
+                }
+
+                TitleTextBox.Focus();
+                Keyboard.Focus(TitleTextBox);
+                TitleTextBox.CaretIndex = TitleTextBox.Text.Length;
+                UpdatePlaceholders();
+            }));
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        if (CaptureWindowSize())
+        {
+            _saveState();
+        }
+
+        base.OnClosed(e);
+    }
+
+    public bool CaptureWindowSize()
+    {
+        return UtilityWindowSizeManager.Capture(
+            this,
+            _state.WindowPlacement,
+            UtilityWindowKind.QuickAdd);
     }
 
     private void StatusListBox_OnSelectionChanged(
@@ -106,11 +153,20 @@ public partial class QuickAddWindow : Window
         UpdatePlaceholders();
     }
 
+    private void InputTextBox_OnKeyboardFocusChanged(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+    {
+        UpdatePlaceholders();
+    }
+
     private void UpdatePlaceholders()
     {
         if (TitlePlaceholder is not null)
         {
-            TitlePlaceholder.Visibility = string.IsNullOrEmpty(TitleTextBox.Text)
+            TitlePlaceholder.Visibility =
+                string.IsNullOrEmpty(TitleTextBox.Text) &&
+                !TitleTextBox.IsKeyboardFocusWithin
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         }
@@ -118,7 +174,8 @@ public partial class QuickAddWindow : Window
         if (DescriptionPlaceholder is not null)
         {
             DescriptionPlaceholder.Visibility =
-                string.IsNullOrEmpty(DescriptionTextBox.Text)
+                string.IsNullOrEmpty(DescriptionTextBox.Text) &&
+                !DescriptionTextBox.IsKeyboardFocusWithin
                     ? Visibility.Visible
                     : Visibility.Collapsed;
         }

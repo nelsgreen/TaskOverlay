@@ -50,21 +50,25 @@
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
                     <Border x:Name="InputBorder"
-                            Padding="{TemplateBinding Padding}"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="6">
-                        <ScrollViewer x:Name="PART_ContentHost" />
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Margin="{TemplateBinding Padding}" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsKeyboardFocusWithin" Value="True">
                             <Setter TargetName="InputBorder"
                                     Property="BorderBrush"
                                     Value="#FF9C7B31" />
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource AppTextBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="InputBorder" Property="Opacity" Value="0.45" />
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource AppMutedTextBrush}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

@@ -57,6 +57,10 @@ internal static class Program
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
             ("working presentation settings", WorkingPresentationSettings),
+            ("utility window size persistence", UtilityWindowSizePersistence),
+            ("old utility window size compatibility", OldUtilityWindowSizeCompatibility),
+            ("invalid utility window size repair", InvalidUtilityWindowSizeRepair),
+            ("single WPF instance guard", SingleWpfInstanceGuard),
             ("working panel bounds", WorkingPanelBoundsBehavior),
             ("old collapsed mode migration", OldCollapsedModeMigration),
             ("old pinned mode migration", OldPinnedModeMigration),
@@ -2008,6 +2012,128 @@ internal static class Program
                 not "Ctrl+Alt+D" and
                 not "Ctrl+Alt+S"),
             "Removed mode and clipboard hotkeys must not be registered.");
+    }
+
+    private static void UtilityWindowSizePersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.WindowPlacement.QuickAddSize =
+                UtilityWindowSizePolicy.Capture(UtilityWindowKind.QuickAdd, 710, 810);
+            state.WindowPlacement.TaskDetailsSize =
+                UtilityWindowSizePolicy.Capture(UtilityWindowKind.TaskDetails, 730, 840);
+            state.WindowPlacement.SettingsSize =
+                UtilityWindowSizePolicy.Capture(UtilityWindowKind.Settings, 760, 900);
+
+            store.Save(state);
+            var loaded = store.Load();
+
+            Assert(
+                loaded.WindowPlacement.QuickAddSize is { Width: 710, Height: 810 },
+                "Quick Add size should survive save/load.");
+            Assert(
+                loaded.WindowPlacement.TaskDetailsSize is { Width: 730, Height: 840 },
+                "Task Details size should survive save/load.");
+            Assert(
+                loaded.WindowPlacement.SettingsSize is { Width: 760, Height: 900 },
+                "Settings size should survive save/load.");
+        });
+    }
+
+    private static void OldUtilityWindowSizeCompatibility()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            store.Save(AppState.CreateDefault());
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            var placement = root["windowPlacement"]!.AsObject();
+            placement.Remove("quickAddSize");
+            placement.Remove("taskDetailsSize");
+            placement.Remove("settingsSize");
+            File.WriteAllText(
+                store.StatePath,
+                root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+            var loaded = store.Load();
+            var quickAdd = UtilityWindowSizePolicy.Resolve(
+                UtilityWindowKind.QuickAdd,
+                loaded.WindowPlacement.QuickAddSize);
+            var taskDetails = UtilityWindowSizePolicy.Resolve(
+                UtilityWindowKind.TaskDetails,
+                loaded.WindowPlacement.TaskDetailsSize);
+            var settings = UtilityWindowSizePolicy.Resolve(
+                UtilityWindowKind.Settings,
+                loaded.WindowPlacement.SettingsSize);
+
+            Assert(
+                quickAdd == new ResolvedWindowSize(620, 740),
+                "Old state should use the Quick Add default size.");
+            Assert(
+                taskDetails == new ResolvedWindowSize(620, 760),
+                "Old state should use the Task Details default size.");
+            Assert(
+                settings == new ResolvedWindowSize(680, 820),
+                "Old state should use the Settings default size.");
+        });
+    }
+
+    private static void InvalidUtilityWindowSizeRepair()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.WindowPlacement.QuickAddSize = new WindowSizeState
+            {
+                Width = -200,
+                Height = 5000
+            };
+            state.WindowPlacement.TaskDetailsSize = new WindowSizeState
+            {
+                Width = 9000,
+                Height = 1
+            };
+            state.WindowPlacement.SettingsSize = new WindowSizeState
+            {
+                Width = 0,
+                Height = 10000
+            };
+
+            store.Save(state);
+            var loaded = store.Load();
+
+            Assert(
+                loaded.WindowPlacement.QuickAddSize is { Width: 560, Height: 1000 },
+                "Quick Add size should clamp to safe bounds.");
+            Assert(
+                loaded.WindowPlacement.TaskDetailsSize is { Width: 1200, Height: 620 },
+                "Task Details size should clamp to safe bounds.");
+            Assert(
+                loaded.WindowPlacement.SettingsSize is { Width: 600, Height: 1100 },
+                "Settings size should clamp to safe bounds.");
+        });
+
+        var constrained = UtilityWindowSizePolicy.Resolve(
+            UtilityWindowKind.Settings,
+            savedSize: null,
+            availableWidth: 640,
+            availableHeight: 700);
+        Assert(
+            constrained == new ResolvedWindowSize(640, 700),
+            "Default utility size should fit the available work area.");
+    }
+
+    private static void SingleWpfInstanceGuard()
+    {
+        var mutexName = $@"Local\TaskOverlay.WpfV2.Tests.{Guid.NewGuid():N}";
+        using var first = SingleInstanceGuard.TryAcquire(mutexName);
+        using var second = SingleInstanceGuard.TryAcquire(mutexName);
+
+        Assert(first is not null, "The first WPF instance should acquire the guard.");
+        Assert(second is null, "A second WPF instance must be rejected.");
     }
 
     private static void UserFacingOverlayModeLabels()
