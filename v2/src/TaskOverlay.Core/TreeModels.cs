@@ -12,6 +12,8 @@ public enum TreeNodeKind
 public enum TreeNodeStatus
 {
     Todo,
+    Focus,
+    Wait,
     Done
 }
 
@@ -21,6 +23,13 @@ public enum TreeProjection
     ActiveOnly,
     ActivePlusAncestors,
     CurrentBranchOnly
+}
+
+public enum TreeManagerFilter
+{
+    All,
+    ActiveOnly,
+    ActivePlusAncestors
 }
 
 public sealed record TreeNode(

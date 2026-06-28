@@ -14,6 +14,7 @@ public sealed class AppState
     public List<GroupItem> Groups { get; set; } = new();
     public OverlaySettings OverlaySettings { get; set; } = new();
     public WindowPlacement WindowPlacement { get; set; } = new();
+    public TreeManagerSettings TreeManagerSettings { get; set; } = new();
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
@@ -29,6 +30,11 @@ public sealed class AppState
             OverlaySettings = new OverlaySettings
             {
                 OverlayMode = global::TaskOverlay.Core.OverlayMode.Working
+            },
+            TreeManagerSettings = new TreeManagerSettings
+            {
+                SelectedProjectId = defaultProject.Id,
+                SelectedNodeId = defaultProject.Id
             },
             Projects = { defaultProject },
             Tasks =
@@ -309,4 +315,13 @@ public sealed class UtilityShellPlacementState
     public double? Top { get; set; }
     public double? Width { get; set; }
     public double? Height { get; set; }
+}
+
+public sealed class TreeManagerSettings
+{
+    public Guid? SelectedProjectId { get; set; }
+    public Guid? SelectedNodeId { get; set; }
+    public List<Guid> ExpandedNodeIds { get; set; } = new();
+    public TreeManagerFilter Filter { get; set; } = TreeManagerFilter.All;
+    public bool ExpansionInitialized { get; set; }
 }

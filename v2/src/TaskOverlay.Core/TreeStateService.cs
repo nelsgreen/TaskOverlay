@@ -346,20 +346,32 @@ public sealed class TreeStateService
 
         var timestamp = now ?? DateTimeOffset.UtcNow;
         var task = (TaskItem)node.Value.Value;
-        if (status == TreeNodeStatus.Done)
+        var taskStatus = status switch
         {
-            TaskInteractionService.Complete(task, timestamp);
-        }
-        else
-        {
-            TaskInteractionService.SetStatus(
-                _state,
-                task,
-                TaskStatus.Todo,
-                timestamp);
-        }
+            TreeNodeStatus.Focus => TaskStatus.InWork,
+            TreeNodeStatus.Wait => TaskStatus.Waiting,
+            TreeNodeStatus.Done => TaskStatus.Done,
+            _ => TaskStatus.Todo
+        };
+        TaskInteractionService.SetStatus(_state, task, taskStatus, timestamp);
 
         task.UpdatedAtUtc = timestamp;
+        return true;
+    }
+
+    public bool SetWaitingFor(
+        Guid nodeId,
+        string? waitingFor,
+        DateTimeOffset? now = null)
+    {
+        var task = FindTask(nodeId);
+        if (task is null)
+        {
+            return false;
+        }
+
+        task.WaitingFor = waitingFor?.Trim() ?? string.Empty;
+        task.UpdatedAtUtc = now ?? DateTimeOffset.UtcNow;
         return true;
     }
 
@@ -674,7 +686,13 @@ public sealed class TreeStateService
         task.SortOrder,
         TreeNodeKind.Task,
         task.Title,
-        task.Status == TaskStatus.Done ? TreeNodeStatus.Done : TreeNodeStatus.Todo,
+        task.Status switch
+        {
+            TaskStatus.InWork => TreeNodeStatus.Focus,
+            TaskStatus.Waiting => TreeNodeStatus.Wait,
+            TaskStatus.Done => TreeNodeStatus.Done,
+            _ => TreeNodeStatus.Todo
+        },
         task.InWork,
         task.CreatedAtUtc,
         task.UpdatedAtUtc);

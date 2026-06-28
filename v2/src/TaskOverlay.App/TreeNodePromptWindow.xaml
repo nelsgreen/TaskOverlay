@@ -1,0 +1,56 @@
+<Window x:Class="TaskOverlay.App.TreeNodePromptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tree Manager"
+        Icon="Assets/app.ico"
+        Width="420"
+        Height="190"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="#FF111315">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="Background" Value="#FF22262A" />
+            <Setter Property="Foreground" Value="#FFF2F4F5" />
+            <Setter Property="BorderBrush" Value="#FF3A4046" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </Window.Resources>
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="PromptText"
+                   Foreground="#FFB2BAC4"
+                   FontSize="12" />
+        <TextBox x:Name="TitleInput"
+                 Grid.Row="1"
+                 Margin="0,9,0,16"
+                 Padding="10,8"
+                 Background="#FF090A0B"
+                 Foreground="#FFF5F6F7"
+                 CaretBrush="#FFF5F6F7"
+                 BorderBrush="#FF3A4046"
+                 BorderThickness="1"
+                 FontSize="14"
+                 KeyDown="TitleInput_OnKeyDown" />
+        <StackPanel Grid.Row="2"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal">
+            <Button MinWidth="82"
+                    Content="Cancel"
+                    IsCancel="True" />
+            <Button MinWidth="82"
+                    Margin="8,0,0,0"
+                    Background="#FFE9ECEF"
+                    Foreground="#FF111315"
+                    BorderBrush="#FFE9ECEF"
+                    Content="Create"
+                    Click="ConfirmButton_OnClick" />
+        </StackPanel>
+    </Grid>
+</Window>

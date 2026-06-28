@@ -42,6 +42,8 @@ internal static class Program
             ("tree active and status", TreeActiveAndStatus),
             ("tree navigation", TreeNavigation),
             ("tree projections", TreeProjections),
+            ("tree manager state persistence", TreeManagerStatePersistence),
+            ("tree manager state repair", TreeManagerStateRepair),
             ("tree legacy flat state compatibility", TreeLegacyFlatStateCompatibility),
             ("daily MVP project seeding", DailyMvpProjectSeeding),
             ("old attention state compatibility", OldAttentionStateCompatibility),
@@ -895,6 +897,15 @@ internal static class Program
         Assert(service.MarkActive(task.Id, true, timestamp), "Task should become active.");
         Assert(state.Tasks.Single().InWork, "Task active should retain flat InWork compatibility.");
         Assert(service.GetNode(task.Id)?.Active == true, "Normalized task should report active.");
+        Assert(service.GetNode(task.Id)?.Status == TreeNodeStatus.Focus, "Active task should use FOCUS status.");
+        Assert(service.MarkStatus(task.Id, TreeNodeStatus.Wait, timestamp), "Task should become WAIT.");
+        Assert(state.Tasks.Single().Status == TaskStatus.Waiting, "WAIT should use the existing Waiting status.");
+        Assert(!state.Tasks.Single().InWork, "WAIT should leave FOCUS state.");
+        Assert(service.SetWaitingFor(task.Id, "  Vendor reply  ", timestamp), "WAIT context should update.");
+        Assert(state.Tasks.Single().WaitingFor == "Vendor reply", "WAIT context should be trimmed and retained.");
+        Assert(service.GetNode(task.Id)?.Status == TreeNodeStatus.Wait, "Normalized task should report WAIT.");
+        Assert(service.MarkStatus(task.Id, TreeNodeStatus.Focus, timestamp), "Task should return to FOCUS.");
+        Assert(state.Tasks.Single().Status == TaskStatus.InWork, "FOCUS should use the existing InWork status.");
         Assert(service.MarkStatus(task.Id, TreeNodeStatus.Done, timestamp), "Task should become done.");
         Assert(state.Tasks.Single().Completed, "Done should retain flat Completed compatibility.");
         Assert(!state.Tasks.Single().InWork, "Done task should leave active state.");
@@ -943,8 +954,13 @@ internal static class Program
         var child = service.CreateTask(firstTask.Id, "Child")!;
         var secondGroup = service.CreateGroup(project.Id, "Second group")!;
         var secondTask = service.CreateTask(secondGroup.Id, "Second task")!;
+        var waitingTask = service.CreateTask(secondGroup.Id, "Waiting task")!;
+        var doneTask = service.CreateTask(secondGroup.Id, "Done task")!;
         service.MarkActive(firstTask.Id, true);
         service.MarkActive(secondTask.Id, true);
+        service.MarkStatus(waitingTask.Id, TreeNodeStatus.Wait);
+        service.MarkActive(doneTask.Id, true);
+        service.MarkStatus(doneTask.Id, TreeNodeStatus.Done);
         var taskCount = state.Tasks.Count;
 
         Assert(
@@ -957,7 +973,9 @@ internal static class Program
                     "First task",
                     "Child",
                     "Second group",
-                    "Second task"
+                    "Second task",
+                    "Waiting task",
+                    "Done task"
                 }),
             "AllInProject should return project pre-order.");
         Assert(
@@ -978,11 +996,86 @@ internal static class Program
                 }),
             "ActivePlusAncestors should add context without inactive descendants.");
         Assert(
+            service.GetProjection(project.Id, TreeProjection.ActiveOnly)
+                .All(node => node.Status == TreeNodeStatus.Focus),
+            "ActiveOnly should contain FOCUS tasks only, excluding WAIT and DONE.");
+        Assert(
+            service.GetProjection(project.Id, TreeProjection.ActivePlusAncestors)
+                .All(node => node.Id != doneTask.Id),
+            "DONE tasks must not appear in the active projection.");
+        Assert(
             service.GetProjection(project.Id, TreeProjection.CurrentBranchOnly, firstGroup.Id)
                 .Select(node => node.Id)
                 .SequenceEqual(new[] { project.Id, firstGroup.Id, firstTask.Id, child.Id }),
             "CurrentBranchOnly should include selected subtree and ancestors.");
         Assert(state.Tasks.Count == taskCount, "Projection must not mutate state.");
+    }
+
+    private static void TreeManagerStatePersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = CreateEmptyTreeState();
+            var service = new TreeStateService(state);
+            var project = state.Projects.Single();
+            var section = service.CreateGroup(project.Id, "Section")!;
+            var task = service.CreateTask(section.Id, "Task")!;
+            var subtask = service.CreateTask(task.Id, "Subtask")!;
+            service.MarkStatus(task.Id, TreeNodeStatus.Wait);
+            service.SetWaitingFor(task.Id, "Client response");
+            state.TreeManagerSettings.SelectedProjectId = project.Id;
+            state.TreeManagerSettings.SelectedNodeId = subtask.Id;
+            state.TreeManagerSettings.ExpandedNodeIds = new System.Collections.Generic.List<Guid>
+            {
+                project.Id,
+                section.Id,
+                task.Id
+            };
+            state.TreeManagerSettings.Filter = TreeManagerFilter.ActivePlusAncestors;
+            state.TreeManagerSettings.ExpansionInitialized = true;
+
+            var store = new AppStateStore(directory);
+            store.Save(state);
+            var loaded = store.Load();
+            var loadedTask = loaded.Tasks.Single(item => item.Id == task.Id);
+
+            Assert(loaded.TreeManagerSettings.SelectedProjectId == project.Id, "Selected project should restore.");
+            Assert(loaded.TreeManagerSettings.SelectedNodeId == subtask.Id, "Selected node should restore.");
+            Assert(
+                loaded.TreeManagerSettings.ExpandedNodeIds.SequenceEqual(
+                    new[] { project.Id, section.Id, task.Id }),
+                "Expanded node IDs should restore in order.");
+            Assert(
+                loaded.TreeManagerSettings.Filter == TreeManagerFilter.ActivePlusAncestors,
+                "Tree filter should restore.");
+            Assert(loaded.TreeManagerSettings.ExpansionInitialized, "Expansion initialization should persist.");
+            Assert(loadedTask.Status == TaskStatus.Waiting, "WAIT status should survive save/load.");
+            Assert(loadedTask.WaitingFor == "Client response", "waitingFor should survive save/load.");
+        });
+    }
+
+    private static void TreeManagerStateRepair()
+    {
+        var state = CreateEmptyTreeState();
+        var project = state.Projects.Single();
+        state.TreeManagerSettings.SelectedProjectId = Guid.NewGuid();
+        state.TreeManagerSettings.SelectedNodeId = Guid.NewGuid();
+        state.TreeManagerSettings.ExpandedNodeIds = new System.Collections.Generic.List<Guid>
+        {
+            Guid.NewGuid(),
+            project.Id,
+            project.Id
+        };
+        state.TreeManagerSettings.Filter = (TreeManagerFilter)999;
+
+        Assert(TreeManagerStatePolicy.Normalize(state), "Invalid Tree Manager state should be repaired.");
+        Assert(state.TreeManagerSettings.SelectedProjectId == project.Id, "Missing project should fall back safely.");
+        Assert(state.TreeManagerSettings.SelectedNodeId == project.Id, "Missing node should fall back to project.");
+        Assert(
+            state.TreeManagerSettings.ExpandedNodeIds.SequenceEqual(new[] { project.Id }),
+            "Unknown and duplicate expanded IDs should be removed.");
+        Assert(state.TreeManagerSettings.Filter == TreeManagerFilter.All, "Invalid filter should fall back to All.");
+        Assert(!TreeManagerStatePolicy.Normalize(state), "Normalized Tree Manager state should be idempotent.");
     }
 
     private static void TreeLegacyFlatStateCompatibility()
@@ -1030,9 +1123,11 @@ internal static class Program
             Assert(loaded.SchemaVersion == 2, "Additive tree fields should not require schema migration.");
             Assert(taskNode?.ParentId == projectId, "Legacy flat task should resolve under its project.");
             Assert(taskNode?.Active == true, "Legacy InWork should map to Active.");
-            Assert(taskNode?.Status == TreeNodeStatus.Todo, "Legacy Completed should map to Status.");
+            Assert(taskNode?.Status == TreeNodeStatus.Focus, "Legacy InWork should map to FOCUS status.");
             Assert(loaded.Tasks.Single().Description == "preserved", "Legacy task data should remain intact.");
             Assert(loaded.WindowPlacement.CollapsedLeft == 1800, "Handle anchor should remain intact.");
+            Assert(loaded.TreeManagerSettings.SelectedProjectId == projectId, "Legacy state should get a safe tree selection.");
+            Assert(loaded.TreeManagerSettings.Filter == TreeManagerFilter.All, "Legacy state should default to All filter.");
 
             var nested = service.CreateTask(taskId, "Nested")!;
             store.Save(loaded);
