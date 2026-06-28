@@ -7,7 +7,7 @@ using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
 
-public partial class TaskDetailsWindow : Window
+public partial class TaskDetailsView : UserControl
 {
     private static readonly IReadOnlyList<TaskStatusOption> DetailStatuses =
         new[]
@@ -34,6 +34,7 @@ public partial class TaskDetailsWindow : Window
     private readonly Action<TaskItem, TaskEditValues> _saveTask;
     private readonly Action<TaskItem> _deleteTask;
     private readonly Action<bool> _modalInteractionChanged;
+    private readonly Action _closeShell;
     private readonly DateTimeOffset? _originalRemindAtUtc;
     private readonly int? _originalRepeatMinutes;
     private readonly ReminderPreset _originalReminderPreset;
@@ -45,17 +46,19 @@ public partial class TaskDetailsWindow : Window
     private bool _updatingReminderControls;
     private bool _reminderScheduleEdited;
 
-    public TaskDetailsWindow(
+    public TaskDetailsView(
         AppState state,
         TaskItem task,
         Action<TaskItem, TaskEditValues> saveTask,
         Action<TaskItem> deleteTask,
-        Action<bool> modalInteractionChanged)
+        Action<bool> modalInteractionChanged,
+        Action closeShell)
     {
         _task = task;
         _saveTask = saveTask;
         _deleteTask = deleteTask;
         _modalInteractionChanged = modalInteractionChanged;
+        _closeShell = closeShell;
         _originalRemindAtUtc = task.RemindAtUtc;
         _originalRepeatMinutes = task.RemindEveryMinutes;
         _originalReminderPreset = ReminderService.DetectPreset(task);
@@ -100,6 +103,16 @@ public partial class TaskDetailsWindow : Window
         _initializing = false;
         UpdateWaitingField();
         UpdateReminderVisibility();
+    }
+
+    public Guid TaskId => _task.Id;
+
+    public void OnActivated()
+    {
+        if (!IsKeyboardFocusWithin)
+        {
+            TitleTextBox.Focus();
+        }
     }
 
     private void StatusListBox_OnSelectionChanged(
@@ -383,7 +396,7 @@ public partial class TaskDetailsWindow : Window
                 remindAtUtc,
                 repeatMinutes,
                 replaceSchedule));
-        Close();
+        _closeShell();
     }
 
     private bool TryBuildReminderTime(out DateTimeOffset? remindAtUtc)
@@ -418,14 +431,14 @@ public partial class TaskDetailsWindow : Window
 
     private void CancelButton_OnClick(object sender, RoutedEventArgs e)
     {
-        Close();
+        _closeShell();
     }
 
     private void DeleteButton_OnClick(object sender, RoutedEventArgs e)
     {
         var result = ShowModalMessage(
             () => MessageBox.Show(
-                this,
+                Window.GetWindow(this),
                 $"Delete \"{_task.Title}\"?",
                 "Delete task",
                 MessageBoxButton.YesNo,
@@ -437,7 +450,7 @@ public partial class TaskDetailsWindow : Window
         }
 
         _deleteTask(_task);
-        Close();
+        _closeShell();
     }
 
     private void UpdateWaitingField()
@@ -460,7 +473,7 @@ public partial class TaskDetailsWindow : Window
     {
         ShowModalMessage(
             () => MessageBox.Show(
-                this,
+                Window.GetWindow(this),
                 message,
                 "TaskOverlay",
                 MessageBoxButton.OK,

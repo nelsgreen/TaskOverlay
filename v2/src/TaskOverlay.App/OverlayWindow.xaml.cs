@@ -52,6 +52,7 @@ public partial class OverlayWindow : Window
     private readonly AppState _state;
     private readonly Action _saveState;
     private readonly Action<string> _log;
+    private readonly Action<Guid> _openTaskDetails;
     private readonly DispatcherTimer _passiveTimer;
     private readonly DispatcherTimer _collapsedExpandTimer;
 
@@ -81,15 +82,19 @@ public partial class OverlayWindow : Window
     private double _dragStartTop;
     private Matrix _dragFromDevice = Matrix.Identity;
     private HandleWindow? _handleWindow;
-    private TaskDetailsWindow? _taskDetailsWindow;
 
     public event Action<OverlayMode>? OverlayModeChanged;
 
-    public OverlayWindow(AppState state, Action saveState, Action<string> log)
+    public OverlayWindow(
+        AppState state,
+        Action saveState,
+        Action<string> log,
+        Action<Guid> openTaskDetails)
     {
         _state = state;
         _saveState = saveState;
         _log = log;
+        _openTaskDetails = openTaskDetails;
 
         InitializeComponent();
         RefreshTasks();
@@ -251,7 +256,7 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        OpenTaskDetails(task);
+        _openTaskDetails(task.Id);
     }
 
     public void HideSafely()
@@ -284,8 +289,6 @@ public partial class OverlayWindow : Window
 
         _isShuttingDown = true;
         StopModeTimers();
-        _taskDetailsWindow?.Close();
-        _taskDetailsWindow = null;
         CaptureWindowPlacement();
     }
 
@@ -1534,47 +1537,9 @@ public partial class OverlayWindow : Window
 
     private void OpenTaskDetails(TaskItem task)
     {
-        if (_taskDetailsWindow is not null)
-        {
-            _taskDetailsWindow.Activate();
-            return;
-        }
-
         StopModeTimers();
         SetActiveMode(true);
-        _taskDetailsWindow = new TaskDetailsWindow(
-            _state,
-            task,
-            SaveTaskEdits,
-            DeleteTask,
-            SetModalInteractionActive)
-        {
-            Owner = this
-        };
-        _taskDetailsWindow.Closed += TaskDetailsWindow_OnClosed;
-        _taskDetailsWindow.Show();
-        _taskDetailsWindow.Activate();
-    }
-
-    private void TaskDetailsWindow_OnClosed(object? sender, EventArgs e)
-    {
-        if (_taskDetailsWindow is not null)
-        {
-            _taskDetailsWindow.Closed -= TaskDetailsWindow_OnClosed;
-            _taskDetailsWindow = null;
-        }
-
-        ScheduleCollapse();
-    }
-
-    private void SaveTaskEdits(TaskItem task, TaskEditValues values)
-    {
-        TaskInteractionService.Update(_state, task, values);
-        RefreshTasks();
-        _saveState();
-        _log(
-            $"Task edited: id={task.Id}; status={task.Status}; " +
-            $"projectId={task.ProjectId}; remindAt={task.RemindAtUtc:O}");
+        _openTaskDetails(task.Id);
     }
 
     private void DeleteTask(TaskItem task)
@@ -2097,7 +2062,7 @@ public partial class OverlayWindow : Window
         return OverlayCollapseGuard.CanCollapse(
             new OverlayInteractionState(
                 OverlayMode: _state.OverlaySettings.OverlayMode,
-                TaskDetailsOpen: _taskDetailsWindow?.IsVisible == true,
+                TaskDetailsOpen: false,
                 ContextMenuOpen: IsContextMenuOpen(),
                 SettingsOpen: _settingsInteractionActive,
                 ModalDialogOpen: _modalInteractionCount > 0,
@@ -2275,7 +2240,7 @@ public partial class OverlayWindow : Window
             }));
     }
 
-    private void SetModalInteractionActive(bool active)
+    public void SetModalInteractionActive(bool active)
     {
         if (_isClosed || _isShuttingDown)
         {

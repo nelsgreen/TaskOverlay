@@ -1,0 +1,260 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="AppWindowBrush" Color="#FF101216" />
+    <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FF17191E" />
+    <SolidColorBrush x:Key="AppCardBrush" Color="#FF14161A" />
+    <SolidColorBrush x:Key="AppInputBrush" Color="#FF1D2025" />
+    <SolidColorBrush x:Key="AppBorderBrush" Color="#FF30343B" />
+    <SolidColorBrush x:Key="AppBorderStrongBrush" Color="#FF454A54" />
+    <SolidColorBrush x:Key="AppTextBrush" Color="#FFF2F2F3" />
+    <SolidColorBrush x:Key="AppMutedTextBrush" Color="#FF959BA6" />
+    <SolidColorBrush x:Key="AppGoldBrush" Color="#FFD7A93B" />
+    <SolidColorBrush x:Key="AppGoldSoftBrush" Color="#FF5A461B" />
+
+    <Style x:Key="AppCardStyle" TargetType="Border">
+        <Setter Property="Padding" Value="14" />
+        <Setter Property="Background" Value="{StaticResource AppCardBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="9" />
+    </Style>
+
+    <Style x:Key="AppTitleStyle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource AppTextBrush}" />
+        <Setter Property="FontSize" Value="18" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="AppSubtitleStyle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="AppSectionLabelStyle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="#FFC1C5CD" />
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="AppTextBoxStyle" TargetType="TextBox">
+        <Setter Property="Padding" Value="11,8" />
+        <Setter Property="Foreground" Value="{StaticResource AppTextBrush}" />
+        <Setter Property="Background" Value="{StaticResource AppInputBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CaretBrush" Value="{StaticResource AppTextBrush}" />
+        <Setter Property="SelectionBrush" Value="#FF6B5424" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="InputBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Margin="{TemplateBinding Padding}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="InputBorder"
+                                    Property="BorderBrush"
+                                    Value="#FF9C7B31" />
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource AppTextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="InputBorder" Property="Opacity" Value="0.45" />
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource AppMutedTextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="AppButtonStyle" TargetType="Button">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="13,6" />
+        <Setter Property="Foreground" Value="{StaticResource AppTextBrush}" />
+        <Setter Property="Background" Value="#FF22252B" />
+        <Setter Property="BorderBrush" Value="{StaticResource AppBorderStrongBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonBorder"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#FF777D88" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.72" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.38" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="AppPrimaryButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource AppButtonStyle}">
+        <Setter Property="Foreground" Value="#FF15171B" />
+        <Setter Property="Background" Value="#FFE5E5E7" />
+        <Setter Property="BorderBrush" Value="#FFF7F7F8" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="AppChipListStyle" TargetType="ListBox">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ItemsPanel">
+            <Setter.Value>
+                <ItemsPanelTemplate>
+                    <WrapPanel />
+                </ItemsPanelTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="AppChipItemStyle" TargetType="ListBoxItem">
+        <Setter Property="Margin" Value="0,0,7,7" />
+        <Setter Property="Padding" Value="11,5" />
+        <Setter Property="Foreground" Value="#FFD1D5DB" />
+        <Setter Property="Background" Value="#FF1B1E23" />
+        <Setter Property="BorderBrush" Value="#FF353941" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="ChipBorder"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="14">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ChipBorder" Property="BorderBrush" Value="#FF777D88" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Foreground" Value="#FFFFE7A0" />
+                            <Setter TargetName="ChipBorder" Property="Background" Value="#FF3A301B" />
+                            <Setter TargetName="ChipBorder" Property="BorderBrush" Value="{StaticResource AppGoldBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="AppSliderStyle" TargetType="Slider">
+        <Setter Property="Height" Value="22" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid VerticalAlignment="Center">
+                        <Track x:Name="PART_Track" Height="14">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                              IsTabStop="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Height="4"
+                                                    VerticalAlignment="Center"
+                                                    Background="#FF80631F"
+                                                    CornerRadius="2" />
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Width="12" Height="12">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Ellipse Fill="{StaticResource AppGoldBrush}" />
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                              IsTabStop="False">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <Border Height="4"
+                                                    VerticalAlignment="Center"
+                                                    Background="#FF2B2E34"
+                                                    CornerRadius="2" />
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="AppSwitcherTabStyle" TargetType="ToggleButton">
+        <Setter Property="MinHeight" Value="28" />
+        <Setter Property="Padding" Value="12,5" />
+        <Setter Property="Foreground" Value="#FFB7BDC7" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="TabBorder"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="6">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="TabBorder" Property="Background" Value="#FF25282E" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="#FF17191D" />
+                            <Setter TargetName="TabBorder" Property="Background" Value="#FFE7E7E8" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.35" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

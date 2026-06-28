@@ -21,21 +21,19 @@ internal static class TaskAttentionUiOptions
     public static IReadOnlyList<TaskStatusOption> QuickAddStatuses { get; } =
         new[]
         {
-            new TaskStatusOption(TaskStatus.Todo, "Todo"),
-            new TaskStatusOption(TaskStatus.Waiting, "Waiting"),
-            new TaskStatusOption(TaskStatus.InWork, "Focus")
+            new TaskStatusOption(TaskStatus.Todo, "TODO"),
+            new TaskStatusOption(TaskStatus.InWork, "FOCUS"),
+            new TaskStatusOption(TaskStatus.Waiting, "WAIT"),
+            new TaskStatusOption(TaskStatus.Done, "DONE")
         };
 
-    public static IReadOnlyList<ReminderPresetOption> ReminderPresets { get; } =
+    public static IReadOnlyList<ReminderPresetOption> QuickAddReminderPresets { get; } =
         new[]
         {
             new ReminderPresetOption(ReminderPreset.None, "No reminder"),
             new ReminderPresetOption(ReminderPreset.In30Minutes, "In 30 minutes"),
             new ReminderPresetOption(ReminderPreset.In1Hour, "In 1 hour"),
-            new ReminderPresetOption(ReminderPreset.In2Hours, "In 2 hours"),
-            new ReminderPresetOption(ReminderPreset.TomorrowMorning, "Tomorrow morning"),
-            new ReminderPresetOption(ReminderPreset.RepeatEvery2Hours, "Repeat every 2 hours"),
-            new ReminderPresetOption(ReminderPreset.RepeatDaily, "Repeat daily")
+            new ReminderPresetOption(ReminderPreset.TomorrowMorning, "Tomorrow morning")
         };
 
     public static IReadOnlyList<ReminderPresetOption> EditorReminderPresets { get; } =

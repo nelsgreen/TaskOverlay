@@ -57,6 +57,10 @@ internal static class Program
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
             ("working presentation settings", WorkingPresentationSettings),
+            ("utility shell geometry persistence", UtilityShellGeometryPersistence),
+            ("old utility shell geometry compatibility", OldUtilityShellGeometryCompatibility),
+            ("invalid utility shell geometry repair", InvalidUtilityShellGeometryRepair),
+            ("single WPF instance guard", SingleWpfInstanceGuard),
             ("working panel bounds", WorkingPanelBoundsBehavior),
             ("old collapsed mode migration", OldCollapsedModeMigration),
             ("old pinned mode migration", OldPinnedModeMigration),
@@ -68,6 +72,7 @@ internal static class Program
             ("overlay mode click cycle", OverlayModeClickCycle),
             ("overlay mode shortcut policy", OverlayModeShortcutPolicyBehavior),
             ("global hotkey bindings", GlobalHotkeyBindingBehavior),
+            ("user-facing overlay mode labels", UserFacingOverlayModeLabels),
             ("working mode task filtering", WorkingModeTaskFiltering),
             ("working mode focus badge", WorkingModeFocusBadge),
             ("handle surface ownership across modes", HandleSurfaceOwnershipAcrossModes),
@@ -2007,6 +2012,124 @@ internal static class Program
                 not "Ctrl+Alt+D" and
                 not "Ctrl+Alt+S"),
             "Removed mode and clipboard hotkeys must not be registered.");
+    }
+
+    private static void UtilityShellGeometryPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.WindowPlacement.UtilityShellPlacement =
+                UtilityShellGeometryPolicy.Capture(120, 80, 900, 850);
+
+            store.Save(state);
+            var loaded = store.Load();
+
+            Assert(
+                loaded.WindowPlacement.UtilityShellPlacement is
+                {
+                    Left: 120,
+                    Top: 80,
+                    Width: 900,
+                    Height: 850
+                },
+                "The shared utility shell geometry should survive save/load.");
+        });
+    }
+
+    private static void OldUtilityShellGeometryCompatibility()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            store.Save(AppState.CreateDefault());
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            var placement = root["windowPlacement"]!.AsObject();
+            placement.Remove("utilityShellPlacement");
+            File.WriteAllText(
+                store.StatePath,
+                root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+            var loaded = store.Load();
+            var geometry = UtilityShellGeometryPolicy.Resolve(
+                loaded.WindowPlacement.UtilityShellPlacement,
+                new OverlayBounds(0, 0, 1920, 1080));
+
+            Assert(
+                geometry == new ResolvedUtilityShellGeometry(620, 130, 680, 820),
+                "Old state should center the shared utility shell at its safe default size.");
+        });
+    }
+
+    private static void InvalidUtilityShellGeometryRepair()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = store.Load();
+            state.WindowPlacement.UtilityShellPlacement =
+                new UtilityShellPlacementState
+            {
+                Left = -5000,
+                Top = 9000,
+                Width = -200,
+                Height = 5000
+            };
+
+            store.Save(state);
+            var loaded = store.Load();
+            var geometry = UtilityShellGeometryPolicy.Resolve(
+                loaded.WindowPlacement.UtilityShellPlacement,
+                new OverlayBounds(0, 0, 1920, 1080));
+
+            Assert(
+                geometry == new ResolvedUtilityShellGeometry(16, 16, 600, 1048),
+                "Invalid shell size and position should clamp inside the work area.");
+        });
+
+        var constrained = UtilityShellGeometryPolicy.Resolve(
+            saved: null,
+            workArea: new OverlayBounds(0, 0, 640, 700));
+        Assert(
+            constrained == new ResolvedUtilityShellGeometry(16, 16, 608, 668),
+            "Default shell geometry should fit a constrained work area.");
+    }
+
+    private static void SingleWpfInstanceGuard()
+    {
+        var mutexName = $@"Local\TaskOverlay.WpfV2.Tests.{Guid.NewGuid():N}";
+        using var first = SingleInstanceGuard.TryAcquire(mutexName);
+        using var second = SingleInstanceGuard.TryAcquire(mutexName);
+
+        Assert(first is not null, "The first WPF instance should acquire the guard.");
+        Assert(second is null, "A second WPF instance must be rejected.");
+    }
+
+    private static void UserFacingOverlayModeLabels()
+    {
+        var options = OverlayModeDisplay.UserModes.ToArray();
+
+        Assert(options.Length == 3, "Settings should expose exactly three overlay modes.");
+        Assert(
+            options.Select(option => option.Mode).SequenceEqual(new[]
+            {
+                OverlayMode.Working,
+                OverlayMode.PinnedExpanded,
+                OverlayMode.CollapsedHandle
+            }),
+            "Settings should expose only the supported user-facing overlay modes.");
+        Assert(
+            options.Select(option => option.Label).SequenceEqual(new[]
+            {
+                "Working",
+                "Pinned",
+                "Collapsed handle"
+            }),
+            "Settings overlay mode labels should use current terminology.");
+        Assert(
+            OverlayModeDisplay.GetLabel(OverlayMode.AutoQuestTracker) == "Working",
+            "Legacy auto mode should display as Working.");
     }
 
     private static void WorkingModeTaskFiltering()

@@ -300,4 +300,13 @@ public sealed class WindowPlacement
     public double? Top { get; set; }
     public double? CollapsedLeft { get; set; }
     public double? CollapsedTop { get; set; }
+    public UtilityShellPlacementState? UtilityShellPlacement { get; set; }
+}
+
+public sealed class UtilityShellPlacementState
+{
+    public double? Left { get; set; }
+    public double? Top { get; set; }
+    public double? Width { get; set; }
+    public double? Height { get; set; }
 }
