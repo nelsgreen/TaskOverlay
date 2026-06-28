@@ -28,6 +28,7 @@ public partial class App : System.Windows.Application
     private AppStateStore? _stateStore;
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
+    private WindowNavigationActions? _windowNavigation;
     private DispatcherTimer? _reminderTimer;
     private volatile bool _isShuttingDown;
 
@@ -51,6 +52,11 @@ public partial class App : System.Windows.Application
                 _diagnostics.Log("Daily MVP projects seeded.");
             }
 
+            _windowNavigation = new WindowNavigationActions(
+                ShowQuickAdd,
+                ShowSettings,
+                ActivateTaskDetails,
+                CanActivateTaskDetails);
             _overlayWindow = CreateOverlayWindow();
             _overlayWindow.Show();
 
@@ -534,7 +540,10 @@ public partial class App : System.Windows.Application
 
         if (_quickAddWindow is null)
         {
-            _quickAddWindow = new QuickAddWindow(_state, AddQuickTask);
+            _quickAddWindow = new QuickAddWindow(
+                _state,
+                AddQuickTask,
+                RequireWindowNavigation());
             _quickAddWindow.Closed += QuickAddWindow_OnClosed;
         }
 
@@ -647,7 +656,13 @@ public partial class App : System.Windows.Application
             _settingsWindow = new SettingsWindow(
                 _state,
                 PersistState,
-                RefreshTaskPresentations);
+                RefreshTaskPresentations,
+                new SettingsWindowActions(
+                    SetOverlayMode,
+                    () => OpenFolder(_diagnostics?.LogsDirectory),
+                    () => OpenFolder(_stateStore?.StateDirectory),
+                    ResetSavedWindowPositions),
+                RequireWindowNavigation());
             _settingsWindow.Closed += SettingsWindow_OnClosed;
         }
 
@@ -714,9 +729,56 @@ public partial class App : System.Windows.Application
         var overlay = new OverlayWindow(
             _state,
             PersistOverlayState,
-            message => _diagnostics?.Log(message));
+            message => _diagnostics?.Log(message),
+            RequireWindowNavigation());
         overlay.OverlayModeChanged += OverlayWindow_OnOverlayModeChanged;
         return overlay;
+    }
+
+    private WindowNavigationActions RequireWindowNavigation()
+    {
+        return _windowNavigation ?? throw new InvalidOperationException(
+            "Window navigation is not initialized.");
+    }
+
+    private bool CanActivateTaskDetails()
+    {
+        return _overlayWindow?.HasOpenTaskDetails == true;
+    }
+
+    private bool ActivateTaskDetails()
+    {
+        return _overlayWindow?.ActivateTaskDetails() == true;
+    }
+
+    private void OpenFolder(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        System.IO.Directory.CreateDirectory(path);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true
+        });
+    }
+
+    private void ResetSavedWindowPositions()
+    {
+        if (_state is null)
+        {
+            return;
+        }
+
+        _state.WindowPlacement.Left = null;
+        _state.WindowPlacement.Top = null;
+        _state.WindowPlacement.CollapsedLeft = null;
+        _state.WindowPlacement.CollapsedTop = null;
+        PersistState();
+        _diagnostics?.Log("Saved overlay window positions reset from Settings.");
     }
 
     private void PersistOverlayState()

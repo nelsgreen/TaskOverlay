@@ -68,6 +68,7 @@ internal static class Program
             ("overlay mode click cycle", OverlayModeClickCycle),
             ("overlay mode shortcut policy", OverlayModeShortcutPolicyBehavior),
             ("global hotkey bindings", GlobalHotkeyBindingBehavior),
+            ("user-facing overlay mode labels", UserFacingOverlayModeLabels),
             ("working mode task filtering", WorkingModeTaskFiltering),
             ("working mode focus badge", WorkingModeFocusBadge),
             ("handle surface ownership across modes", HandleSurfaceOwnershipAcrossModes),
@@ -2007,6 +2008,32 @@ internal static class Program
                 not "Ctrl+Alt+D" and
                 not "Ctrl+Alt+S"),
             "Removed mode and clipboard hotkeys must not be registered.");
+    }
+
+    private static void UserFacingOverlayModeLabels()
+    {
+        var options = OverlayModeDisplay.UserModes.ToArray();
+
+        Assert(options.Length == 3, "Settings should expose exactly three overlay modes.");
+        Assert(
+            options.Select(option => option.Mode).SequenceEqual(new[]
+            {
+                OverlayMode.Working,
+                OverlayMode.PinnedExpanded,
+                OverlayMode.CollapsedHandle
+            }),
+            "Settings should expose only the supported user-facing overlay modes.");
+        Assert(
+            options.Select(option => option.Label).SequenceEqual(new[]
+            {
+                "Working",
+                "Pinned",
+                "Collapsed handle"
+            }),
+            "Settings overlay mode labels should use current terminology.");
+        Assert(
+            OverlayModeDisplay.GetLabel(OverlayMode.AutoQuestTracker) == "Working",
+            "Legacy auto mode should display as Working.");
     }
 
     private static void WorkingModeTaskFiltering()

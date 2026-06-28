@@ -52,6 +52,7 @@ public partial class OverlayWindow : Window
     private readonly AppState _state;
     private readonly Action _saveState;
     private readonly Action<string> _log;
+    private readonly WindowNavigationActions _windowNavigation;
     private readonly DispatcherTimer _passiveTimer;
     private readonly DispatcherTimer _collapsedExpandTimer;
 
@@ -85,11 +86,16 @@ public partial class OverlayWindow : Window
 
     public event Action<OverlayMode>? OverlayModeChanged;
 
-    public OverlayWindow(AppState state, Action saveState, Action<string> log)
+    public OverlayWindow(
+        AppState state,
+        Action saveState,
+        Action<string> log,
+        WindowNavigationActions windowNavigation)
     {
         _state = state;
         _saveState = saveState;
         _log = log;
+        _windowNavigation = windowNavigation;
 
         InitializeComponent();
         RefreshTasks();
@@ -126,6 +132,8 @@ public partial class OverlayWindow : Window
     public bool IsClosed => _isClosed;
     public bool IsOverlayVisible =>
         _overlayVisible && (IsVisible || _handleWindow?.IsVisible == true);
+    public bool HasOpenTaskDetails =>
+        _taskDetailsWindow is not null && _taskDetailsWindow.IsVisible;
     private bool UsesHandleWindow =>
         OverlaySurfacePolicy.UseHandleWindowForMode(
             _state.OverlaySettings.OverlayMode,
@@ -252,6 +260,17 @@ public partial class OverlayWindow : Window
         }
 
         OpenTaskDetails(task);
+    }
+
+    public bool ActivateTaskDetails()
+    {
+        if (!HasOpenTaskDetails)
+        {
+            return false;
+        }
+
+        _taskDetailsWindow!.Activate();
+        return true;
     }
 
     public void HideSafely()
@@ -1547,7 +1566,8 @@ public partial class OverlayWindow : Window
             task,
             SaveTaskEdits,
             DeleteTask,
-            SetModalInteractionActive)
+            SetModalInteractionActive,
+            _windowNavigation)
         {
             Owner = this
         };

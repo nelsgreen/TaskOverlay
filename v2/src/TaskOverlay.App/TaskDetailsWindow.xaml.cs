@@ -50,7 +50,8 @@ public partial class TaskDetailsWindow : Window
         TaskItem task,
         Action<TaskItem, TaskEditValues> saveTask,
         Action<TaskItem> deleteTask,
-        Action<bool> modalInteractionChanged)
+        Action<bool> modalInteractionChanged,
+        WindowNavigationActions navigation)
     {
         _task = task;
         _saveTask = saveTask;
@@ -68,6 +69,8 @@ public partial class TaskDetailsWindow : Window
 
         _initializing = true;
         InitializeComponent();
+        WindowSwitcher.Configure(navigation, AppWindowKind.TaskDetails);
+        Activated += (_, _) => WindowSwitcher.RefreshAvailability();
 
         TitleTextBox.Text = task.Title;
         DescriptionTextBox.Text = task.Description;
