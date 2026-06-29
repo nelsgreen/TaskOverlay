@@ -33,12 +33,12 @@ product area so implementation work can be split into bounded changes.
 - Quick access from handle or expanded panel.
 - Notes should not be mixed with tasks.
 - Workflow/context notes:
-  - Provide a place to write important project or section context that is not a task.
-  - Support notes for Project and Section first; Task/Subtask notes can remain later or reuse existing description fields.
+  - Provide a place to write important project or section/workstream context that is not a task.
+  - Support notes for Project, Workstream, and Section first; Task/Subtask notes can remain later or reuse existing description fields.
   - Use this for workflow nuances, decisions, links, constraints, or things the user tends to forget.
-  - Surface these notes in Tree Manager details so each project/section has an obvious "where do I write this?" place.
+  - Surface these notes in Tree Manager details so each project/workstream/section has an obvious "where do I write this?" place.
   - Do not show workflow notes in the small active overlay by default.
-  - Candidate UI labels: Context notes, Workflow notes, Section notes.
+  - Candidate UI labels: Context notes, Workflow notes, Section notes, Workstream notes.
 
 ## 4. Task Interactions
 
@@ -58,10 +58,18 @@ product area so implementation work can be split into bounded changes.
 - Overlay as active subset.
 - Hierarchy:
   - Project.
+  - Workstream.
   - Section.
   - Task.
   - Subtask.
-- Use Section in UI; do not use Group or Workstream in user-facing labels.
+- Workstreams:
+  - Use Workstream for parallel streams of work inside a project.
+  - A Workstream can contain sections and nested tasks.
+  - A project may have multiple workstreams running in parallel.
+  - Tasks may need cross-links across workstreams; support many-to-many relationships later.
+  - Cross-links should express dependencies, blockers, related tasks, duplicates, or "see also" relations without forcing a strict parent-child tree.
+  - Keep the main hierarchy simple for MVP, but plan the data model so node links can be added later.
+- Section remains useful as a folder/subdivision inside a workstream or project.
 - Gantt-like future planning view.
 - Active + ancestors display mode.
 - Do not render the full backlog inside the small overlay.
