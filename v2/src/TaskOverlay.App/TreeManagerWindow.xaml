@@ -17,6 +17,7 @@
         <SolidColorBrush x:Key="TreeBorder" Color="#FF303438" />
         <SolidColorBrush x:Key="TreeText" Color="#FFF2F4F5" />
         <SolidColorBrush x:Key="TreeMuted" Color="#FF9AA5B1" />
+        <SolidColorBrush x:Key="TreeGuide" Color="#FF4A5159" />
         <SolidColorBrush x:Key="TreeFocus" Color="#FF45D58A" />
         <SolidColorBrush x:Key="TreeDanger" Color="#FFDB646A" />
 
@@ -95,7 +96,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="96" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="142" />
+            <RowDefinition Height="84" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
@@ -105,8 +106,8 @@
                 BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="330" />
-                    <ColumnDefinition Width="160" />
+                    <ColumnDefinition Width="280" />
+                    <ColumnDefinition Width="150" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
@@ -164,14 +165,17 @@
                             Margin="8,10,0,10"
                             VerticalAlignment="Center"
                             Orientation="Horizontal">
-                    <Button Style="{StaticResource TreeButtonStyle}"
+                    <Button x:Name="NewProjectButton"
+                            Style="{StaticResource TreeButtonStyle}"
                             Content="New project"
                             Click="NewProjectButton_OnClick" />
-                    <Button Margin="8,0,0,0"
+                    <Button x:Name="NewSectionButton"
+                            Margin="8,0,0,0"
                             Style="{StaticResource TreeButtonStyle}"
                             Content="New section"
                             Click="NewSectionButton_OnClick" />
-                    <Button Margin="8,0,0,0"
+                    <Button x:Name="NewTaskButton"
+                            Margin="8,0,0,0"
                             Style="{StaticResource PrimaryTreeButtonStyle}"
                             Content="New task"
                             Click="NewTaskButton_OnClick" />
@@ -227,8 +231,8 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBlock VerticalAlignment="Center"
                                                Foreground="{StaticResource TreeMuted}"
-                                               FontSize="15"
-                                               Text="⌁" />
+                                               FontSize="8"
+                                               Text="&#x25C6;" />
                                     <TextBlock Grid.Column="1"
                                                Margin="7,0"
                                                VerticalAlignment="Center"
@@ -261,10 +265,34 @@
 
             <Grid Grid.Column="1">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="38" />
                     <RowDefinition Height="52" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <Border Padding="14,9"
+                <Border Padding="12,0"
+                        Background="#FF0D0F11"
+                        BorderBrush="{StaticResource TreeBorder}"
+                        BorderThickness="0,0,0,1">
+                    <StackPanel VerticalAlignment="Bottom"
+                                Orientation="Horizontal">
+                        <Border Padding="12,7,12,8"
+                                BorderBrush="{StaticResource TreeFocus}"
+                                BorderThickness="0,0,0,2">
+                            <TextBlock Foreground="{StaticResource TreeText}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Text="Tree" />
+                        </Border>
+                        <Button Margin="4,0,0,1"
+                                Padding="12,7"
+                                Style="{StaticResource FilterButtonStyle}"
+                                IsEnabled="False"
+                                Content="Workstreams (later)"
+                                ToolTip="Future alternate project view" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1"
+                        Padding="14,9"
                         Background="#FF0D0F11"
                         BorderBrush="{StaticResource TreeBorder}"
                         BorderThickness="0,0,0,1">
@@ -300,96 +328,153 @@
                         </Border>
                     </Grid>
                 </Border>
-                <Grid Grid.Row="1">
+                <Grid Grid.Row="2">
                     <ListBox x:Name="TreeRows"
                              Margin="8"
                              Background="Transparent"
                              BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
                              ItemContainerStyle="{StaticResource TreeListBoxItemStyle}"
                              SelectionChanged="TreeRows_OnSelectionChanged">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid Margin="{Binding IndentMargin}">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="28" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Button Width="22"
-                                            Height="22"
-                                            Padding="0"
-                                            VerticalAlignment="Center"
-                                            Style="{StaticResource FilterButtonStyle}"
-                                            Content="{Binding ExpandGlyph}"
-                                            Visibility="{Binding ExpandVisibility}"
-                                            Click="ExpandButton_OnClick" />
-                                    <Border Grid.Column="1"
-                                            Margin="4,5,8,5"
-                                            Padding="7,3"
-                                            VerticalAlignment="Center"
-                                            Background="#FF22262A"
-                                            BorderBrush="{Binding StatusBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="5">
-                                        <TextBlock Foreground="{Binding StatusBrush}"
-                                                   FontSize="9"
-                                                   FontWeight="SemiBold"
-                                                   Text="{Binding StatusLabel}" />
-                                    </Border>
-                                    <StackPanel Grid.Column="2"
-                                                Margin="0,7"
-                                                VerticalAlignment="Center">
-                                        <TextBlock FontSize="13"
-                                                   FontWeight="SemiBold"
-                                                   Text="{Binding Title}"
-                                                   TextTrimming="CharacterEllipsis">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Foreground" Value="{StaticResource TreeText}" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsDone}" Value="True">
-                                                            <Setter Property="Foreground" Value="#FF747C85" />
-                                                            <Setter Property="TextDecorations" Value="Strikethrough" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                        <TextBlock Margin="0,2,0,0"
-                                                   Foreground="{StaticResource TreeMuted}"
-                                                   FontSize="10"
-                                                   Text="{Binding WaitingForLabel}"
-                                                   Visibility="{Binding WaitingForVisibility}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="3"
-                                                Margin="8,0"
+                                <Border BorderThickness="1"
+                                        CornerRadius="5">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Margin" Value="0,1" />
+                                            <Setter Property="Padding" Value="6,4" />
+                                            <Setter Property="Background" Value="Transparent" />
+                                            <Setter Property="BorderBrush" Value="Transparent" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSection}" Value="True">
+                                                    <Setter Property="Margin" Value="0,7,0,3" />
+                                                    <Setter Property="Padding" Value="8,7" />
+                                                    <Setter Property="Background" Value="#FF171B1F" />
+                                                    <Setter Property="BorderBrush" Value="#FF394149" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                             Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource TreeSelected}" />
+                                                    <Setter Property="BorderBrush" Value="#FF5A6570" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="24" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid Width="{Binding IndentWidth}"
+                                              Margin="0,-5,0,-5"
+                                              Visibility="{Binding GuideVisibility}">
+                                            <Border Width="1"
+                                                    HorizontalAlignment="Right"
+                                                    Background="{StaticResource TreeGuide}" />
+                                            <Border Width="11"
+                                                    Height="1"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    Background="{StaticResource TreeGuide}" />
+                                        </Grid>
+                                        <Button Grid.Column="1"
+                                                Width="22"
+                                                Height="22"
+                                                Padding="0"
                                                 VerticalAlignment="Center"
-                                                Orientation="Horizontal">
-                                        <TextBlock Margin="0,0,8,0"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="#FF6F7882"
-                                                   FontSize="9"
-                                                   Text="{Binding KindLabel}" />
-                                        <Button Width="26"
-                                                Height="24"
-                                                Padding="0"
-                                                Style="{StaticResource TreeButtonStyle}"
-                                                Content="↑"
-                                                IsEnabled="{Binding CanMoveUp}"
-                                                ToolTip="Move up"
-                                                Click="MoveUpButton_OnClick" />
-                                        <Button Width="26"
-                                                Height="24"
-                                                Margin="4,0,0,0"
-                                                Padding="0"
-                                                Style="{StaticResource TreeButtonStyle}"
-                                                Content="↓"
-                                                IsEnabled="{Binding CanMoveDown}"
-                                                ToolTip="Move down"
-                                                Click="MoveDownButton_OnClick" />
-                                    </StackPanel>
-                                </Grid>
+                                                Style="{StaticResource FilterButtonStyle}"
+                                                Content="{Binding ExpandGlyph}"
+                                                Visibility="{Binding ExpandVisibility}"
+                                                ToolTip="Expand or collapse children"
+                                                Click="ExpandButton_OnClick" />
+                                        <Border Grid.Column="2"
+                                                Margin="4,4,9,4"
+                                                Padding="6,2"
+                                                VerticalAlignment="Center"
+                                                Background="#FF202428"
+                                                BorderBrush="{Binding StatusBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Visibility="{Binding TaskVisibility}">
+                                            <TextBlock Foreground="{Binding StatusBrush}"
+                                                       FontSize="8"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding StatusLabel}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="3"
+                                                    Margin="0,4"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock MaxHeight="44"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding Title}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       TextWrapping="Wrap">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{StaticResource TreeText}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsSection}" Value="True">
+                                                                <Setter Property="FontSize" Value="14" />
+                                                                <Setter Property="FontWeight" Value="Bold" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                                                <Setter Property="Foreground" Value="#FF747C85" />
+                                                                <Setter Property="TextDecorations" Value="Strikethrough" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <StackPanel Margin="0,3,0,0"
+                                                        Orientation="Horizontal"
+                                                        Visibility="{Binding SectionVisibility}">
+                                                <TextBlock Foreground="#FF7F94A8"
+                                                           FontSize="9"
+                                                           FontWeight="SemiBold"
+                                                           Text="SECTION" />
+                                                <TextBlock Margin="7,0,0,0"
+                                                           Foreground="{StaticResource TreeMuted}"
+                                                           FontSize="9"
+                                                           Text="{Binding SectionSummary}" />
+                                            </StackPanel>
+                                            <TextBlock Margin="0,2,0,0"
+                                                       Foreground="{StaticResource TreeMuted}"
+                                                       FontSize="10"
+                                                       Text="{Binding WaitingForLabel}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Visibility="{Binding WaitingForVisibility}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="4"
+                                                    Margin="8,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    Opacity="0.62"
+                                                    Orientation="Horizontal">
+                                            <Button Width="24"
+                                                    Height="22"
+                                                    Padding="0"
+                                                    Style="{StaticResource TreeButtonStyle}"
+                                                    Content="&#x2191;"
+                                                    IsEnabled="{Binding CanMoveUp}"
+                                                    ToolTip="Move up"
+                                                    Click="MoveUpButton_OnClick" />
+                                            <Button Width="24"
+                                                    Height="22"
+                                                    Margin="3,0,0,0"
+                                                    Padding="0"
+                                                    Style="{StaticResource TreeButtonStyle}"
+                                                    Content="&#x2193;"
+                                                    IsEnabled="{Binding CanMoveDown}"
+                                                    ToolTip="Move down"
+                                                    Click="MoveDownButton_OnClick" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
@@ -417,11 +502,12 @@
                             BorderBrush="{StaticResource TreeBorder}"
                             BorderThickness="0,0,0,1">
                         <DockPanel>
-                            <TextBlock VerticalAlignment="Center"
+                            <TextBlock x:Name="DetailsHeading"
+                                       VerticalAlignment="Center"
                                        Foreground="{StaticResource TreeText}"
                                        FontSize="14"
                                        FontWeight="SemiBold"
-                                       Text="Details" />
+                                       Text="Edit item" />
                             <Border DockPanel.Dock="Right"
                                     Margin="8,10,0,10"
                                     Padding="7,2"
@@ -513,10 +599,33 @@
                                          Style="{StaticResource TreeTextBoxStyle}" />
                             </StackPanel>
 
+                            <TextBlock x:Name="DetailsNotesLabel"
+                                       Foreground="{StaticResource TreeMuted}"
+                                       FontSize="9"
+                                       FontWeight="SemiBold"
+                                       Text="NOTES / DESCRIPTION" />
+                            <TextBox x:Name="DetailsNotesInput"
+                                     Height="86"
+                                     Margin="0,6,0,4"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     Style="{StaticResource TreeTextBoxStyle}" />
+                            <TextBlock x:Name="DetailsNotesHint"
+                                       Margin="0,0,0,16"
+                                       Foreground="#FF727C86"
+                                       FontSize="9"
+                                       TextWrapping="Wrap" />
+
                             <TextBlock Foreground="{StaticResource TreeMuted}"
                                        FontSize="9"
                                        FontWeight="SemiBold"
                                        Text="ACTIONS" />
+                            <TextBlock x:Name="CreateTargetHint"
+                                       Margin="0,5,0,8"
+                                       Foreground="#FF7F94A8"
+                                       FontSize="10"
+                                       TextWrapping="Wrap" />
                             <WrapPanel Margin="0,6,0,0">
                                 <Button x:Name="AddSectionButton"
                                         Margin="0,0,6,6"
@@ -565,34 +674,32 @@
         </Grid>
 
         <Border Grid.Row="2"
-                Padding="16,10"
+                Padding="14,8"
                 Background="#FF0E1012"
                 BorderBrush="{StaticResource TreeBorder}"
                 BorderThickness="0,1,0,0">
             <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="28" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <DockPanel>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="160" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
                     <TextBlock Foreground="{StaticResource TreeText}"
                                FontSize="13"
                                FontWeight="SemiBold"
                                Text="Active now" />
-                    <TextBlock Margin="10,0,0,0"
-                               Foreground="{StaticResource TreeMuted}"
-                               FontSize="10"
-                               Text="Feeds the overlay" />
-                    <Border DockPanel.Dock="Right"
-                            Padding="6,2"
-                            Background="#FF303438"
-                            CornerRadius="4">
+                    <StackPanel Margin="0,5,0,0"
+                                Orientation="Horizontal">
+                        <TextBlock Foreground="{StaticResource TreeMuted}"
+                                   FontSize="9"
+                                   Text="Feeds Working" />
                         <TextBlock x:Name="ActiveNowCount"
-                                   Foreground="{StaticResource TreeText}"
-                                   FontSize="10" />
-                    </Border>
-                </DockPanel>
-                <ScrollViewer Grid.Row="1"
+                                   Margin="8,0,0,0"
+                                   Foreground="#FF7F94A8"
+                                   FontSize="9" />
+                    </StackPanel>
+                </StackPanel>
+                <ScrollViewer Grid.Column="1"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Disabled">
                     <ItemsControl x:Name="ActiveNowItems">
@@ -603,33 +710,34 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Width="220"
-                                        Margin="0,4,8,2"
-                                        Padding="12,9"
+                                <Border Width="200"
+                                        Height="62"
+                                        Margin="0,0,7,0"
+                                        Padding="10,7"
                                         Background="{StaticResource TreeSurface}"
                                         BorderBrush="{StaticResource TreeBorder}"
                                         BorderThickness="1"
                                         CornerRadius="6">
                                     <StackPanel>
                                         <TextBlock Foreground="{StaticResource TreeText}"
-                                                   FontSize="12"
+                                                   FontSize="11"
                                                    FontWeight="SemiBold"
                                                    Text="{Binding Title}"
                                                    TextTrimming="CharacterEllipsis" />
-                                        <StackPanel Margin="0,6,0,0"
+                                        <StackPanel Margin="0,4,0,0"
                                                     Orientation="Horizontal">
-                                            <Border Padding="6,2"
+                                            <Border Padding="5,1"
                                                     BorderBrush="{Binding StatusBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="4">
                                                 <TextBlock Foreground="{Binding StatusBrush}"
-                                                           FontSize="9"
+                                                           FontSize="8"
                                                            FontWeight="SemiBold"
                                                            Text="{Binding StatusLabel}" />
                                             </Border>
-                                            <TextBlock Margin="8,2,0,0"
+                                            <TextBlock Margin="7,1,0,0"
                                                        Foreground="{StaticResource TreeMuted}"
-                                                       FontSize="9"
+                                                       FontSize="8"
                                                        Text="{Binding ProjectName}" />
                                         </StackPanel>
                                     </StackPanel>

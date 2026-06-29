@@ -156,22 +156,19 @@ public partial class TreeManagerWindow : Window
         foreach (var node in rows)
         {
             var ancestors = _treeStateService.GetAncestors(node.Id);
-            var parent = node.ParentId.HasValue
-                ? _treeStateService.GetNode(node.ParentId.Value)
-                : null;
             var siblings = _treeStateService.GetChildren(node.ParentId);
             var siblingIndex = siblings.ToList().FindIndex(sibling => sibling.Id == node.Id);
             var task = node.Kind == TreeNodeKind.Task
                 ? _state.Tasks.FirstOrDefault(item => item.Id == node.Id)
                 : null;
+            var childCount = _treeStateService.GetChildren(node.Id).Count;
             var depth = _state.TreeManagerSettings.Filter == TreeManagerFilter.ActiveOnly
                 ? 0
                 : Math.Max(0, ancestors.Count - 1);
             _rows.Add(new TreeNodeRowViewModel(
                 node,
-                parent?.Kind,
                 depth,
-                _treeStateService.GetChildren(node.Id).Count > 0,
+                childCount,
                 _state.TreeManagerSettings.ExpandedNodeIds.Contains(node.Id),
                 task is not null && ReminderAttentionService.ShouldShowNotification(task, now),
                 siblingIndex > 0,
@@ -256,6 +253,7 @@ public partial class TreeManagerWindow : Window
         var hasSelection = _selectedNode is not null;
         DetailsTitleInput.IsEnabled = hasSelection;
         DetailsTitleInput.Text = _selectedNode?.Title ?? string.Empty;
+        DetailsHeading.Text = $"Edit {ResolveTypeLabel(_selectedNode)}";
         DetailsKindLabel.Text = ResolveKindLabel(_selectedNode);
         DetailsTypeValue.Text = ResolveTypeLabel(_selectedNode);
         TaskStatusPanel.Visibility = _selectedNode?.Kind == TreeNodeKind.Task
@@ -275,8 +273,17 @@ public partial class TreeManagerWindow : Window
             ? _state.Tasks.FirstOrDefault(task => task.Id == _selectedNode.Id)
             : null;
         WaitingForInput.Text = selectedTask?.WaitingFor ?? string.Empty;
+        DetailsNotesLabel.Text = selectedTask is null
+            ? "CONTEXT / NOTES"
+            : "NOTES / DESCRIPTION";
+        DetailsNotesInput.IsEnabled = selectedTask is not null;
+        DetailsNotesInput.Text = selectedTask?.Description ?? string.Empty;
+        DetailsNotesHint.Text = selectedTask is null
+            ? "Project and section notes are planned and are not stored in this version."
+            : "Saved with this task and available to Task Details.";
         _draftStatus = _selectedNode?.Status ?? TreeNodeStatus.Todo;
         UpdateStatusEditor();
+        UpdateCreationContext();
 
         DeleteButton.IsEnabled = hasSelection && !IsProtectedDefaultProject(_selectedNode);
     }
@@ -431,6 +438,7 @@ public partial class TreeManagerWindow : Window
         {
             _treeStateService.MarkStatus(_selectedNode.Id, _draftStatus);
             _treeStateService.SetWaitingFor(_selectedNode.Id, WaitingForInput.Text);
+            _treeStateService.SetDescription(_selectedNode.Id, DetailsNotesInput.Text);
         }
 
         SaveAndRefresh(_selectedNode.Id);
@@ -499,7 +507,10 @@ public partial class TreeManagerWindow : Window
     private void CreateSection()
     {
         var projectId = _state.TreeManagerSettings.SelectedProjectId;
-        if (!projectId.HasValue || !TryPrompt("New section", "Section title", out var title))
+        var project = projectId.HasValue ? _treeStateService.GetNode(projectId.Value) : null;
+        if (!projectId.HasValue ||
+            project is null ||
+            !TryPrompt("New section", $"Section title in {project.Title}", out var title))
         {
             return;
         }
@@ -514,9 +525,7 @@ public partial class TreeManagerWindow : Window
 
     private void NewTaskButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var parentId = _selectedNode?.Kind == TreeNodeKind.Group
-            ? _selectedNode.Id
-            : _state.TreeManagerSettings.SelectedProjectId;
+        var parentId = ResolveNewTaskParent();
         CreateTask(parentId, "New task", "Task title");
     }
 
@@ -538,7 +547,10 @@ public partial class TreeManagerWindow : Window
 
     private void CreateTask(Guid? parentId, string title, string prompt)
     {
-        if (!parentId.HasValue || !TryPrompt(title, prompt, out var taskTitle))
+        var parent = parentId.HasValue ? _treeStateService.GetNode(parentId.Value) : null;
+        if (!parentId.HasValue ||
+            parent is null ||
+            !TryPrompt(title, $"{prompt} in {parent.Title}", out var taskTitle))
         {
             return;
         }
@@ -555,6 +567,53 @@ public partial class TreeManagerWindow : Window
         }
 
         SaveAndRefresh(task.Id);
+    }
+
+    private Guid? ResolveNewTaskParent()
+    {
+        if (_selectedNode?.Kind is TreeNodeKind.Project or TreeNodeKind.Group)
+        {
+            return _selectedNode.Id;
+        }
+
+        if (_selectedNode?.Kind == TreeNodeKind.Task)
+        {
+            var structuralParent = _treeStateService.GetAncestors(_selectedNode.Id)
+                .LastOrDefault(node => node.Kind == TreeNodeKind.Group) ??
+                                   _treeStateService.GetProjectRoot(_selectedNode.Id);
+            return structuralParent?.Id;
+        }
+
+        return _state.TreeManagerSettings.SelectedProjectId;
+    }
+
+    private void UpdateCreationContext()
+    {
+        var selectedProjectId = _state.TreeManagerSettings.SelectedProjectId;
+        var project = selectedProjectId.HasValue
+            ? _treeStateService.GetNode(selectedProjectId.Value)
+            : null;
+        var taskParentId = ResolveNewTaskParent();
+        var taskParent = taskParentId.HasValue
+            ? _treeStateService.GetNode(taskParentId.Value)
+            : null;
+
+        NewSectionButton.IsEnabled = project is not null;
+        NewSectionButton.ToolTip = project is null
+            ? "Select a project first"
+            : $"Create a section in project {project.Title}";
+        NewTaskButton.IsEnabled = taskParent is not null;
+        NewTaskButton.ToolTip = taskParent is null
+            ? "Select a project or section first"
+            : $"Create a task in {ResolveTypeLabel(taskParent)} {taskParent.Title}";
+
+        CreateTargetHint.Text = _selectedNode?.Kind switch
+        {
+            TreeNodeKind.Project => $"New sections and tasks will be created in Project \"{_selectedNode.Title}\".",
+            TreeNodeKind.Group => $"New tasks will be created in Section \"{_selectedNode.Title}\".",
+            TreeNodeKind.Task => $"New subtasks will be created under Task \"{_selectedNode.Title}\".",
+            _ => "Select a project, section, or task to choose a creation target."
+        };
     }
 
     private bool TryPrompt(string title, string prompt, out string value) =>

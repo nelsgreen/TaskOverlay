@@ -375,6 +375,22 @@ public sealed class TreeStateService
         return true;
     }
 
+    public bool SetDescription(
+        Guid nodeId,
+        string? description,
+        DateTimeOffset? now = null)
+    {
+        var task = FindTask(nodeId);
+        if (task is null)
+        {
+            return false;
+        }
+
+        task.Description = description?.Trim() ?? string.Empty;
+        task.UpdatedAtUtc = now ?? DateTimeOffset.UtcNow;
+        return true;
+    }
+
     public TreeNode? GetNode(Guid nodeId)
     {
         var node = FindNode(nodeId);

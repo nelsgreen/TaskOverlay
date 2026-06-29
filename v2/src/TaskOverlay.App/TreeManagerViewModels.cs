@@ -32,9 +32,8 @@ internal sealed class TreeNodeRowViewModel
 
     public TreeNodeRowViewModel(
         TreeNode node,
-        TreeNodeKind? parentKind,
         int depth,
-        bool hasChildren,
+        int childCount,
         bool isExpanded,
         bool isReminder,
         bool canMoveUp,
@@ -42,9 +41,8 @@ internal sealed class TreeNodeRowViewModel
         string waitingFor)
     {
         Node = node;
-        ParentKind = parentKind;
         Depth = Math.Max(0, depth);
-        HasChildren = hasChildren;
+        ChildCount = Math.Max(0, childCount);
         IsExpanded = isExpanded;
         IsReminder = isReminder;
         CanMoveUp = canMoveUp;
@@ -53,19 +51,31 @@ internal sealed class TreeNodeRowViewModel
     }
 
     public TreeNode Node { get; }
-    public TreeNodeKind? ParentKind { get; }
     public Guid Id => Node.Id;
     public int Depth { get; }
-    public Thickness IndentMargin => new(Depth * 18, 0, 0, 0);
+    public double IndentWidth => Depth * 22;
+    public Visibility GuideVisibility => Depth > 0
+        ? Visibility.Visible
+        : Visibility.Collapsed;
     public string Title => Node.Title;
-    public bool HasChildren { get; }
+    public int ChildCount { get; }
+    public bool HasChildren => ChildCount > 0;
     public bool IsExpanded { get; }
-    public string ExpandGlyph => IsExpanded ? "−" : "+";
+    public string ExpandGlyph => IsExpanded ? "\u25BE" : "\u25B8";
     public Visibility ExpandVisibility => HasChildren
         ? Visibility.Visible
         : Visibility.Hidden;
     public bool IsTask => Node.Kind == TreeNodeKind.Task;
     public bool IsSection => Node.Kind == TreeNodeKind.Group;
+    public Visibility TaskVisibility => IsTask
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+    public Visibility SectionVisibility => IsSection
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+    public string SectionSummary => ChildCount == 1
+        ? "1 item"
+        : $"{ChildCount} items";
     public bool IsDone => Node.Status == TreeNodeStatus.Done;
     public bool IsReminder { get; }
     public bool CanMoveUp { get; }
@@ -78,13 +88,6 @@ internal sealed class TreeNodeRowViewModel
     public Visibility WaitingForVisibility => string.IsNullOrEmpty(WaitingForLabel)
         ? Visibility.Collapsed
         : Visibility.Visible;
-    public string KindLabel => Node.Kind switch
-    {
-        TreeNodeKind.Group => "SECTION",
-        TreeNodeKind.Task when ParentKind == TreeNodeKind.Task => "SUBTASK",
-        TreeNodeKind.Task => "TASK",
-        _ => "PROJECT"
-    };
     public string StatusLabel => IsReminder
         ? "REMIND"
         : Node.Status switch

@@ -903,6 +903,12 @@ internal static class Program
         Assert(!state.Tasks.Single().InWork, "WAIT should leave FOCUS state.");
         Assert(service.SetWaitingFor(task.Id, "  Vendor reply  ", timestamp), "WAIT context should update.");
         Assert(state.Tasks.Single().WaitingFor == "Vendor reply", "WAIT context should be trimmed and retained.");
+        Assert(
+            service.SetDescription(task.Id, "  Delivery details  ", timestamp),
+            "Task description should update through the tree service.");
+        Assert(
+            state.Tasks.Single().Description == "Delivery details",
+            "Task description should be trimmed and retained.");
         Assert(service.GetNode(task.Id)?.Status == TreeNodeStatus.Wait, "Normalized task should report WAIT.");
         Assert(service.MarkStatus(task.Id, TreeNodeStatus.Focus, timestamp), "Task should return to FOCUS.");
         Assert(state.Tasks.Single().Status == TaskStatus.InWork, "FOCUS should use the existing InWork status.");
@@ -914,6 +920,7 @@ internal static class Program
         Assert(service.MarkStatus(task.Id, TreeNodeStatus.Todo), "Task should return to todo.");
         Assert(!state.Tasks.Single().Completed, "Todo should clear flat Completed state.");
         Assert(!service.MarkStatus(group.Id, TreeNodeStatus.Done), "Group status change should be rejected.");
+        Assert(!service.SetDescription(group.Id, "Unsupported"), "Group notes should remain unsupported.");
     }
 
     private static void TreeNavigation()
