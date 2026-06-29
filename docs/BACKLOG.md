@@ -62,6 +62,12 @@ product area so implementation work can be split into bounded changes.
   - Section.
   - Task.
   - Subtask.
+- Tree Manager project views:
+  - Keep the current tree view as the primary structured task view.
+  - Add a future Workstreams tab inside the same Tree Manager window as an alternate project view.
+  - The Workstreams tab should not replace the tree; it should visualize the same project tasks through parallel streams and relationships.
+  - Tree view answers "where is this task in the hierarchy?".
+  - Workstreams view answers "which streams are running, how are tasks related, and what blocks what?".
 - Workstreams:
   - Use Workstream for parallel streams of work inside a project.
   - A Workstream can contain sections and nested tasks.
@@ -69,6 +75,13 @@ product area so implementation work can be split into bounded changes.
   - Tasks may need cross-links across workstreams; support many-to-many relationships later.
   - Cross-links should express dependencies, blockers, related tasks, duplicates, or "see also" relations without forcing a strict parent-child tree.
   - Keep the main hierarchy simple for MVP, but plan the data model so node links can be added later.
+- Workstreams view visual ideas:
+  - Start with columns or swimlanes per workstream, with compact task cards inside each stream.
+  - Show cross-stream dependencies with optional connector lines/arrows when the user enables relationship view.
+  - Consider sticky-note style cards for lightweight planning, but avoid a full Kanban workflow unless explicitly scoped later.
+  - Support relationship badges on cards even when connector lines are hidden, for example Blocks, Blocked by, Related, Duplicate, See also.
+  - Allow selecting a card to open the same right-side details panel as the tree view.
+  - Keep many-to-many relationships as a separate links layer over the same task nodes, not as duplicate tasks.
 - Section remains useful as a folder/subdivision inside a workstream or project.
 - Gantt-like future planning view.
 - Active + ancestors display mode.
