@@ -32,6 +32,13 @@ product area so implementation work can be split into bounded changes.
 - Short important notes module.
 - Quick access from handle or expanded panel.
 - Notes should not be mixed with tasks.
+- Workflow/context notes:
+  - Provide a place to write important project or section context that is not a task.
+  - Support notes for Project and Section first; Task/Subtask notes can remain later or reuse existing description fields.
+  - Use this for workflow nuances, decisions, links, constraints, or things the user tends to forget.
+  - Surface these notes in Tree Manager details so each project/section has an obvious "where do I write this?" place.
+  - Do not show workflow notes in the small active overlay by default.
+  - Candidate UI labels: Context notes, Workflow notes, Section notes.
 
 ## 4. Task Interactions
 
@@ -49,12 +56,12 @@ product area so implementation work can be split into bounded changes.
 
 - Tree as master structure.
 - Overlay as active subset.
-- Epics and hierarchy:
+- Hierarchy:
   - Project.
-  - Epic.
-  - Group / Workstream.
+  - Section.
   - Task.
   - Subtask.
+- Use Section in UI; do not use Group or Workstream in user-facing labels.
 - Gantt-like future planning view.
 - Active + ancestors display mode.
 - Do not render the full backlog inside the small overlay.
