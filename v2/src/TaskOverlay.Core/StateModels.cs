@@ -116,6 +116,7 @@ public sealed class TaskItem
     public DateTimeOffset? ReminderSnoozedUntilUtc { get; set; }
     public string WaitingFor { get; set; } = string.Empty;
     public bool ReminderActive { get; set; }
+    public bool PinToPanel { get; set; }
     public Guid? ProjectId { get; set; }
     public Guid? GroupId { get; set; }
     public Guid? ParentTaskId { get; set; }
@@ -323,5 +324,7 @@ public sealed class TreeManagerSettings
     public Guid? SelectedNodeId { get; set; }
     public List<Guid> ExpandedNodeIds { get; set; } = new();
     public TreeManagerFilter Filter { get; set; } = TreeManagerFilter.All;
+    public TreeManagerView ActiveView { get; set; } = TreeManagerView.Tree;
+    public TreeManagerStatusFilter StatusFilter { get; set; } = TreeManagerStatusFilter.All;
     public bool ExpansionInitialized { get; set; }
 }

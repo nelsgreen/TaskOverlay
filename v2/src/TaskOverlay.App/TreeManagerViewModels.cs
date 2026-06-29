@@ -29,6 +29,8 @@ internal sealed class TreeNodeRowViewModel
     private static readonly Brush WaitBrush = CreateBrush("#FF51B5DB");
     private static readonly Brush RemindBrush = CreateBrush("#FFF1B94E");
     private static readonly Brush DoneBrush = CreateBrush("#FF737B87");
+    private static readonly Brush PinnedBrush = CreateBrush("#FFA79AF4");
+    private static readonly Brush UnpinnedBrush = CreateBrush("#FF69727C");
 
     public TreeNodeRowViewModel(
         TreeNode node,
@@ -38,7 +40,8 @@ internal sealed class TreeNodeRowViewModel
         bool isReminder,
         bool canMoveUp,
         bool canMoveDown,
-        string waitingFor)
+        string waitingFor,
+        bool isPinnedToPanel)
     {
         Node = node;
         Depth = Math.Max(0, depth);
@@ -48,6 +51,7 @@ internal sealed class TreeNodeRowViewModel
         CanMoveUp = canMoveUp;
         CanMoveDown = canMoveDown;
         WaitingFor = waitingFor;
+        IsPinnedToPanel = isPinnedToPanel;
     }
 
     public TreeNode Node { get; }
@@ -81,6 +85,12 @@ internal sealed class TreeNodeRowViewModel
     public bool CanMoveUp { get; }
     public bool CanMoveDown { get; }
     public string WaitingFor { get; }
+    public bool IsPinnedToPanel { get; }
+    public string PinToolTip => IsPinnedToPanel ? "Remove from panel" : "Pin to panel";
+    public Brush PinBrush => IsPinnedToPanel ? PinnedBrush : UnpinnedBrush;
+    public Visibility PanelBadgeVisibility => IsPinnedToPanel
+        ? Visibility.Visible
+        : Visibility.Collapsed;
     public string WaitingForLabel => Node.Status == TreeNodeStatus.Wait &&
                                      !string.IsNullOrWhiteSpace(WaitingFor)
         ? $"Waiting for {WaitingFor}"
@@ -114,6 +124,80 @@ internal sealed class TreeNodeRowViewModel
         return brush;
     }
 }
+
+internal sealed class TreeStatusRowViewModel
+{
+    private static readonly Brush TodoBrush = CreateBrush("#FF9AA4B2");
+    private static readonly Brush FocusBrush = CreateBrush("#FF45D58A");
+    private static readonly Brush WaitBrush = CreateBrush("#FF51B5DB");
+    private static readonly Brush RemindBrush = CreateBrush("#FFF1B94E");
+    private static readonly Brush DoneBrush = CreateBrush("#FF737B87");
+    private static readonly Brush PinnedBrush = CreateBrush("#FFA79AF4");
+    private static readonly Brush UnpinnedBrush = CreateBrush("#FF69727C");
+
+    public TreeStatusRowViewModel(
+        TaskItem task,
+        string contextPath,
+        bool isReminder,
+        string reminderLabel)
+    {
+        Task = task;
+        ContextPath = contextPath;
+        IsReminder = isReminder;
+        ReminderLabel = reminderLabel;
+    }
+
+    public TaskItem Task { get; }
+    public Guid Id => Task.Id;
+    public string Title => Task.Title;
+    public string ContextPath { get; }
+    public bool IsReminder { get; }
+    public bool IsDone => Task.Status == TaskStatus.Done;
+    public bool IsPinnedToPanel => Task.PinToPanel;
+    public string PinToolTip => IsPinnedToPanel ? "Remove from panel" : "Pin to panel";
+    public Brush PinBrush => IsPinnedToPanel ? PinnedBrush : UnpinnedBrush;
+    public Visibility PanelBadgeVisibility => IsPinnedToPanel
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+    public string StatusLabel => IsReminder
+        ? "REMIND"
+        : Task.Status switch
+        {
+            TaskStatus.InWork => "FOCUS",
+            TaskStatus.Waiting => "WAIT",
+            TaskStatus.Done => "DONE",
+            _ => "TODO"
+        };
+    public Brush StatusBrush => IsReminder
+        ? RemindBrush
+        : Task.Status switch
+        {
+            TaskStatus.InWork => FocusBrush,
+            TaskStatus.Waiting => WaitBrush,
+            TaskStatus.Done => DoneBrush,
+            _ => TodoBrush
+        };
+    public string WaitingForLabel => Task.Status == TaskStatus.Waiting &&
+                                     !string.IsNullOrWhiteSpace(Task.WaitingFor)
+        ? $"Waiting for: {Task.WaitingFor}"
+        : string.Empty;
+    public string ReminderLabel { get; }
+    public Visibility WaitingForVisibility => string.IsNullOrEmpty(WaitingForLabel)
+        ? Visibility.Collapsed
+        : Visibility.Visible;
+    public Visibility ReminderVisibility => string.IsNullOrEmpty(ReminderLabel)
+        ? Visibility.Collapsed
+        : Visibility.Visible;
+
+    private static Brush CreateBrush(string color)
+    {
+        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+        brush.Freeze();
+        return brush;
+    }
+}
+
+internal sealed record TreeLocationOption(Guid? Id, string Label);
 
 internal sealed class TreeActiveTaskViewModel
 {

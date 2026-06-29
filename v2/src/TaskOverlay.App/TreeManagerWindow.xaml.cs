@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using TaskOverlay.Core;
 
@@ -27,10 +28,12 @@ public partial class TreeManagerWindow : Window
     private readonly TreeStateService _treeStateService;
     private readonly ObservableCollection<TreeProjectViewModel> _projects = new();
     private readonly ObservableCollection<TreeNodeRowViewModel> _rows = new();
+    private readonly ObservableCollection<TreeStatusRowViewModel> _statusRows = new();
     private readonly ObservableCollection<TreeActiveTaskViewModel> _activeTasks = new();
     private TreeNode? _selectedNode;
     private TreeNodeStatus _draftStatus;
     private bool _suppressSelectionEvents;
+    private bool _suppressLocationEvents;
 
     public TreeManagerWindow(
         AppState state,
@@ -45,6 +48,7 @@ public partial class TreeManagerWindow : Window
         InitializeComponent();
         ProjectList.ItemsSource = _projects;
         TreeRows.ItemsSource = _rows;
+        StatusRows.ItemsSource = _statusRows;
         ActiveNowItems.ItemsSource = _activeTasks;
         Refresh();
     }
@@ -59,9 +63,12 @@ public partial class TreeManagerWindow : Window
         {
             RefreshProjects();
             RefreshTreeRows();
+            RefreshStatusRows();
             RefreshActiveNow();
             LoadSelectedNode();
             UpdateFilterButtons();
+            UpdateStatusFilterButtons();
+            UpdateActiveView();
         }
         finally
         {
@@ -124,7 +131,8 @@ public partial class TreeManagerWindow : Window
         TreePathLabel.Text = selectedProject is null
             ? "No project selected"
             : $"{selectedProject.Name}  /  task tree";
-        ProjectSummary.Text = $"{_projects.Count} projects · {activeTasks.Count} active";
+        var panelCount = _state.Tasks.Count(task => task.PinToPanel);
+        ProjectSummary.Text = $"{_projects.Count} projects · {activeTasks.Count} active · {panelCount} panel";
     }
 
     private void RefreshTreeRows()
@@ -173,12 +181,63 @@ public partial class TreeManagerWindow : Window
                 task is not null && ReminderAttentionService.ShouldShowNotification(task, now),
                 siblingIndex > 0,
                 siblingIndex >= 0 && siblingIndex < siblings.Count - 1,
-                task?.WaitingFor ?? string.Empty));
+                task?.WaitingFor ?? string.Empty,
+                task?.PinToPanel ?? false));
         }
 
         TreeRows.SelectedItem = _rows.FirstOrDefault(row =>
             row.Id == _state.TreeManagerSettings.SelectedNodeId);
         TreeEmptyState.Visibility = _rows.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void RefreshStatusRows()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var filtered = TreeManagerTaskFilter.Select(
+                _state.Tasks,
+                _state.TreeManagerSettings.StatusFilter,
+                now)
+            .OrderByDescending(task => ReminderAttentionService.ShouldShowNotification(task, now))
+            .ThenByDescending(task => task.PinToPanel)
+            .ThenBy(task => task.Status == TaskStatus.Done)
+            .ThenByDescending(task => task.Status == TaskStatus.InWork)
+            .ThenBy(task => task.SortOrder)
+            .ThenBy(task => task.CreatedAtUtc)
+            .ToList();
+        var query = SearchBox.Text.Trim();
+
+        _statusRows.Clear();
+        foreach (var task in filtered)
+        {
+            var contextPath = string.Join(
+                " / ",
+                _treeStateService.GetAncestors(task.Id).Select(node => node.Title));
+            if (query.Length > 0 &&
+                !task.Title.Contains(query, StringComparison.OrdinalIgnoreCase) &&
+                !contextPath.Contains(query, StringComparison.OrdinalIgnoreCase) &&
+                !task.WaitingFor.Contains(query, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var isReminder = ReminderAttentionService.ShouldShowNotification(task, now);
+            var reminderLabel = isReminder
+                ? "Reminder requires attention"
+                : task.RemindAtUtc is DateTimeOffset remindAt
+                    ? $"Reminder {remindAt.ToLocalTime():g}"
+                    : string.Empty;
+            _statusRows.Add(new TreeStatusRowViewModel(
+                task,
+                contextPath,
+                isReminder,
+                reminderLabel));
+        }
+
+        StatusRows.SelectedItem = _statusRows.FirstOrDefault(row =>
+            row.Id == _state.TreeManagerSettings.SelectedNodeId);
+        StatusEmptyState.Visibility = _statusRows.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
     }
@@ -273,6 +332,17 @@ public partial class TreeManagerWindow : Window
             ? _state.Tasks.FirstOrDefault(task => task.Id == _selectedNode.Id)
             : null;
         WaitingForInput.Text = selectedTask?.WaitingFor ?? string.Empty;
+        DetailsPinPanel.Visibility = selectedTask is not null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        DetailsPinToggle.IsChecked = selectedTask?.PinToPanel ?? false;
+        DetailsPinToggle.ToolTip = selectedTask?.PinToPanel == true
+            ? "Remove from panel"
+            : "Pin to panel";
+        LocationPanel.Visibility = selectedTask is not null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        LoadLocationEditor(selectedTask);
         DetailsNotesLabel.Text = selectedTask is null
             ? "CONTEXT / NOTES"
             : "NOTES / DESCRIPTION";
@@ -300,6 +370,140 @@ public partial class TreeManagerWindow : Window
         SetStatusButtonState(DoneStatusButton, TreeNodeStatus.Done, DoneBrush);
     }
 
+    private void LoadLocationEditor(TaskItem? task)
+    {
+        _suppressLocationEvents = true;
+        try
+        {
+            if (task is null)
+            {
+                ProjectLocationCombo.ItemsSource = null;
+                SectionLocationCombo.ItemsSource = null;
+                ParentLocationCombo.ItemsSource = null;
+                return;
+            }
+
+            var project = ProjectReferenceResolver.ResolveProject(_state, task);
+            var projectOptions = OrderedProjects()
+                .Select(item => new TreeLocationOption(item.Id, item.Name))
+                .ToList();
+            ProjectLocationCombo.ItemsSource = projectOptions;
+            ProjectLocationCombo.SelectedItem = projectOptions.FirstOrDefault(option =>
+                option.Id == project?.Id);
+            RefreshSectionLocationOptions(project?.Id, task.GroupId);
+            RefreshParentLocationOptions(project?.Id, task.GroupId, task.ParentTaskId, task.Id);
+        }
+        finally
+        {
+            _suppressLocationEvents = false;
+        }
+    }
+
+    private void RefreshSectionLocationOptions(Guid? projectId, Guid? selectedSectionId)
+    {
+        var options = new List<TreeLocationOption>
+        {
+            new(null, "Project root")
+        };
+        if (projectId.HasValue)
+        {
+            options.AddRange(_state.Groups
+                .Where(group => group.ProjectId == projectId.Value)
+                .OrderBy(group => group.SortOrder)
+                .ThenBy(group => group.CreatedAtUtc)
+                .Select(group => new TreeLocationOption(group.Id, group.Name)));
+        }
+
+        SectionLocationCombo.ItemsSource = options;
+        SectionLocationCombo.SelectedItem = options.FirstOrDefault(option =>
+            option.Id == selectedSectionId) ?? options[0];
+    }
+
+    private void RefreshParentLocationOptions(
+        Guid? projectId,
+        Guid? sectionId,
+        Guid? selectedParentId,
+        Guid currentTaskId)
+    {
+        var excludedIds = _treeStateService.GetDescendants(currentTaskId)
+            .Select(node => node.Id)
+            .Append(currentTaskId)
+            .ToHashSet();
+        var options = new List<TreeLocationOption>
+        {
+            new(null, "No task parent")
+        };
+        if (projectId.HasValue)
+        {
+            options.AddRange(_state.Tasks
+                .Where(task => task.ProjectId == projectId.Value &&
+                               task.GroupId == sectionId &&
+                               !excludedIds.Contains(task.Id))
+                .OrderBy(task => task.SortOrder)
+                .ThenBy(task => task.CreatedAtUtc)
+                .Select(task => new TreeLocationOption(task.Id, task.Title)));
+        }
+
+        ParentLocationCombo.ItemsSource = options;
+        ParentLocationCombo.SelectedItem = options.FirstOrDefault(option =>
+            option.Id == selectedParentId) ?? options[0];
+    }
+
+    private void ProjectLocationCombo_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressLocationEvents || _selectedNode?.Kind != TreeNodeKind.Task)
+        {
+            return;
+        }
+
+        var projectId = (ProjectLocationCombo.SelectedItem as TreeLocationOption)?.Id;
+        _suppressLocationEvents = true;
+        try
+        {
+            RefreshSectionLocationOptions(projectId, selectedSectionId: null);
+            RefreshParentLocationOptions(
+                projectId,
+                sectionId: null,
+                selectedParentId: null,
+                _selectedNode.Id);
+        }
+        finally
+        {
+            _suppressLocationEvents = false;
+        }
+    }
+
+    private void SectionLocationCombo_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressLocationEvents || _selectedNode?.Kind != TreeNodeKind.Task)
+        {
+            return;
+        }
+
+        var projectId = (ProjectLocationCombo.SelectedItem as TreeLocationOption)?.Id;
+        var sectionId = (SectionLocationCombo.SelectedItem as TreeLocationOption)?.Id;
+        _suppressLocationEvents = true;
+        try
+        {
+            RefreshParentLocationOptions(
+                projectId,
+                sectionId,
+                selectedParentId: null,
+                _selectedNode.Id);
+        }
+        finally
+        {
+            _suppressLocationEvents = false;
+        }
+    }
+
+    private Guid? ResolveLocationParentId()
+    {
+        return (ParentLocationCombo.SelectedItem as TreeLocationOption)?.Id ??
+               (SectionLocationCombo.SelectedItem as TreeLocationOption)?.Id ??
+               (ProjectLocationCombo.SelectedItem as TreeLocationOption)?.Id;
+    }
+
     private void SetStatusButtonState(Button button, TreeNodeStatus status, Brush accent)
     {
         var selected = _draftStatus == status;
@@ -316,6 +520,46 @@ public partial class TreeManagerWindow : Window
         SetFilterButtonState(AllFilterButton, TreeManagerFilter.All);
         SetFilterButtonState(ActiveOnlyFilterButton, TreeManagerFilter.ActiveOnly);
         SetFilterButtonState(ActiveAncestorsFilterButton, TreeManagerFilter.ActivePlusAncestors);
+    }
+
+    private void UpdateStatusFilterButtons()
+    {
+        SetStatusFilterButtonState(StatusAllFilterButton, TreeManagerStatusFilter.All);
+        SetStatusFilterButtonState(StatusPanelFilterButton, TreeManagerStatusFilter.Panel);
+        SetStatusFilterButtonState(StatusFocusFilterButton, TreeManagerStatusFilter.Focus);
+        SetStatusFilterButtonState(StatusWaitFilterButton, TreeManagerStatusFilter.Wait);
+        SetStatusFilterButtonState(StatusRemindFilterButton, TreeManagerStatusFilter.Remind);
+        SetStatusFilterButtonState(StatusTodoFilterButton, TreeManagerStatusFilter.Todo);
+        SetStatusFilterButtonState(StatusDoneFilterButton, TreeManagerStatusFilter.Done);
+    }
+
+    private void SetStatusFilterButtonState(Button button, TreeManagerStatusFilter filter)
+    {
+        var selected = _state.TreeManagerSettings.StatusFilter == filter;
+        button.Background = selected ? ActiveFilterBackground : InactiveFilterBackground;
+        button.Foreground = selected ? ActiveFilterForeground : InactiveFilterForeground;
+        button.BorderBrush = selected
+            ? (Brush)FindResource("TreeBorder")
+            : Brushes.Transparent;
+    }
+
+    private void UpdateActiveView()
+    {
+        var treeActive = _state.TreeManagerSettings.ActiveView == TreeManagerView.Tree;
+        TreeFilterBar.Visibility = treeActive ? Visibility.Visible : Visibility.Collapsed;
+        TreeContent.Visibility = treeActive ? Visibility.Visible : Visibility.Collapsed;
+        StatusFilterBar.Visibility = treeActive ? Visibility.Collapsed : Visibility.Visible;
+        StatusContent.Visibility = treeActive ? Visibility.Collapsed : Visibility.Visible;
+        SetTabButtonState(TreeTabButton, treeActive);
+        SetTabButtonState(StatusTabButton, !treeActive);
+    }
+
+    private void SetTabButtonState(Button button, bool selected)
+    {
+        button.Foreground = selected ? ActiveFilterForeground : InactiveFilterForeground;
+        button.BorderBrush = selected
+            ? (Brush)FindResource("TreeFocus")
+            : Brushes.Transparent;
     }
 
     private void SetFilterButtonState(Button button, TreeManagerFilter filter)
@@ -354,6 +598,48 @@ public partial class TreeManagerWindow : Window
         LoadSelectedNode();
     }
 
+    private void StatusRows_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionEvents || StatusRows.SelectedItem is not TreeStatusRowViewModel row)
+        {
+            return;
+        }
+
+        _state.TreeManagerSettings.SelectedNodeId = row.Id;
+        var project = _treeStateService.GetProjectRoot(row.Id);
+        if (project is not null)
+        {
+            _state.TreeManagerSettings.SelectedProjectId = project.Id;
+            _suppressSelectionEvents = true;
+            try
+            {
+                ProjectList.SelectedItem = _projects.FirstOrDefault(item => item.Id == project.Id);
+                SelectedProjectLabel.Text = project.Title;
+                TreePathLabel.Text = $"{project.Title}  /  task tree";
+            }
+            finally
+            {
+                _suppressSelectionEvents = false;
+            }
+        }
+
+        PersistUiState();
+        LoadSelectedNode();
+    }
+
+    private void ViewTabButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string viewName } ||
+            !Enum.TryParse<TreeManagerView>(viewName, out var view))
+        {
+            return;
+        }
+
+        _state.TreeManagerSettings.ActiveView = view;
+        PersistUiState();
+        Refresh();
+    }
+
     private void FilterButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string filterName } ||
@@ -367,12 +653,73 @@ public partial class TreeManagerWindow : Window
         Refresh();
     }
 
+    private void StatusFilterButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string filterName } ||
+            !Enum.TryParse<TreeManagerStatusFilter>(filterName, out var filter))
+        {
+            return;
+        }
+
+        _state.TreeManagerSettings.StatusFilter = filter;
+        PersistUiState();
+        RefreshStatusRows();
+        UpdateStatusFilterButtons();
+    }
+
     private void SearchBox_OnTextChanged(object sender, TextChangedEventArgs e)
     {
         if (IsInitialized)
         {
             RefreshTreeRows();
+            RefreshStatusRows();
         }
+    }
+
+    private void PinButton_OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        Guid? taskId = (sender as FrameworkElement)?.DataContext switch
+        {
+            TreeNodeRowViewModel { IsTask: true } treeRow => treeRow.Id,
+            TreeStatusRowViewModel statusRow => statusRow.Id,
+            _ => null
+        };
+
+        e.Handled = true;
+        if (taskId.HasValue)
+        {
+            Dispatcher.BeginInvoke(new Action(() => TogglePinToPanel(taskId.Value)));
+        }
+    }
+
+    private void DetailsPinToggle_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedNode?.Kind == TreeNodeKind.Task)
+        {
+            SetPinToPanel(_selectedNode.Id, DetailsPinToggle.IsChecked == true);
+        }
+
+        e.Handled = true;
+    }
+
+    private void TogglePinToPanel(Guid taskId)
+    {
+        var task = _state.Tasks.FirstOrDefault(item => item.Id == taskId);
+        if (task is not null)
+        {
+            SetPinToPanel(taskId, !task.PinToPanel);
+        }
+    }
+
+    private void SetPinToPanel(Guid taskId, bool pinToPanel)
+    {
+        if (!_treeStateService.SetPinToPanel(taskId, pinToPanel))
+        {
+            return;
+        }
+
+        _saveState();
+        Refresh();
     }
 
     private void ExpandButton_OnClick(object sender, RoutedEventArgs e)
@@ -428,8 +775,23 @@ public partial class TreeManagerWindow : Window
 
     private void SaveButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_selectedNode is null ||
-            !_treeStateService.RenameNode(_selectedNode.Id, DetailsTitleInput.Text))
+        if (_selectedNode is null || string.IsNullOrWhiteSpace(DetailsTitleInput.Text))
+        {
+            return;
+        }
+
+        if (_selectedNode.Kind == TreeNodeKind.Task)
+        {
+            var locationParentId = ResolveLocationParentId();
+            if (!locationParentId.HasValue ||
+                _selectedNode.ParentId != locationParentId &&
+                !_treeStateService.MoveNode(_selectedNode.Id, locationParentId.Value))
+            {
+                return;
+            }
+        }
+
+        if (!_treeStateService.RenameNode(_selectedNode.Id, DetailsTitleInput.Text))
         {
             return;
         }

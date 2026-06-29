@@ -30,6 +30,18 @@ public static class TreeManagerStatePolicy
             changed = true;
         }
 
+        if (!Enum.IsDefined(settings.ActiveView))
+        {
+            settings.ActiveView = TreeManagerView.Tree;
+            changed = true;
+        }
+
+        if (!Enum.IsDefined(settings.StatusFilter))
+        {
+            settings.StatusFilter = TreeManagerStatusFilter.All;
+            changed = true;
+        }
+
         var projectIds = state.Projects.Select(project => project.Id).ToHashSet();
         var groupIds = state.Groups.Select(group => group.Id).ToHashSet();
         var taskIds = state.Tasks.Select(task => task.Id).ToHashSet();

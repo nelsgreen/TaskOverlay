@@ -44,6 +44,8 @@ internal static class Program
             ("tree projections", TreeProjections),
             ("tree manager state persistence", TreeManagerStatePersistence),
             ("tree manager state repair", TreeManagerStateRepair),
+            ("tree manager panel pin isolation", TreeManagerPanelPinIsolation),
+            ("tree manager status filters", TreeManagerStatusFilters),
             ("tree legacy flat state compatibility", TreeLegacyFlatStateCompatibility),
             ("daily MVP project seeding", DailyMvpProjectSeeding),
             ("old attention state compatibility", OldAttentionStateCompatibility),
@@ -1030,6 +1032,7 @@ internal static class Program
             var subtask = service.CreateTask(task.Id, "Subtask")!;
             service.MarkStatus(task.Id, TreeNodeStatus.Wait);
             service.SetWaitingFor(task.Id, "Client response");
+            service.SetPinToPanel(task.Id, true);
             state.TreeManagerSettings.SelectedProjectId = project.Id;
             state.TreeManagerSettings.SelectedNodeId = subtask.Id;
             state.TreeManagerSettings.ExpandedNodeIds = new System.Collections.Generic.List<Guid>
@@ -1039,6 +1042,8 @@ internal static class Program
                 task.Id
             };
             state.TreeManagerSettings.Filter = TreeManagerFilter.ActivePlusAncestors;
+            state.TreeManagerSettings.ActiveView = TreeManagerView.Status;
+            state.TreeManagerSettings.StatusFilter = TreeManagerStatusFilter.Panel;
             state.TreeManagerSettings.ExpansionInitialized = true;
 
             var store = new AppStateStore(directory);
@@ -1055,9 +1060,14 @@ internal static class Program
             Assert(
                 loaded.TreeManagerSettings.Filter == TreeManagerFilter.ActivePlusAncestors,
                 "Tree filter should restore.");
+            Assert(loaded.TreeManagerSettings.ActiveView == TreeManagerView.Status, "Active view should restore.");
+            Assert(
+                loaded.TreeManagerSettings.StatusFilter == TreeManagerStatusFilter.Panel,
+                "Status filter should restore.");
             Assert(loaded.TreeManagerSettings.ExpansionInitialized, "Expansion initialization should persist.");
             Assert(loadedTask.Status == TaskStatus.Waiting, "WAIT status should survive save/load.");
             Assert(loadedTask.WaitingFor == "Client response", "waitingFor should survive save/load.");
+            Assert(loadedTask.PinToPanel, "PinToPanel should survive save/load.");
         });
     }
 
@@ -1074,6 +1084,8 @@ internal static class Program
             project.Id
         };
         state.TreeManagerSettings.Filter = (TreeManagerFilter)999;
+        state.TreeManagerSettings.ActiveView = (TreeManagerView)999;
+        state.TreeManagerSettings.StatusFilter = (TreeManagerStatusFilter)999;
 
         Assert(TreeManagerStatePolicy.Normalize(state), "Invalid Tree Manager state should be repaired.");
         Assert(state.TreeManagerSettings.SelectedProjectId == project.Id, "Missing project should fall back safely.");
@@ -1082,7 +1094,79 @@ internal static class Program
             state.TreeManagerSettings.ExpandedNodeIds.SequenceEqual(new[] { project.Id }),
             "Unknown and duplicate expanded IDs should be removed.");
         Assert(state.TreeManagerSettings.Filter == TreeManagerFilter.All, "Invalid filter should fall back to All.");
+        Assert(state.TreeManagerSettings.ActiveView == TreeManagerView.Tree, "Invalid view should fall back to Tree.");
+        Assert(
+            state.TreeManagerSettings.StatusFilter == TreeManagerStatusFilter.All,
+            "Invalid status filter should fall back to All.");
         Assert(!TreeManagerStatePolicy.Normalize(state), "Normalized Tree Manager state should be idempotent.");
+    }
+
+    private static void TreeManagerPanelPinIsolation()
+    {
+        var state = CreateEmptyTreeState();
+        var service = new TreeStateService(state);
+        var project = state.Projects.Single();
+        var todo = service.CreateTask(project.Id, "Pinned TODO")!;
+        var focus = service.CreateTask(project.Id, "FOCUS")!;
+        service.MarkStatus(focus.Id, TreeNodeStatus.Focus);
+
+        Assert(service.SetPinToPanel(todo.Id, true), "Task should pin to panel.");
+        Assert(state.Tasks.Single(task => task.Id == todo.Id).PinToPanel, "Pin state should update immediately.");
+        Assert(!service.SetPinToPanel(project.Id, true), "Only tasks can pin to panel.");
+
+        var working = OverlayTaskFilter.SelectForMode(
+                state.Tasks,
+                OverlayMode.Working,
+                DateTimeOffset.Parse("2026-06-29T10:00:00Z"))
+            .Select(task => task.Id)
+            .ToList();
+        Assert(!working.Contains(todo.Id), "Pinned TODO must not enter Working.");
+        Assert(working.Contains(focus.Id), "FOCUS should continue to enter Working.");
+
+        Assert(service.SetPinToPanel(todo.Id, false), "Task should unpin from panel.");
+        Assert(!state.Tasks.Single(task => task.Id == todo.Id).PinToPanel, "Unpin should persist in state.");
+    }
+
+    private static void TreeManagerStatusFilters()
+    {
+        var now = DateTimeOffset.Parse("2026-06-29T10:00:00Z");
+        var todo = TaskItem.Create("Todo", now);
+        todo.PinToPanel = true;
+        var focus = TaskItem.Create("Focus", now);
+        focus.Status = TaskStatus.InWork;
+        focus.InWork = true;
+        var wait = TaskItem.Create("Wait", now);
+        wait.Status = TaskStatus.Waiting;
+        wait.WaitingFor = "Reply";
+        var remind = TaskItem.Create("Remind", now);
+        ReminderService.SetSchedule(remind, now.AddMinutes(-1), null, now.AddMinutes(-5));
+        ReminderService.ProcessDueReminders(new[] { remind }, now);
+        var done = TaskItem.Create("Done", now);
+        TaskInteractionService.Complete(done, now);
+        var tasks = new[] { todo, focus, wait, remind, done };
+
+        Assert(
+            TreeManagerTaskFilter.Select(tasks, TreeManagerStatusFilter.All, now).Count() == 5,
+            "All filter should retain every task.");
+        Assert(
+            TreeManagerTaskFilter.Select(tasks, TreeManagerStatusFilter.Panel, now).Single().Id == todo.Id,
+            "Panel filter should use PinToPanel only.");
+        Assert(
+            TreeManagerTaskFilter.Select(tasks, TreeManagerStatusFilter.Focus, now).Single().Id == focus.Id,
+            "FOCUS filter should use InWork status.");
+        Assert(
+            TreeManagerTaskFilter.Select(tasks, TreeManagerStatusFilter.Wait, now).Single().Id == wait.Id,
+            "WAIT filter should use Waiting status.");
+        Assert(
+            TreeManagerTaskFilter.Select(tasks, TreeManagerStatusFilter.Remind, now).Single().Id == remind.Id,
+            "REMIND filter should use active reminder attention.");
+        Assert(
+            TreeManagerTaskFilter.Select(tasks, TreeManagerStatusFilter.Todo, now).Select(task => task.Id)
+                .SequenceEqual(new[] { todo.Id, remind.Id }),
+            "TODO filter should follow stored task status independently of REMIND attention.");
+        Assert(
+            TreeManagerTaskFilter.Select(tasks, TreeManagerStatusFilter.Done, now).Single().Id == done.Id,
+            "DONE filter should include completed tasks.");
     }
 
     private static void TreeLegacyFlatStateCompatibility()
@@ -1135,6 +1219,7 @@ internal static class Program
             Assert(loaded.WindowPlacement.CollapsedLeft == 1800, "Handle anchor should remain intact.");
             Assert(loaded.TreeManagerSettings.SelectedProjectId == projectId, "Legacy state should get a safe tree selection.");
             Assert(loaded.TreeManagerSettings.Filter == TreeManagerFilter.All, "Legacy state should default to All filter.");
+            Assert(!loaded.Tasks.Single().PinToPanel, "Legacy tasks should default to not pinned to panel.");
 
             var nested = service.CreateTask(taskId, "Nested")!;
             store.Save(loaded);

@@ -32,6 +32,23 @@ public enum TreeManagerFilter
     ActivePlusAncestors
 }
 
+public enum TreeManagerView
+{
+    Tree,
+    Status
+}
+
+public enum TreeManagerStatusFilter
+{
+    All,
+    Panel,
+    Focus,
+    Wait,
+    Remind,
+    Todo,
+    Done
+}
+
 public sealed record TreeNode(
     Guid Id,
     Guid? ParentId,

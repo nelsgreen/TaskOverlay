@@ -391,6 +391,22 @@ public sealed class TreeStateService
         return true;
     }
 
+    public bool SetPinToPanel(
+        Guid nodeId,
+        bool pinToPanel,
+        DateTimeOffset? now = null)
+    {
+        var task = FindTask(nodeId);
+        if (task is null)
+        {
+            return false;
+        }
+
+        task.PinToPanel = pinToPanel;
+        task.UpdatedAtUtc = now ?? DateTimeOffset.UtcNow;
+        return true;
+    }
+
     public TreeNode? GetNode(Guid nodeId)
     {
         var node = FindNode(nodeId);
