@@ -13,7 +13,7 @@
         <SolidColorBrush x:Key="TreeBackground" Color="#FF0B0D0F" />
         <SolidColorBrush x:Key="TreeSurface" Color="#FF151719" />
         <SolidColorBrush x:Key="TreeElevated" Color="#FF1C1F22" />
-        <SolidColorBrush x:Key="TreeSelected" Color="#FF2A2E33" />
+        <SolidColorBrush x:Key="TreeSelected" Color="#FF263440" />
         <SolidColorBrush x:Key="TreeBorder" Color="#FF303438" />
         <SolidColorBrush x:Key="TreeText" Color="#FFF2F4F5" />
         <SolidColorBrush x:Key="TreeMuted" Color="#FF9AA5B1" />
@@ -29,14 +29,35 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Cursor" Value="Hand" />
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#FF292D31" />
-                </Trigger>
-                <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Opacity" Value="0.4" />
-                </Trigger>
-            </Style.Triggers>
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#FF5A646E" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.78" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.38" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="PrimaryTreeButtonStyle"
@@ -64,6 +85,48 @@
             <Setter Property="Foreground" Value="{StaticResource TreeMuted}" />
         </Style>
 
+        <Style x:Key="StatusFilterChipStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource TreeButtonStyle}">
+            <Setter Property="Padding" Value="11,5" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="Background" Value="#FF111315" />
+            <Setter Property="BorderBrush" Value="#FF2C3136" />
+            <Setter Property="Foreground" Value="{StaticResource TreeMuted}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ChipBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="14">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ChipBorder" Property="BorderBrush" Value="#FF48515A" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ChipBorder" Property="Opacity" Value="0.78" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="QuietIconButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource TreeButtonStyle}">
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="#FF77818B" />
+        </Style>
+
         <Style x:Key="TreeTextBoxStyle" TargetType="TextBox">
             <Setter Property="Padding" Value="10,8" />
             <Setter Property="Background" Value="#FF090A0B" />
@@ -72,22 +135,93 @@
             <Setter Property="BorderBrush" Value="{StaticResource TreeBorder}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="FontSize" Value="13" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="TextBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5">
+                            <ScrollViewer x:Name="PART_ContentHost" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="TextBorder" Property="BorderBrush" Value="#FF657382" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="TextBorder" Property="Background" Value="#FF151719" />
+                                <Setter TargetName="TextBorder" Property="Opacity" Value="0.55" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="TreeToggleStyle" TargetType="ToggleButton">
-            <Setter Property="Padding" Value="9,6" />
-            <Setter Property="Background" Value="#FF202428" />
-            <Setter Property="Foreground" Value="#FF8A939D" />
-            <Setter Property="BorderBrush" Value="#FF41474E" />
-            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Cursor" Value="Hand" />
-            <Style.Triggers>
-                <Trigger Property="IsChecked" Value="True">
-                    <Setter Property="Background" Value="#FF302A48" />
-                    <Setter Property="Foreground" Value="#FFB8AEFA" />
-                    <Setter Property="BorderBrush" Value="#FF786DB0" />
-                </Trigger>
-            </Style.Triggers>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Track"
+                                Width="42"
+                                Height="22"
+                                Background="#FF30343A"
+                                BorderBrush="#FF444B52"
+                                BorderThickness="1"
+                                CornerRadius="11">
+                            <Ellipse x:Name="Thumb"
+                                     Width="16"
+                                     Height="16"
+                                     Margin="3,0,0,0"
+                                     HorizontalAlignment="Left"
+                                     VerticalAlignment="Center"
+                                     Fill="#FFD5D9DD" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="#FF5D5587" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#FF8F83CB" />
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right" />
+                                <Setter TargetName="Thumb" Property="Margin" Value="0,0,3,0" />
+                                <Setter TargetName="Thumb" Property="Fill" Value="#FFF2F0FF" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#FFA79AF4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="TreeComboBoxItemStyle" TargetType="ComboBoxItem">
+            <Setter Property="Padding" Value="9,7" />
+            <Setter Property="Background" Value="#FF111315" />
+            <Setter Property="Foreground" Value="{StaticResource TreeText}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="4">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#FF2A3036" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#FF33404C" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="TreeComboBoxStyle" TargetType="ComboBox">
@@ -97,6 +231,79 @@
             <Setter Property="Foreground" Value="{StaticResource TreeText}" />
             <Setter Property="BorderBrush" Value="{StaticResource TreeBorder}" />
             <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource TreeComboBoxItemStyle}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="DropDownToggle"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          Focusable="False"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <ContentPresenter />
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                                <Border x:Name="ComboBorder"
+                                        Padding="{TemplateBinding Padding}"
+                                        Background="{TemplateBinding Background}"
+                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                        CornerRadius="5"
+                                        TextElement.Foreground="{TemplateBinding Foreground}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="18" />
+                                        </Grid.ColumnDefinitions>
+                                        <ContentPresenter VerticalAlignment="Center"
+                                                          Content="{TemplateBinding SelectionBoxItem}"
+                                                          ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                          ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" />
+                                        <Path Grid.Column="1"
+                                              Width="8"
+                                              Height="5"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Data="M 0 0 L 4 4 L 8 0 Z"
+                                              Fill="{TemplateBinding Foreground}" />
+                                    </Grid>
+                                </Border>
+                            </ToggleButton>
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   Placement="Bottom"
+                                   PopupAnimation="Fade">
+                                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        MaxHeight="260"
+                                        Margin="0,3,0,0"
+                                        Padding="4"
+                                        Background="#FF111315"
+                                        BorderBrush="#FF3B4249"
+                                        BorderThickness="1"
+                                        CornerRadius="6">
+                                    <ScrollViewer CanContentScroll="True">
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#FF657382" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ComboBorder" Property="Background" Value="#FF17191B" />
+                                <Setter TargetName="ComboBorder" Property="Opacity" Value="0.55" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="TreeListBoxItemStyle" TargetType="ListBoxItem">
@@ -106,6 +313,19 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Focusable" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="{StaticResource TreeSelected}" />
@@ -119,7 +339,7 @@
 
     <Grid Background="{StaticResource TreeBackground}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="96" />
+            <RowDefinition Height="88" />
             <RowDefinition Height="*" />
             <RowDefinition Height="84" />
         </Grid.RowDefinitions>
@@ -131,8 +351,8 @@
                 BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="280" />
-                    <ColumnDefinition Width="150" />
+                    <ColumnDefinition Width="290" />
+                    <ColumnDefinition Width="170" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
@@ -146,22 +366,16 @@
                                FontSize="11"
                                Text="Organize projects, sections, tasks, and active overlay items" />
                 </StackPanel>
-                <Border Grid.Column="1"
-                        Margin="8,10"
-                        Padding="10,7"
-                        Background="{StaticResource TreeElevated}"
-                        BorderBrush="{StaticResource TreeBorder}"
-                        BorderThickness="1"
-                        CornerRadius="6">
-                    <TextBlock x:Name="SelectedProjectLabel"
-                               VerticalAlignment="Center"
-                               Foreground="{StaticResource TreeText}"
-                               FontWeight="SemiBold"
-                               TextTrimming="CharacterEllipsis" />
-                </Border>
+                <ComboBox x:Name="HeaderProjectSelector"
+                          Grid.Column="1"
+                          Height="36"
+                          Margin="8,8"
+                          DisplayMemberPath="Name"
+                          Style="{StaticResource TreeComboBoxStyle}"
+                          SelectionChanged="HeaderProjectSelector_OnSelectionChanged" />
                 <Grid Grid.Column="2"
                       Height="36"
-                      Margin="8,10">
+                      Margin="8,8">
                     <TextBox x:Name="SearchBox"
                              VerticalContentAlignment="Center"
                              Style="{StaticResource TreeTextBoxStyle}"
@@ -187,7 +401,7 @@
                     </TextBlock>
                 </Grid>
                 <StackPanel Grid.Column="3"
-                            Margin="8,10,0,10"
+                            Margin="8,8,0,8"
                             VerticalAlignment="Center"
                             Orientation="Horizontal">
                     <Button x:Name="NewProjectButton"
@@ -254,10 +468,14 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock VerticalAlignment="Center"
-                                               Foreground="{StaticResource TreeMuted}"
-                                               FontSize="8"
-                                               Text="&#x25C6;" />
+                                    <Viewbox Width="15"
+                                             Height="13"
+                                             VerticalAlignment="Center">
+                                        <Path Data="M 1,3 L 6,3 L 8,5 L 15,5 L 15,13 L 1,13 Z"
+                                              Fill="Transparent"
+                                              Stroke="#FF9AA5B1"
+                                              StrokeThickness="1.2" />
+                                    </Viewbox>
                                     <TextBlock Grid.Column="1"
                                                Margin="7,0"
                                                VerticalAlignment="Center"
@@ -372,37 +590,37 @@
                                   VerticalScrollBarVisibility="Disabled">
                         <StackPanel Orientation="Horizontal">
                             <Button x:Name="StatusAllFilterButton"
-                                    Style="{StaticResource FilterButtonStyle}"
+                                    Style="{StaticResource StatusFilterChipStyle}"
                                     Content="All"
                                     Tag="All"
                                     Click="StatusFilterButton_OnClick" />
                             <Button x:Name="StatusPanelFilterButton"
-                                    Style="{StaticResource FilterButtonStyle}"
+                                    Style="{StaticResource StatusFilterChipStyle}"
                                     Content="Panel"
                                     Tag="Panel"
                                     Click="StatusFilterButton_OnClick" />
                             <Button x:Name="StatusFocusFilterButton"
-                                    Style="{StaticResource FilterButtonStyle}"
+                                    Style="{StaticResource StatusFilterChipStyle}"
                                     Content="FOCUS"
                                     Tag="Focus"
                                     Click="StatusFilterButton_OnClick" />
                             <Button x:Name="StatusWaitFilterButton"
-                                    Style="{StaticResource FilterButtonStyle}"
+                                    Style="{StaticResource StatusFilterChipStyle}"
                                     Content="WAIT"
                                     Tag="Wait"
                                     Click="StatusFilterButton_OnClick" />
                             <Button x:Name="StatusRemindFilterButton"
-                                    Style="{StaticResource FilterButtonStyle}"
+                                    Style="{StaticResource StatusFilterChipStyle}"
                                     Content="REMIND"
                                     Tag="Remind"
                                     Click="StatusFilterButton_OnClick" />
                             <Button x:Name="StatusTodoFilterButton"
-                                    Style="{StaticResource FilterButtonStyle}"
+                                    Style="{StaticResource StatusFilterChipStyle}"
                                     Content="TODO"
                                     Tag="Todo"
                                     Click="StatusFilterButton_OnClick" />
                             <Button x:Name="StatusDoneFilterButton"
-                                    Style="{StaticResource FilterButtonStyle}"
+                                    Style="{StaticResource StatusFilterChipStyle}"
                                     Content="DONE"
                                     Tag="Done"
                                     Click="StatusFilterButton_OnClick" />
@@ -475,14 +693,17 @@
                                                 Visibility="{Binding ExpandVisibility}"
                                                 ToolTip="Expand or collapse children"
                                                 Click="ExpandButton_OnClick" />
-                                        <TextBlock Grid.Column="2"
-                                                   Margin="5,0,9,0"
-                                                   VerticalAlignment="Center"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   Foreground="#FF9DA9B5"
-                                                   FontSize="13"
-                                                   Text="&#xE8B7;"
-                                                   Visibility="{Binding SectionVisibility}" />
+                                        <Viewbox Grid.Column="2"
+                                                 Width="16"
+                                                 Height="14"
+                                                 Margin="5,0,9,0"
+                                                 VerticalAlignment="Center"
+                                                 Visibility="{Binding SectionVisibility}">
+                                            <Path Data="M 1,3 L 6,3 L 8,5 L 15,5 L 15,13 L 1,13 Z"
+                                                  Fill="Transparent"
+                                                  Stroke="#FFAAB5C0"
+                                                  StrokeThickness="1.2" />
+                                        </Viewbox>
                                         <Border Grid.Column="2"
                                                 Margin="4,4,9,4"
                                                 Padding="6,2"
@@ -522,18 +743,6 @@
                                                     </Style>
                                                 </TextBlock.Style>
                                             </TextBlock>
-                                            <StackPanel Margin="0,3,0,0"
-                                                        Orientation="Horizontal"
-                                                        Visibility="{Binding SectionVisibility}">
-                                                <TextBlock Foreground="#FF7F94A8"
-                                                           FontSize="9"
-                                                           FontWeight="SemiBold"
-                                                           Text="SECTION" />
-                                                <TextBlock Margin="7,0,0,0"
-                                                           Foreground="{StaticResource TreeMuted}"
-                                                           FontSize="9"
-                                                           Text="{Binding SectionSummary}" />
-                                            </StackPanel>
                                             <TextBlock Margin="0,2,0,0"
                                                        Foreground="{StaticResource TreeMuted}"
                                                        FontSize="10"
@@ -549,12 +758,17 @@
                                             <Button Width="25"
                                                     Height="23"
                                                     Padding="0"
-                                                    Style="{StaticResource TreeButtonStyle}"
+                                                    Background="{Binding PinBackground}"
+                                                    BorderBrush="{Binding PinStroke}"
+                                                    Style="{StaticResource QuietIconButtonStyle}"
                                                     ToolTip="{Binding PinToolTip}"
                                                     PreviewMouseLeftButtonDown="PinButton_OnPreviewMouseLeftButtonDown">
-                                                <TextBlock FontFamily="Segoe MDL2 Assets"
-                                                           Foreground="{Binding PinBrush}"
-                                                           Text="&#xE718;" />
+                                                <Viewbox Width="13" Height="15">
+                                                    <Path Data="M 4,1 L 12,1 L 10.5,5 L 10.5,8 L 13,10 L 13,11 L 8.8,11 L 8,15 L 7.2,11 L 3,11 L 3,10 L 5.5,8 L 5.5,5 Z"
+                                                          Fill="{Binding PinFill}"
+                                                          Stroke="{Binding PinStroke}"
+                                                          StrokeThickness="1.2" />
+                                                </Viewbox>
                                             </Button>
                                             <Border Margin="4,0,0,0"
                                                     Padding="5,2"
@@ -569,15 +783,42 @@
                                                            Text="Panel" />
                                             </Border>
                                         </StackPanel>
+                                        <Border Grid.Column="4"
+                                                MinWidth="22"
+                                                Margin="7,0,0,0"
+                                                Padding="5,2"
+                                                VerticalAlignment="Center"
+                                                Background="#FF252A2F"
+                                                CornerRadius="4"
+                                                Visibility="{Binding SectionVisibility}">
+                                            <TextBlock HorizontalAlignment="Center"
+                                                       Foreground="#FF9AA5B1"
+                                                       FontSize="9"
+                                                       Text="{Binding ChildCount}" />
+                                        </Border>
                                         <StackPanel Grid.Column="5"
                                                     Margin="8,0,0,0"
                                                     VerticalAlignment="Center"
-                                                    Opacity="0.62"
                                                     Orientation="Horizontal">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Setter Property="Opacity" Value="0.16" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                                     Value="True">
+                                                            <Setter Property="Opacity" Value="0.8" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                                     Value="True">
+                                                            <Setter Property="Opacity" Value="0.72" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
                                             <Button Width="24"
                                                     Height="22"
                                                     Padding="0"
-                                                    Style="{StaticResource TreeButtonStyle}"
+                                                    Style="{StaticResource QuietIconButtonStyle}"
                                                     Content="&#x2191;"
                                                     IsEnabled="{Binding CanMoveUp}"
                                                     ToolTip="Move up"
@@ -586,7 +827,7 @@
                                                     Height="22"
                                                     Margin="3,0,0,0"
                                                     Padding="0"
-                                                    Style="{StaticResource TreeButtonStyle}"
+                                                    Style="{StaticResource QuietIconButtonStyle}"
                                                     Content="&#x2193;"
                                                     IsEnabled="{Binding CanMoveDown}"
                                                     ToolTip="Move down"
@@ -645,12 +886,17 @@
                                                 Height="23"
                                                 Padding="0"
                                                 VerticalAlignment="Center"
-                                                Style="{StaticResource TreeButtonStyle}"
+                                                Background="{Binding PinBackground}"
+                                                BorderBrush="{Binding PinStroke}"
+                                                Style="{StaticResource QuietIconButtonStyle}"
                                                 ToolTip="{Binding PinToolTip}"
                                                 PreviewMouseLeftButtonDown="PinButton_OnPreviewMouseLeftButtonDown">
-                                            <TextBlock FontFamily="Segoe MDL2 Assets"
-                                                       Foreground="{Binding PinBrush}"
-                                                       Text="&#xE718;" />
+                                            <Viewbox Width="13" Height="15">
+                                                <Path Data="M 4,1 L 12,1 L 10.5,5 L 10.5,8 L 13,10 L 13,11 L 8.8,11 L 8,15 L 7.2,11 L 3,11 L 3,10 L 5.5,8 L 5.5,5 Z"
+                                                      Fill="{Binding PinFill}"
+                                                      Stroke="{Binding PinStroke}"
+                                                      StrokeThickness="1.2" />
+                                            </Viewbox>
                                         </Button>
                                         <Border Grid.Column="1"
                                                 Margin="4,3,9,3"
@@ -842,17 +1088,38 @@
                             <Border x:Name="DetailsPinPanel"
                                     Margin="0,0,0,14"
                                     Padding="10"
-                                    Background="#FF1B1923"
-                                    BorderBrush="#FF4C456B"
                                     BorderThickness="1"
                                     CornerRadius="6"
                                     Visibility="Collapsed">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="#FF17191D" />
+                                        <Setter Property="BorderBrush" Value="#FF3B4047" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChecked, ElementName=DetailsPinToggle}"
+                                                         Value="True">
+                                                <Setter Property="Background" Value="#FF211E30" />
+                                                <Setter Property="BorderBrush" Value="#FF7469A8" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel>
+                                    <Viewbox Width="14"
+                                             Height="16"
+                                             Margin="0,0,8,0"
+                                             VerticalAlignment="Center">
+                                        <Path Data="M 4,1 L 12,1 L 10.5,5 L 10.5,8 L 13,10 L 13,11 L 8.8,11 L 8,15 L 7.2,11 L 3,11 L 3,10 L 5.5,8 L 5.5,5 Z"
+                                              Fill="#FFA79AF4"
+                                              Stroke="#FFA79AF4"
+                                              StrokeThickness="1" />
+                                    </Viewbox>
+                                    <StackPanel Grid.Column="1">
                                         <TextBlock Foreground="#FFC5BCFF"
                                                    FontSize="11"
                                                    FontWeight="SemiBold"
@@ -864,16 +1131,12 @@
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                     <ToggleButton x:Name="DetailsPinToggle"
-                                                  Grid.Column="1"
+                                                  Grid.Column="2"
                                                   MinWidth="42"
                                                   VerticalAlignment="Center"
                                                   Style="{StaticResource TreeToggleStyle}"
                                                   ToolTip="Pin to panel"
-                                                  Click="DetailsPinToggle_OnClick">
-                                        <TextBlock FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="13"
-                                                   Text="&#xE718;" />
-                                    </ToggleButton>
+                                                  Click="DetailsPinToggle_OnClick" />
                                 </Grid>
                             </Border>
 

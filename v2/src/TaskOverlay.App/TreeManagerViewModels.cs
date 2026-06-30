@@ -20,6 +20,8 @@ internal sealed class TreeProjectViewModel
     public Visibility ActiveCountVisibility => ActiveCount > 0
         ? Visibility.Visible
         : Visibility.Collapsed;
+
+    public override string ToString() => Name;
 }
 
 internal sealed class TreeNodeRowViewModel
@@ -31,6 +33,7 @@ internal sealed class TreeNodeRowViewModel
     private static readonly Brush DoneBrush = CreateBrush("#FF737B87");
     private static readonly Brush PinnedBrush = CreateBrush("#FFA79AF4");
     private static readonly Brush UnpinnedBrush = CreateBrush("#FF69727C");
+    private static readonly Brush PinnedBackgroundBrush = CreateBrush("#FF302A48");
 
     public TreeNodeRowViewModel(
         TreeNode node,
@@ -88,6 +91,9 @@ internal sealed class TreeNodeRowViewModel
     public bool IsPinnedToPanel { get; }
     public string PinToolTip => IsPinnedToPanel ? "Remove from panel" : "Pin to panel";
     public Brush PinBrush => IsPinnedToPanel ? PinnedBrush : UnpinnedBrush;
+    public Brush PinFill => IsPinnedToPanel ? PinnedBrush : Brushes.Transparent;
+    public Brush PinStroke => IsPinnedToPanel ? PinnedBrush : UnpinnedBrush;
+    public Brush PinBackground => IsPinnedToPanel ? PinnedBackgroundBrush : Brushes.Transparent;
     public Visibility PanelBadgeVisibility => IsPinnedToPanel
         ? Visibility.Visible
         : Visibility.Collapsed;
@@ -134,6 +140,7 @@ internal sealed class TreeStatusRowViewModel
     private static readonly Brush DoneBrush = CreateBrush("#FF737B87");
     private static readonly Brush PinnedBrush = CreateBrush("#FFA79AF4");
     private static readonly Brush UnpinnedBrush = CreateBrush("#FF69727C");
+    private static readonly Brush PinnedBackgroundBrush = CreateBrush("#FF302A48");
 
     public TreeStatusRowViewModel(
         TaskItem task,
@@ -156,6 +163,9 @@ internal sealed class TreeStatusRowViewModel
     public bool IsPinnedToPanel => Task.PinToPanel;
     public string PinToolTip => IsPinnedToPanel ? "Remove from panel" : "Pin to panel";
     public Brush PinBrush => IsPinnedToPanel ? PinnedBrush : UnpinnedBrush;
+    public Brush PinFill => IsPinnedToPanel ? PinnedBrush : Brushes.Transparent;
+    public Brush PinStroke => IsPinnedToPanel ? PinnedBrush : UnpinnedBrush;
+    public Brush PinBackground => IsPinnedToPanel ? PinnedBackgroundBrush : Brushes.Transparent;
     public Visibility PanelBadgeVisibility => IsPinnedToPanel
         ? Visibility.Visible
         : Visibility.Collapsed;
@@ -197,7 +207,10 @@ internal sealed class TreeStatusRowViewModel
     }
 }
 
-internal sealed record TreeLocationOption(Guid? Id, string Label);
+internal sealed record TreeLocationOption(Guid? Id, string Label)
+{
+    public override string ToString() => Label;
+}
 
 internal sealed class TreeActiveTaskViewModel
 {

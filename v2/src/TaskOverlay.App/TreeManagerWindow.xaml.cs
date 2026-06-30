@@ -16,6 +16,10 @@ public partial class TreeManagerWindow : Window
     private static readonly Brush InactiveFilterBackground = Brushes.Transparent;
     private static readonly Brush ActiveFilterForeground = CreateBrush("#FFF2F4F5");
     private static readonly Brush InactiveFilterForeground = CreateBrush("#FF9AA5B1");
+    private static readonly Brush ActiveFilterBorder = CreateBrush("#FF697681");
+    private static readonly Brush PanelFilterBackground = CreateBrush("#FF302A48");
+    private static readonly Brush PanelFilterForeground = CreateBrush("#FFC5BCFF");
+    private static readonly Brush PanelFilterBorder = CreateBrush("#FF786DB0");
     private static readonly Brush TodoBrush = CreateBrush("#FF9AA4B2");
     private static readonly Brush FocusBrush = CreateBrush("#FF45D58A");
     private static readonly Brush WaitBrush = CreateBrush("#FF51B5DB");
@@ -47,6 +51,7 @@ public partial class TreeManagerWindow : Window
 
         InitializeComponent();
         ProjectList.ItemsSource = _projects;
+        HeaderProjectSelector.ItemsSource = _projects;
         TreeRows.ItemsSource = _rows;
         StatusRows.ItemsSource = _statusRows;
         ActiveNowItems.ItemsSource = _activeTasks;
@@ -127,7 +132,7 @@ public partial class TreeManagerWindow : Window
             project.Id == _state.TreeManagerSettings.SelectedProjectId) ??
                               _projects.FirstOrDefault();
         ProjectList.SelectedItem = selectedProject;
-        SelectedProjectLabel.Text = selectedProject?.Name ?? "No project";
+        HeaderProjectSelector.SelectedItem = selectedProject;
         TreePathLabel.Text = selectedProject is null
             ? "No project selected"
             : $"{selectedProject.Name}  /  task tree";
@@ -312,7 +317,7 @@ public partial class TreeManagerWindow : Window
         var hasSelection = _selectedNode is not null;
         DetailsTitleInput.IsEnabled = hasSelection;
         DetailsTitleInput.Text = _selectedNode?.Title ?? string.Empty;
-        DetailsHeading.Text = $"Edit {ResolveTypeLabel(_selectedNode)}";
+        DetailsHeading.Text = "Details";
         DetailsKindLabel.Text = ResolveKindLabel(_selectedNode);
         DetailsTypeValue.Text = ResolveTypeLabel(_selectedNode);
         TaskStatusPanel.Visibility = _selectedNode?.Kind == TreeNodeKind.Task
@@ -524,23 +529,41 @@ public partial class TreeManagerWindow : Window
 
     private void UpdateStatusFilterButtons()
     {
-        SetStatusFilterButtonState(StatusAllFilterButton, TreeManagerStatusFilter.All);
-        SetStatusFilterButtonState(StatusPanelFilterButton, TreeManagerStatusFilter.Panel);
-        SetStatusFilterButtonState(StatusFocusFilterButton, TreeManagerStatusFilter.Focus);
-        SetStatusFilterButtonState(StatusWaitFilterButton, TreeManagerStatusFilter.Wait);
-        SetStatusFilterButtonState(StatusRemindFilterButton, TreeManagerStatusFilter.Remind);
-        SetStatusFilterButtonState(StatusTodoFilterButton, TreeManagerStatusFilter.Todo);
-        SetStatusFilterButtonState(StatusDoneFilterButton, TreeManagerStatusFilter.Done);
+        var now = DateTimeOffset.UtcNow;
+        SetStatusFilterButtonState(StatusAllFilterButton, TreeManagerStatusFilter.All, "All", now);
+        SetStatusFilterButtonState(StatusPanelFilterButton, TreeManagerStatusFilter.Panel, "Panel", now);
+        SetStatusFilterButtonState(StatusFocusFilterButton, TreeManagerStatusFilter.Focus, "FOCUS", now);
+        SetStatusFilterButtonState(StatusWaitFilterButton, TreeManagerStatusFilter.Wait, "WAIT", now);
+        SetStatusFilterButtonState(StatusRemindFilterButton, TreeManagerStatusFilter.Remind, "REMIND", now);
+        SetStatusFilterButtonState(StatusTodoFilterButton, TreeManagerStatusFilter.Todo, "TODO", now);
+        SetStatusFilterButtonState(StatusDoneFilterButton, TreeManagerStatusFilter.Done, "DONE", now);
     }
 
-    private void SetStatusFilterButtonState(Button button, TreeManagerStatusFilter filter)
+    private void SetStatusFilterButtonState(
+        Button button,
+        TreeManagerStatusFilter filter,
+        string label,
+        DateTimeOffset now)
     {
         var selected = _state.TreeManagerSettings.StatusFilter == filter;
-        button.Background = selected ? ActiveFilterBackground : InactiveFilterBackground;
-        button.Foreground = selected ? ActiveFilterForeground : InactiveFilterForeground;
-        button.BorderBrush = selected
-            ? (Brush)FindResource("TreeBorder")
-            : Brushes.Transparent;
+        var count = TreeManagerTaskFilter.Select(_state.Tasks, filter, now).Count();
+        button.Content = $"{label}  {count}";
+        var panelSelected = selected && filter == TreeManagerStatusFilter.Panel;
+        button.Background = panelSelected
+            ? PanelFilterBackground
+            : selected
+                ? ActiveFilterBackground
+                : InactiveFilterBackground;
+        button.Foreground = panelSelected
+            ? PanelFilterForeground
+            : selected
+                ? ActiveFilterForeground
+                : InactiveFilterForeground;
+        button.BorderBrush = panelSelected
+            ? PanelFilterBorder
+            : selected
+                ? ActiveFilterBorder
+                : Brushes.Transparent;
     }
 
     private void UpdateActiveView()
@@ -568,7 +591,7 @@ public partial class TreeManagerWindow : Window
         button.Background = selected ? ActiveFilterBackground : InactiveFilterBackground;
         button.Foreground = selected ? ActiveFilterForeground : InactiveFilterForeground;
         button.BorderBrush = selected
-            ? (Brush)FindResource("TreeBorder")
+            ? ActiveFilterBorder
             : Brushes.Transparent;
     }
 
@@ -579,6 +602,22 @@ public partial class TreeManagerWindow : Window
             return;
         }
 
+        SelectProject(project);
+    }
+
+    private void HeaderProjectSelector_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionEvents ||
+            HeaderProjectSelector.SelectedItem is not TreeProjectViewModel project)
+        {
+            return;
+        }
+
+        SelectProject(project);
+    }
+
+    private void SelectProject(TreeProjectViewModel project)
+    {
         _state.TreeManagerSettings.SelectedProjectId = project.Id;
         _state.TreeManagerSettings.SelectedNodeId = project.Id;
         _state.OverlaySettings.LastSelectedProjectId = project.Id;
@@ -614,7 +653,7 @@ public partial class TreeManagerWindow : Window
             try
             {
                 ProjectList.SelectedItem = _projects.FirstOrDefault(item => item.Id == project.Id);
-                SelectedProjectLabel.Text = project.Title;
+                HeaderProjectSelector.SelectedItem = _projects.FirstOrDefault(item => item.Id == project.Id);
                 TreePathLabel.Text = $"{project.Title}  /  task tree";
             }
             finally
