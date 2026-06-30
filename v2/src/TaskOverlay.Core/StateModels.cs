@@ -14,6 +14,7 @@ public sealed class AppState
     public List<GroupItem> Groups { get; set; } = new();
     public OverlaySettings OverlaySettings { get; set; } = new();
     public WindowPlacement WindowPlacement { get; set; } = new();
+    public TreeManagerSettings TreeManagerSettings { get; set; } = new();
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
@@ -29,6 +30,11 @@ public sealed class AppState
             OverlaySettings = new OverlaySettings
             {
                 OverlayMode = global::TaskOverlay.Core.OverlayMode.Working
+            },
+            TreeManagerSettings = new TreeManagerSettings
+            {
+                SelectedProjectId = defaultProject.Id,
+                SelectedNodeId = defaultProject.Id
             },
             Projects = { defaultProject },
             Tasks =
@@ -110,6 +116,7 @@ public sealed class TaskItem
     public DateTimeOffset? ReminderSnoozedUntilUtc { get; set; }
     public string WaitingFor { get; set; } = string.Empty;
     public bool ReminderActive { get; set; }
+    public bool PinToPanel { get; set; }
     public Guid? ProjectId { get; set; }
     public Guid? GroupId { get; set; }
     public Guid? ParentTaskId { get; set; }
@@ -309,4 +316,15 @@ public sealed class UtilityShellPlacementState
     public double? Top { get; set; }
     public double? Width { get; set; }
     public double? Height { get; set; }
+}
+
+public sealed class TreeManagerSettings
+{
+    public Guid? SelectedProjectId { get; set; }
+    public Guid? SelectedNodeId { get; set; }
+    public List<Guid> ExpandedNodeIds { get; set; } = new();
+    public TreeManagerFilter Filter { get; set; } = TreeManagerFilter.All;
+    public TreeManagerView ActiveView { get; set; } = TreeManagerView.Tree;
+    public TreeManagerStatusFilter StatusFilter { get; set; } = TreeManagerStatusFilter.All;
+    public bool ExpansionInitialized { get; set; }
 }

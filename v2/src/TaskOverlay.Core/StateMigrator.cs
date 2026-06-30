@@ -190,6 +190,11 @@ public static class StateMigrator
             RepairTask(task);
         }
 
+        if (TreeManagerStatePolicy.Normalize(state))
+        {
+            changed = true;
+        }
+
         return changed;
 
         void RepairTask(TaskItem task)

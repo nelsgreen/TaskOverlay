@@ -223,7 +223,9 @@ public sealed class AppStateStore
             state.Projects is null ||
             state.Groups is null ||
             state.OverlaySettings is null ||
-            state.WindowPlacement is null)
+            state.WindowPlacement is null ||
+            state.TreeManagerSettings is null ||
+            state.TreeManagerSettings.ExpandedNodeIds is null)
         {
             throw new InvalidDataException("State file is missing required sections.");
         }
