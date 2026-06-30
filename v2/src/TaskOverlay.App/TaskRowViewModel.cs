@@ -14,6 +14,7 @@ internal sealed class TaskRowViewModel
     {
         Task = task;
         var project = ProjectReferenceResolver.ResolveProject(state, task);
+        ProjectId = project?.Id ?? Guid.Empty;
         ProjectName = project?.Name ?? ProjectItem.DefaultName;
         ProjectColorHex = ProjectColorPalette.IsValid(project?.ColorHex)
             ? project!.ColorHex
@@ -25,11 +26,7 @@ internal sealed class TaskRowViewModel
             presentation);
         ShowDescription = presentation.ShowDescriptions &&
                           !string.IsNullOrWhiteSpace(task.Description) &&
-                          (workingMode
-                              ? task.Status == TaskStatus.InWork
-                              : task.DescriptionExpanded ||
-                                task.InWork ||
-                                task.Status == TaskStatus.Waiting);
+                          (!workingMode || task.Status == TaskStatus.InWork);
         ShowWaitingFor = !workingMode &&
                          presentation.ShowDescriptions &&
                          task.Status == TaskStatus.Waiting &&
@@ -38,14 +35,16 @@ internal sealed class TaskRowViewModel
         RowOpacity = quietIdleRow ? 0.58 : 1.0;
         TitleColorHex = quietIdleRow
             ? "#FFA1A1AA"
-            : "#FFFFE878";
+            : "#FFF4F4F5";
         var workingFontSize = OverlayTaskPresentationPolicy.GetWorkingFontSize(
             state.OverlaySettings,
             presentation.IsActive);
-        TitleFontSize = workingMode ? workingFontSize : 20;
+        TitleFontSize = workingMode ? workingFontSize : 14;
         DescriptionFontSize = workingMode
             ? Math.Max(10, workingFontSize - 4)
-            : 13;
+            : 12;
+        DescriptionLineHeight = Math.Ceiling(DescriptionFontSize * 1.35);
+        DescriptionMaxHeight = DescriptionLineHeight * (workingMode ? 2 : 3);
         RowMargin = workingMode
             ? new Thickness(0, 1, 0, 1)
             : new Thickness(0, 2, 0, 2);
@@ -60,14 +59,33 @@ internal sealed class TaskRowViewModel
     public bool InWork => Task.Status == TaskStatus.InWork;
     public bool IsWaiting => Task.Status == TaskStatus.Waiting;
     public bool IsReminderDue { get; }
+    public string StatusLabel => Task.Status switch
+    {
+        TaskStatus.InWork => "FOCUS",
+        TaskStatus.Waiting => "WAIT",
+        _ => "TODO"
+    };
+    public string StatusBackgroundHex => Task.Status switch
+    {
+        TaskStatus.InWork => "#FF064E3B",
+        TaskStatus.Waiting => "#FF0C4A6E",
+        _ => "#FF27272A"
+    };
+    public string StatusForegroundHex => Task.Status switch
+    {
+        TaskStatus.InWork => "#FF6EE7B7",
+        TaskStatus.Waiting => "#FF7DD3FC",
+        _ => "#FFD4D4D8"
+    };
     public string StatusDotColorHex => IsReminderDue
-        ? "#FFEF4444"
+        ? "#FFF4B74A"
         : InWork
             ? "#FF38BDF8"
             : IsWaiting
                 ? "#FFF59E0B"
                 : "#FF71717A";
     public string ProjectName { get; }
+    public Guid ProjectId { get; }
     public string ProjectColorHex { get; }
     public string WaitingForLabel => $"Waiting for: {Task.WaitingFor}";
     public bool ShowDescription { get; }
@@ -77,6 +95,8 @@ internal sealed class TaskRowViewModel
     public string TitleColorHex { get; }
     public double TitleFontSize { get; }
     public double DescriptionFontSize { get; }
+    public double DescriptionLineHeight { get; }
+    public double DescriptionMaxHeight { get; }
     public Thickness RowMargin { get; }
     public Thickness RowPadding { get; }
 }

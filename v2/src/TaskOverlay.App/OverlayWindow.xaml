@@ -13,16 +13,21 @@
         Topmost="True">
     <Window.Resources>
         <Style x:Key="TaskRowBorderStyle" TargetType="Border">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="#80111418" />
+            <Setter Property="BorderBrush" Value="#332F343D" />
+            <Setter Property="BorderThickness" Value="1" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding InWork}" Value="True">
-                    <Setter Property="Background" Value="#332563EB" />
+                    <Setter Property="Background" Value="#3310643B" />
+                    <Setter Property="BorderBrush" Value="#6652D69A" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsWaiting}" Value="True">
-                    <Setter Property="Background" Value="#334B2E16" />
+                    <Setter Property="Background" Value="#261D4A5A" />
+                    <Setter Property="BorderBrush" Value="#6657B7E8" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsReminderDue}" Value="True">
-                    <Setter Property="Background" Value="#665B1D1D" />
+                    <Setter Property="Background" Value="#332A1D09" />
+                    <Setter Property="BorderBrush" Value="#99D89B32" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
@@ -98,9 +103,21 @@
             </Border>
         </DataTemplate>
 
+        <DataTemplate x:Key="StatusBadgeTemplate">
+            <Border Margin="0,0,5,0"
+                    Padding="5,1"
+                    Background="{Binding StatusBackgroundHex}"
+                    CornerRadius="3">
+                <TextBlock Foreground="{Binding StatusForegroundHex}"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Text="{Binding StatusLabel}" />
+            </Border>
+        </DataTemplate>
+
         <DataTemplate x:Key="ReminderBadgeTemplate">
             <Button Padding="0"
-                    Background="#FFDC2626"
+                    Background="#FF8A5A00"
                     BorderThickness="0"
                     Cursor="Hand"
                     FocusVisualStyle="{x:Null}"
@@ -173,6 +190,8 @@
                     <TextBlock Margin="0,5,0,2"
                                Foreground="#FFD4D4D8"
                                FontSize="{Binding DescriptionFontSize}"
+                               LineHeight="{Binding DescriptionLineHeight}"
+                               MaxHeight="{Binding DescriptionMaxHeight}"
                                Text="{Binding Description}"
                                TextTrimming="CharacterEllipsis"
                                TextWrapping="Wrap">
@@ -188,7 +207,7 @@
                         </TextBlock.Style>
                     </TextBlock>
                     <TextBlock Margin="0,3,0,1"
-                               Foreground="#FFFBBF24"
+                               Foreground="#FF7DD3FC"
                                FontSize="12"
                                FontWeight="SemiBold"
                                Text="{Binding WaitingForLabel}">
@@ -211,9 +230,9 @@
             <Border Margin="{Binding RowMargin}"
                     Padding="{Binding RowPadding}"
                     Opacity="{Binding RowOpacity}"
-                    BorderThickness="0"
                     CornerRadius="6"
                     Style="{StaticResource TaskRowBorderStyle}"
+                    MouseLeftButtonUp="TaskRow_OnMouseLeftButtonUp"
                     ContextMenuOpening="TaskRow_OnContextMenuOpening">
                 <Border.ContextMenu>
                     <ContextMenu Opened="TaskContextMenu_OnOpened"
@@ -235,11 +254,7 @@
                     <StackPanel Grid.Column="1">
                         <WrapPanel Margin="0,0,0,3">
                             <ContentControl Content="{Binding}"
-                                            ContentTemplate="{StaticResource ProjectBadgeTemplate}" />
-                            <ContentControl Content="{Binding}"
-                                            ContentTemplate="{StaticResource FocusBadgeTemplate}" />
-                            <ContentControl Content="{Binding}"
-                                            ContentTemplate="{StaticResource WaitingBadgeTemplate}" />
+                                            ContentTemplate="{StaticResource StatusBadgeTemplate}" />
                             <ContentControl Content="{Binding}"
                                             ContentTemplate="{StaticResource ReminderBadgeTemplate}" />
                         </WrapPanel>
@@ -254,9 +269,9 @@
             <Border Margin="{Binding RowMargin}"
                     Padding="{Binding RowPadding}"
                     Opacity="{Binding RowOpacity}"
-                    BorderThickness="0"
                     CornerRadius="6"
                     Style="{StaticResource TaskRowBorderStyle}"
+                    MouseLeftButtonUp="TaskRow_OnMouseLeftButtonUp"
                     ContextMenuOpening="TaskRow_OnContextMenuOpening">
                 <Border.ContextMenu>
                     <ContextMenu Opened="TaskContextMenu_OnOpened"
@@ -289,6 +304,87 @@
                     </StackPanel>
                 </Grid>
             </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="OverlayFilterChipTemplate">
+            <Button Margin="0,0,5,5"
+                    Padding="0"
+                    BorderThickness="1"
+                    Cursor="Hand"
+                    FocusVisualStyle="{x:Null}"
+                    Click="OverlayFilter_OnClick">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Background" Value="#B3111418" />
+                        <Setter Property="BorderBrush" Value="#FF30343B" />
+                        <Setter Property="Foreground" Value="#FFB8BCC6" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                <Setter Property="Background" Value="#FF263440" />
+                                <Setter Property="BorderBrush" Value="#FF6B8299" />
+                                <Setter Property="Foreground" Value="#FFFFFFFF" />
+                            </DataTrigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="BorderBrush" Value="#FF7C8795" />
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border Padding="7,3"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="9">
+                            <ContentPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Button.Template>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                               FontSize="9"
+                               FontWeight="SemiBold"
+                               Text="{Binding Label}" />
+                    <TextBlock Margin="4,0,0,0"
+                               Foreground="#FF8F96A3"
+                               FontSize="9"
+                               Text="{Binding Count}" />
+                </StackPanel>
+            </Button>
+        </DataTemplate>
+
+        <DataTemplate x:Key="OverlayProjectGroupTemplate">
+            <StackPanel Margin="0,0,0,7">
+                <DockPanel Margin="3,0,3,4">
+                    <Border DockPanel.Dock="Right"
+                            MinWidth="20"
+                            Padding="5,1"
+                            Background="#FF272A30"
+                            CornerRadius="7">
+                        <TextBlock HorizontalAlignment="Center"
+                                   Foreground="#FFA1A1AA"
+                                   FontSize="9"
+                                   Text="{Binding Count}" />
+                    </Border>
+                    <StackPanel Orientation="Horizontal">
+                        <Border Width="7"
+                                Height="7"
+                                Margin="0,0,6,0"
+                                VerticalAlignment="Center"
+                                Background="{Binding ProjectColorHex}"
+                                CornerRadius="4" />
+                        <TextBlock VerticalAlignment="Center"
+                                   Foreground="#FFE4E4E7"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding ProjectName}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </DockPanel>
+                <ItemsControl ItemsSource="{Binding Tasks}"
+                              ItemTemplate="{StaticResource ExpandedTaskRowTemplate}" />
+            </StackPanel>
         </DataTemplate>
 
         <DataTemplate DataType="{x:Type local:WorkingOverlayViewState}">
@@ -317,19 +413,29 @@
 
         <DataTemplate DataType="{x:Type local:ExpandedOverlayViewState}">
             <StackPanel Width="{Binding ContentWidth}">
-                <DockPanel LastChildFill="False"
-                           Margin="2,0,2,10"
-                           Visibility="{Binding ActiveHeaderVisibility}">
-                    <TextBlock DockPanel.Dock="Left"
-                               Foreground="#FFF4F4F5"
-                               FontSize="12"
-                               FontWeight="SemiBold"
-                               Text="TASKOVERLAY V2 PROTOTYPE" />
-                    <TextBlock DockPanel.Dock="Right"
-                               Foreground="#FFA1A1AA"
-                               FontSize="11"
-                               Text="{Binding ModeStatus}" />
-                </DockPanel>
+                <StackPanel Visibility="{Binding ActiveHeaderVisibility}">
+                    <DockPanel LastChildFill="False"
+                               Margin="2,0,2,7">
+                        <TextBlock DockPanel.Dock="Left"
+                                   Foreground="#FFF4F4F5"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   Text="TaskOverlay" />
+                        <TextBlock DockPanel.Dock="Right"
+                                   Foreground="#FFA1A1AA"
+                                   FontSize="10"
+                                   Text="{Binding ModeStatus}" />
+                    </DockPanel>
+                    <ItemsControl Margin="0,0,0,5"
+                                  ItemsSource="{Binding FilterOptions}"
+                                  ItemTemplate="{StaticResource OverlayFilterChipTemplate}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </StackPanel>
                 <ScrollViewer MaxHeight="{Binding TasksMaxHeight}"
                               HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto">
@@ -341,8 +447,56 @@
                                    Opacity="{Binding EmptyOpacity}"
                                    Text="{Binding EmptyText}"
                                    Visibility="{Binding EmptyVisibility}" />
-                        <ItemsControl ItemsSource="{Binding Tasks}"
-                                      ItemTemplate="{StaticResource ExpandedTaskRowTemplate}" />
+                        <ItemsControl ItemsSource="{Binding ProjectGroups}"
+                                      ItemTemplate="{StaticResource OverlayProjectGroupTemplate}" />
+                        <StackPanel Visibility="{Binding WaitGroupVisibility}">
+                            <Button Margin="0,1,0,5"
+                                    Padding="0"
+                                    HorizontalContentAlignment="Stretch"
+                                    Background="#B3151A20"
+                                    BorderBrush="#FF304A59"
+                                    BorderThickness="1"
+                                    Cursor="Hand"
+                                    FocusVisualStyle="{x:Null}"
+                                    Click="WaitGroupHeader_OnClick">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border Padding="8,5"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="6">
+                                            <DockPanel>
+                                                <Border DockPanel.Dock="Right"
+                                                        MinWidth="20"
+                                                        Padding="5,1"
+                                                        Background="#FF0C4A6E"
+                                                        CornerRadius="7">
+                                                    <TextBlock HorizontalAlignment="Center"
+                                                               Foreground="#FFBAE6FD"
+                                                               FontSize="9"
+                                                               Text="{Binding WaitCount}" />
+                                                </Border>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Margin="0,0,6,0"
+                                                               Foreground="#FF7DD3FC"
+                                                               FontFamily="Segoe MDL2 Assets"
+                                                               FontSize="10"
+                                                               Text="{Binding WaitToggleGlyph}" />
+                                                    <TextBlock Foreground="#FF7DD3FC"
+                                                               FontSize="10"
+                                                               FontWeight="Bold"
+                                                               Text="WAIT" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+                            <ItemsControl ItemsSource="{Binding WaitProjectGroups}"
+                                          ItemTemplate="{StaticResource OverlayProjectGroupTemplate}"
+                                          Visibility="{Binding WaitTasksVisibility}" />
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </StackPanel>
