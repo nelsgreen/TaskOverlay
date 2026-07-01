@@ -38,15 +38,35 @@ public static class OverlayTaskFilter
         ArgumentNullException.ThrowIfNull(tasks);
 
         var timestamp = now ?? DateTimeOffset.UtcNow;
-        return tasks.Where(task =>
-            task.Status != TaskStatus.Done &&
-            filter switch
+        var visibleTasks = tasks
+            .Where(task => task.Status != TaskStatus.Done)
+            .ToList();
+        if (filter == OverlayPanelFilter.Remind)
+        {
+            return visibleTasks
+                .Select((task, index) => new
+                {
+                    Task = task,
+                    Index = index,
+                    Active = ReminderAttentionService.ShouldShowNotification(
+                        task,
+                        timestamp)
+                })
+                .Where(item =>
+                    item.Active ||
+                    item.Task.ReminderActive ||
+                    item.Task.RemindAtUtc is not null)
+                .OrderByDescending(item => item.Active)
+                .ThenBy(item => item.Task.RemindAtUtc ?? DateTimeOffset.MaxValue)
+                .ThenBy(item => item.Index)
+                .Select(item => item.Task);
+        }
+
+        return visibleTasks.Where(task => filter switch
             {
                 OverlayPanelFilter.Panel => task.PinToPanel,
                 OverlayPanelFilter.Focus => task.Status == TaskStatus.InWork,
                 OverlayPanelFilter.Wait => task.Status == TaskStatus.Waiting,
-                OverlayPanelFilter.Remind =>
-                    ReminderAttentionService.ShouldShowNotification(task, timestamp),
                 OverlayPanelFilter.Todo => task.Status == TaskStatus.Todo,
                 _ => task.PinToPanel
             });

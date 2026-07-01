@@ -1146,7 +1146,7 @@ public partial class OverlayWindow : Window
         }
 
         _state.OverlaySettings.PanelFilter = option.Filter;
-        if (option.Filter == OverlayPanelFilter.Wait)
+        if (option.Filter is OverlayPanelFilter.Wait or OverlayPanelFilter.Remind)
         {
             _state.OverlaySettings.WaitGroupExpanded = true;
         }
@@ -1675,8 +1675,9 @@ public partial class OverlayWindow : Window
             .Cast<object>()
             .ToArray();
         var waitGroupExpanded = _state.OverlaySettings.WaitGroupExpanded ??
-                                _state.OverlaySettings.PanelFilter ==
-                                OverlayPanelFilter.Wait;
+                                _state.OverlaySettings.PanelFilter is
+                                    OverlayPanelFilter.Wait or
+                                    OverlayPanelFilter.Remind;
         var layout = CalculateOverlayLayout(presentation, workArea);
         var panelBackground = presentation.IsActive
             ? ActiveBackground

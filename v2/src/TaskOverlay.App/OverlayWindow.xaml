@@ -207,6 +207,21 @@
                         </TextBlock.Style>
                     </TextBlock>
                     <TextBlock Margin="0,3,0,1"
+                               Foreground="{Binding ReminderMetadataColorHex}"
+                               FontSize="11"
+                               Text="{Binding ReminderMetadataLabel}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ShowReminderMetadata}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBlock Margin="0,3,0,1"
                                Foreground="#FF7DD3FC"
                                FontSize="12"
                                FontWeight="SemiBold"
@@ -239,29 +254,16 @@
                                  Closed="TaskContextMenu_OnClosed"
                                  DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}" />
                 </Border.ContextMenu>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Ellipse Grid.Column="0"
-                             Width="8"
-                             Height="8"
-                             Margin="0,7,8,0"
-                             VerticalAlignment="Top"
-                             Fill="{Binding StatusDotColorHex}"
-                             ToolTip="Status indicator" />
-                    <StackPanel Grid.Column="1">
-                        <WrapPanel Margin="0,0,0,3">
-                            <ContentControl Content="{Binding}"
-                                            ContentTemplate="{StaticResource StatusBadgeTemplate}" />
-                            <ContentControl Content="{Binding}"
-                                            ContentTemplate="{StaticResource ReminderBadgeTemplate}" />
-                        </WrapPanel>
+                <StackPanel>
+                    <WrapPanel Margin="0,0,0,3">
                         <ContentControl Content="{Binding}"
-                                        ContentTemplate="{StaticResource TaskBodyTemplate}" />
-                    </StackPanel>
-                </Grid>
+                                        ContentTemplate="{StaticResource StatusBadgeTemplate}" />
+                        <ContentControl Content="{Binding}"
+                                        ContentTemplate="{StaticResource ReminderBadgeTemplate}" />
+                    </WrapPanel>
+                    <ContentControl Content="{Binding}"
+                                    ContentTemplate="{StaticResource TaskBodyTemplate}" />
+                </StackPanel>
             </Border>
         </DataTemplate>
 

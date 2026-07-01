@@ -2180,7 +2180,15 @@ internal static class Program
 
         Assert(
             displayNames.SequenceEqual(
-                new[] { "Ctrl+Alt+A", "Ctrl+Alt+Q", "Ctrl+Alt+T", "Ctrl+Alt+1" }),
+                new[]
+                {
+                    "Ctrl+Alt+A",
+                    "Ctrl+Alt+Q",
+                    "Ctrl+Alt+T",
+                    "Ctrl+Alt+1",
+                    "Ctrl+Alt+S",
+                    "Ctrl+Alt+D"
+                }),
             "Only the final fixed hotkey set should be registered.");
         Assert(
             bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+A").Command ==
@@ -2199,13 +2207,19 @@ internal static class Program
             GlobalHotkeyCommand.CycleOverlayMode,
             "Ctrl+Alt+1 should cycle overlay modes.");
         Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+S").Command ==
+            GlobalHotkeyCommand.OpenSettings,
+            "Ctrl+Alt+S should open Settings instead of clipboard capture.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+D").Command ==
+            GlobalHotkeyCommand.OpenTreeManager,
+            "Ctrl+Alt+D should open Tree Manager instead of clipboard capture.");
+        Assert(
             displayNames.All(name =>
                 name is not "Ctrl+Alt+M" and
                 not "Ctrl+Alt+2" and
-                not "Ctrl+Alt+3" and
-                not "Ctrl+Alt+D" and
-                not "Ctrl+Alt+S"),
-            "Removed mode and clipboard hotkeys must not be registered.");
+                not "Ctrl+Alt+3"),
+            "Removed mode hotkeys must not be registered.");
     }
 
     private static void UtilityShellGeometryPersistence()
@@ -2339,10 +2353,13 @@ internal static class Program
         waiting.PinToPanel = true;
         var remind = TaskItem.Create("REMIND", now.AddMinutes(-1));
         remind.RemindAtUtc = now;
+        var scheduled = TaskItem.Create("Scheduled REMIND", now);
+        scheduled.RemindAtUtc = now.AddHours(2);
         var done = TaskItem.Create("DONE", now);
         done.Status = TaskStatus.Done;
         done.Completed = true;
-        var tasks = new[] { todo, focus, waiting, remind, done };
+        done.RemindAtUtc = now.AddHours(1);
+        var tasks = new[] { todo, focus, waiting, remind, scheduled, done };
         var sourceIds = tasks.Select(task => task.Id).ToArray();
         var ordered = ReminderAttentionService.OrderForOverlay(tasks, now).ToList();
 
@@ -2353,8 +2370,13 @@ internal static class Program
         Assert(working.Count == 2, "Working should show only FOCUS and active REMIND tasks.");
         Assert(working.Any(task => task.Id == focus.Id), "Working should include FOCUS tasks.");
         Assert(working.Any(task => task.Id == remind.Id), "Working should preserve REMIND attention items.");
-        Assert(working.All(task => task.Id != todo.Id && task.Id != waiting.Id && task.Id != done.Id),
-            "Working should hide normal TODO, pinned WAIT, and DONE tasks.");
+        Assert(
+            working.All(task =>
+                task.Id != todo.Id &&
+                task.Id != waiting.Id &&
+                task.Id != scheduled.Id &&
+                task.Id != done.Id),
+            "Working should hide normal TODO, scheduled-only REMIND, pinned WAIT, and DONE tasks.");
         Assert(
             tasks.Select(task => task.Id).SequenceEqual(sourceIds),
             "Working filtering must not mutate or reorder the source list.");
@@ -2400,13 +2422,25 @@ internal static class Program
         var wait = TaskItem.Create("WAIT", now.AddMinutes(-4));
         wait.Status = TaskStatus.Waiting;
         wait.PinToPanel = true;
-        var remind = TaskItem.Create("REMIND", now.AddMinutes(-3));
-        remind.RemindAtUtc = now.AddMinutes(-1);
+        var scheduledRemind = TaskItem.Create("Scheduled REMIND", now.AddMinutes(-3));
+        scheduledRemind.RemindAtUtc = now.AddHours(2);
+        var activeRemind = TaskItem.Create("Active REMIND", now.AddMinutes(-2));
+        activeRemind.RemindAtUtc = now.AddMinutes(-1);
         var todo = TaskItem.Create("TODO", now.AddMinutes(-2));
         var done = TaskItem.Create("DONE", now.AddMinutes(-1));
         done.PinToPanel = true;
+        done.RemindAtUtc = now.AddHours(1);
         TaskInteractionService.Complete(done, now);
-        var tasks = new[] { panelTodo, focus, wait, remind, todo, done };
+        var tasks = new[]
+        {
+            panelTodo,
+            focus,
+            wait,
+            scheduledRemind,
+            activeRemind,
+            todo,
+            done
+        };
         var sourceIds = tasks.Select(task => task.Id).ToArray();
 
         Assert(
@@ -2424,12 +2458,20 @@ internal static class Program
             "WAIT should include only waiting tasks.");
         Assert(
             OverlayTaskFilter.SelectForPanel(tasks, OverlayPanelFilter.Remind, now)
-                .Single().Id == remind.Id,
-            "REMIND should include only active reminder attention.");
+                .Select(task => task.Id)
+                .SequenceEqual(new[] { activeRemind.Id, scheduledRemind.Id }),
+            "REMIND should put active attention before scheduled reminder metadata and exclude DONE.");
         Assert(
             OverlayTaskFilter.SelectForPanel(tasks, OverlayPanelFilter.Todo, now)
                 .Select(task => task.Id)
-                .SequenceEqual(new[] { panelTodo.Id, remind.Id, todo.Id }),
+                .ToHashSet()
+                .SetEquals(new[]
+                {
+                    panelTodo.Id,
+                    scheduledRemind.Id,
+                    activeRemind.Id,
+                    todo.Id
+                }),
             "TODO should follow task status and exclude DONE.");
         Assert(
             tasks.Select(task => task.Id).SequenceEqual(sourceIds),

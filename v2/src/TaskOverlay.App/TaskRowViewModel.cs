@@ -21,6 +21,21 @@ internal sealed class TaskRowViewModel
             : ProjectColorPalette.Resolve(ProjectName, project?.Id ?? Guid.Empty);
         IsReminderDue = ReminderAttentionService.ShouldShowNotification(task, now);
         var workingMode = presentation.IsWorking;
+        var reminderTime = IsReminderDue
+            ? task.LastReminderAtUtc ?? task.RemindAtUtc
+            : task.RemindAtUtc ?? task.LastReminderAtUtc;
+        HasReminderMetadata = task.ReminderActive || reminderTime is not null;
+        ShowReminderMetadata = HasReminderMetadata &&
+                               (!workingMode || IsReminderDue);
+        ReminderMetadataLabel = reminderTime is DateTimeOffset reminderAt
+            ? IsReminderDue
+                ? $"Reminder due {reminderAt.ToLocalTime():g}"
+                : $"Reminder {reminderAt.ToLocalTime():g}"
+            : IsReminderDue
+                ? "Reminder requires attention"
+                : task.ReminderActive
+                    ? "Reminder active"
+                    : string.Empty;
         ShowFocusBadge = OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
             task,
             presentation);
@@ -59,6 +74,12 @@ internal sealed class TaskRowViewModel
     public bool InWork => Task.Status == TaskStatus.InWork;
     public bool IsWaiting => Task.Status == TaskStatus.Waiting;
     public bool IsReminderDue { get; }
+    public bool HasReminderMetadata { get; }
+    public bool ShowReminderMetadata { get; }
+    public string ReminderMetadataLabel { get; }
+    public string ReminderMetadataColorHex => IsReminderDue
+        ? "#FFF2B84B"
+        : "#FFB89A61";
     public string StatusLabel => Task.Status switch
     {
         TaskStatus.InWork => "FOCUS",
