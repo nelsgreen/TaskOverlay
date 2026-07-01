@@ -1114,10 +1114,58 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        TaskInteractionService.ActivateFromClick(_state, task);
-        _log($"Task in-work changed: id={task.Id}; inWork={task.InWork}");
+        OpenTaskDetails(task);
+        e.Handled = true;
+    }
+
+    private void TaskRow_OnMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (e.Handled ||
+            e.ChangedButton != MouseButton.Left ||
+            IsInteractiveEventSource(e.OriginalSource) ||
+            !TryGetTask(sender, out var task))
+        {
+            return;
+        }
+
+        OpenTaskDetails(task);
+        e.Handled = true;
+    }
+
+    private void OverlayFilter_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button
+            {
+                DataContext: OverlayFilterOptionViewModel option
+            } ||
+            _state.OverlaySettings.PanelFilter == option.Filter)
+        {
+            return;
+        }
+
+        _state.OverlaySettings.PanelFilter = option.Filter;
+        if (option.Filter is OverlayPanelFilter.Wait or OverlayPanelFilter.Remind)
+        {
+            _state.OverlaySettings.WaitGroupExpanded = true;
+        }
+
+        StopModeTimers();
+        SetActiveMode(true, refreshPresentation: true);
+        _saveState();
+        _log($"Overlay panel filter changed: filter={option.Filter}.");
+        e.Handled = true;
+    }
+
+    private void WaitGroupHeader_OnClick(object sender, RoutedEventArgs e)
+    {
+        var current = _state.OverlaySettings.WaitGroupExpanded ??
+                      _state.OverlaySettings.PanelFilter == OverlayPanelFilter.Wait;
+        _state.OverlaySettings.WaitGroupExpanded = !current;
         RefreshTasks();
         _saveState();
+        e.Handled = true;
     }
 
     private bool TryGetTask(object sender, out TaskItem task)
@@ -1591,19 +1639,45 @@ public partial class OverlayWindow : Window
         OverlayBounds workArea)
     {
         var now = DateTimeOffset.UtcNow;
-        var rows = presentation.VisualBranch == OverlayVisualBranch.Collapsed
-            ? Array.Empty<object>()
-            : OverlayTaskFilter.SelectForMode(
-                    ReminderAttentionService.OrderForOverlay(_state.Tasks, now),
-                    presentation.Mode,
-                    now)
+        var orderedTasks = ReminderAttentionService
+            .OrderForOverlay(_state.Tasks, now)
+            .ToList();
+        var selectedTasks = presentation.IsWorking
+            ? OverlayTaskFilter.SelectWorking(orderedTasks, now)
+            : OverlayTaskFilter.SelectForPanel(
+                orderedTasks,
+                _state.OverlaySettings.PanelFilter,
+                now);
+        var taskRows = presentation.VisualBranch == OverlayVisualBranch.Collapsed
+            ? Array.Empty<TaskRowViewModel>()
+            : selectedTasks
                 .Select(task => new TaskRowViewModel(
                     _state,
                     task,
                     presentation,
                     now))
-                .Cast<object>()
                 .ToArray();
+        var rows = taskRows.Cast<object>().ToArray();
+        var projectGroups = BuildProjectGroups(
+                taskRows.Where(row => !row.IsWaiting))
+            .Cast<object>()
+            .ToArray();
+        var waitProjectGroups = BuildProjectGroups(
+                taskRows.Where(row => row.IsWaiting))
+            .Cast<object>()
+            .ToArray();
+        var filterOptions = Enum.GetValues<OverlayPanelFilter>()
+            .Select(filter => new OverlayFilterOptionViewModel(
+                filter,
+                GetPanelFilterLabel(filter),
+                OverlayTaskFilter.SelectForPanel(orderedTasks, filter, now).Count(),
+                _state.OverlaySettings.PanelFilter == filter))
+            .Cast<object>()
+            .ToArray();
+        var waitGroupExpanded = _state.OverlaySettings.WaitGroupExpanded ??
+                                _state.OverlaySettings.PanelFilter is
+                                    OverlayPanelFilter.Wait or
+                                    OverlayPanelFilter.Remind;
         var layout = CalculateOverlayLayout(presentation, workArea);
         var panelBackground = presentation.IsActive
             ? ActiveBackground
@@ -1649,9 +1723,41 @@ public partial class OverlayWindow : Window
                 layout.ContentWidth,
                 layout.TasksMaxHeight,
                 layout.EmptyFontSize,
-                modeStatus)
+                modeStatus,
+                projectGroups,
+                waitProjectGroups,
+                filterOptions,
+                _state.OverlaySettings.PanelFilter,
+                waitGroupExpanded)
         };
     }
+
+    private static IReadOnlyList<OverlayProjectGroupViewModel> BuildProjectGroups(
+        IEnumerable<TaskRowViewModel> rows)
+    {
+        return rows
+            .GroupBy(row => row.ProjectId)
+            .Select(group =>
+            {
+                var first = group.First();
+                return new OverlayProjectGroupViewModel(
+                    first.ProjectId,
+                    first.ProjectName,
+                    first.ProjectColorHex,
+                    group.ToArray());
+            })
+            .ToArray();
+    }
+
+    private static string GetPanelFilterLabel(OverlayPanelFilter filter) =>
+        filter switch
+        {
+            OverlayPanelFilter.Focus => "FOCUS",
+            OverlayPanelFilter.Wait => "WAIT",
+            OverlayPanelFilter.Remind => "REMIND",
+            OverlayPanelFilter.Todo => "TODO",
+            _ => "Panel"
+        };
 
     private OverlayBounds ResolvePresentationWorkArea()
     {

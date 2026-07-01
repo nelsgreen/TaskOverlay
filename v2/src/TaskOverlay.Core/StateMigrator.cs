@@ -87,6 +87,12 @@ public static class StateMigrator
             changed = true;
         }
 
+        if (state.OverlaySettings is not null &&
+            state.OverlaySettings.NormalizePanelPresentation())
+        {
+            changed = true;
+        }
+
         if (state.WindowPlacement is not null &&
             UtilityShellGeometryPolicy.Normalize(state.WindowPlacement))
         {
