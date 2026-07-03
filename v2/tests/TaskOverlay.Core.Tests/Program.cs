@@ -97,6 +97,16 @@ internal static class Program
             ("corrupted state backup", CorruptedStateBackup),
             ("crash log contents", CrashLogContents),
             ("diagnostic callback isolation", DiagnosticCallbackIsolation),
+            ("backup filename generation", BackupFilenameGeneration),
+            ("backup machine name sanitization", BackupMachineNameSanitization),
+            ("backup retention selection", BackupRetentionSelection),
+            ("backup disabled and missing state", BackupDisabledAndMissingState),
+            ("backup copy and scoped retention", BackupCopyAndScopedRetention),
+            ("local backup settings persistence", LocalBackupSettingsPersistence),
+            ("backup metadata and latest discovery", BackupMetadataAndLatestDiscovery),
+            ("backup discovery fallback and freshness", BackupDiscoveryFallbackAndFreshness),
+            ("backup restore safety pair", BackupRestoreSafetyPair),
+            ("backup restore rejects invalid state", BackupRestoreRejectsInvalidState),
             ("clipboard lines create multiple tasks", ClipboardLinesCreateMultipleTasks),
             ("single clipboard task collapses lines", SingleClipboardTaskCollapsesLines),
             ("clipboard task with description", ClipboardTaskWithDescription),
@@ -3008,6 +3018,457 @@ internal static class Program
             store.Save(state);
 
             Assert(File.Exists(store.StatePath), "Logger failures must not break storage.");
+        });
+    }
+
+    private static void BackupFilenameGeneration()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-07-03T09:30:00+06:00");
+        var fileName = BackupService.BuildFileName(
+            "Work",
+            "WORKPC",
+            timestamp);
+
+        Assert(
+            fileName == "TaskOverlay_Work_WORKPC_2026-07-03_09-30.json",
+            "Backup filename should include space, machine, and local timestamp.");
+    }
+
+    private static void BackupMachineNameSanitization()
+    {
+        Assert(
+            BackupService.SanitizeMachineName(" Work PC:/01 ") == "Work_PC_01",
+            "Machine name should be safe for a filename.");
+        Assert(
+            BackupService.SanitizeMachineName("***") == "UnknownMachine",
+            "An unusable machine name should use a stable fallback.");
+    }
+
+    private static void BackupRetentionSelection()
+    {
+        var now = DateTimeOffset.Parse("2026-07-03T10:00:00Z");
+        var files = new[]
+        {
+            new BackupFileInfo("newest.json", now.AddHours(-1)),
+            new BackupFileInfo("second.json", now.AddHours(-2)),
+            new BackupFileInfo("third.json", now.AddHours(-3)),
+            new BackupFileInfo("expired.json", now.AddDays(-20))
+        };
+
+        var selected = BackupService.SelectRetentionFiles(
+            files,
+            now,
+            retentionDays: 14,
+            maximumFiles: 2);
+        Assert(selected.Count == 2, "Retention should select age and count overflow.");
+        Assert(selected.Contains("third.json"), "Retention should enforce maximum files.");
+        Assert(selected.Contains("expired.json"), "Retention should remove expired files.");
+    }
+
+    private static void BackupDisabledAndMissingState()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var missingStatePath = Path.Combine(directory, "missing-state.json");
+            var service = new BackupService(missingStatePath);
+            var disabled = service.CreateBackup(
+                new BackupConfiguration(false, directory, 30, 14, 100),
+                requireEnabled: true,
+                DateTimeOffset.UtcNow,
+                "TESTPC");
+            Assert(
+                disabled.Outcome == BackupOutcome.SkippedDisabled,
+                "Disabled automatic backup should skip before file access.");
+            var schedule = new BackupSettings
+            {
+                Enabled = false,
+                FolderPath = directory
+            };
+            var scheduleNow = DateTimeOffset.Parse("2026-07-03T10:00:00Z");
+            Assert(
+                !BackupService.IsAutomaticBackupDue(schedule, scheduleNow),
+                "Disabled automatic backup should never be due.");
+            schedule.Enabled = true;
+            schedule.LastBackupAttemptAtUtc = scheduleNow.AddMinutes(-29);
+            Assert(
+                !BackupService.IsAutomaticBackupDue(schedule, scheduleNow),
+                "A failed or successful attempt should throttle the next run.");
+            schedule.LastBackupAttemptAtUtc = scheduleNow.AddMinutes(-30);
+            Assert(
+                BackupService.IsAutomaticBackupDue(schedule, scheduleNow),
+                "Automatic backup should become due at the configured interval.");
+
+            var missing = service.CreateBackup(
+                new BackupConfiguration(true, directory, 30, 14, 100),
+                requireEnabled: true,
+                DateTimeOffset.UtcNow,
+                "TESTPC");
+            Assert(
+                missing.Outcome == BackupOutcome.Failed &&
+                missing.Message.Contains("State file is missing"),
+                "Missing state should fail safely without throwing.");
+
+            File.WriteAllText(missingStatePath, "{}");
+            var unavailableFolder = service.CreateBackup(
+                new BackupConfiguration(
+                    true,
+                    Path.Combine(directory, "unavailable"),
+                    30,
+                    14,
+                    100),
+                requireEnabled: true,
+                DateTimeOffset.UtcNow,
+                "TESTPC");
+            Assert(
+                unavailableFolder.Outcome == BackupOutcome.Failed &&
+                unavailableFolder.Message.Contains("unavailable"),
+                "Unavailable backup folder should fail safely without being created.");
+        });
+    }
+
+    private static void BackupCopyAndScopedRetention()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var stateDirectory = Path.Combine(directory, "state");
+            var backupDirectory = Path.Combine(directory, "backups");
+            Directory.CreateDirectory(stateDirectory);
+            Directory.CreateDirectory(backupDirectory);
+            var statePath = Path.Combine(stateDirectory, "state.json");
+            const string stateJson = "{\"schemaVersion\":2,\"tasks\":[]}";
+            File.WriteAllText(statePath, stateJson);
+
+            var oldWork = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Work_TEST_PC_2026-06-01_10-00.json");
+            var homeBackup = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Home_TESTPC_2026-06-01_10-00.json");
+            var otherMachineBackup = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Work_OTHERPC_2026-06-01_10-00.json");
+            var oldWorkMetadata = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Work_TEST_PC_2026-06-01_10-00.meta.json");
+            var unrelated = Path.Combine(backupDirectory, "notes.json");
+            File.WriteAllText(oldWork, "old work");
+            File.WriteAllText(oldWorkMetadata, "{}");
+            File.WriteAllText(homeBackup, "old home");
+            File.WriteAllText(otherMachineBackup, "other machine");
+            File.WriteAllText(unrelated, "unrelated");
+            var expiredTimestamp = DateTime.SpecifyKind(
+                new DateTime(2026, 6, 1, 10, 0, 0),
+                DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(oldWork, expiredTimestamp);
+            File.SetLastWriteTimeUtc(homeBackup, expiredTimestamp);
+            File.SetLastWriteTimeUtc(otherMachineBackup, expiredTimestamp);
+
+            var result = new BackupService(statePath).CreateBackup(
+                new BackupConfiguration(true, backupDirectory, 30, 14, 100),
+                requireEnabled: true,
+                DateTimeOffset.Parse("2026-07-03T09:30:00Z"),
+                "TEST_PC");
+
+            Assert(result.Succeeded, "Backup copy should succeed in a local folder.");
+            Assert(
+                result.BackupPath is not null &&
+                File.ReadAllText(result.BackupPath) == stateJson,
+                "Backup should contain an unchanged copy of state data.");
+            Assert(!File.Exists(oldWork), "Expired Work backup should be removed.");
+            Assert(
+                !File.Exists(oldWorkMetadata),
+                "Retention should remove metadata with its expired backup.");
+            Assert(File.Exists(homeBackup), "Work retention must not remove Home backups.");
+            Assert(
+                File.Exists(otherMachineBackup),
+                "Retention must not remove another machine's Work backups.");
+            Assert(File.Exists(unrelated), "Retention must not remove unrelated files.");
+            Assert(
+                !Directory.EnumerateFiles(backupDirectory, "*.tmp").Any(),
+                "Successful backup should leave no temporary files.");
+            var metadataPath = Path.Combine(
+                backupDirectory,
+                $"{Path.GetFileNameWithoutExtension(result.BackupPath)}.meta.json");
+            Assert(File.Exists(metadataPath), "Backup should create matching metadata.");
+        });
+    }
+
+    private static void LocalBackupSettingsPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new LocalSettingsStore(directory);
+            var settings = new LocalAppSettings();
+            settings.Backups.Enabled = true;
+            settings.Backups.FolderPath = Path.Combine(directory, "Backups");
+            settings.Backups.LastBackupAtUtc =
+                DateTimeOffset.Parse("2026-07-03T03:30:00Z");
+            settings.Backups.LastBackupAttemptAtUtc =
+                DateTimeOffset.Parse("2026-07-03T03:31:00Z");
+            store.Save(settings);
+
+            var loaded = new LocalSettingsStore(directory).Load();
+            Assert(
+                File.Exists(Path.Combine(directory, "localSettings.json")),
+                "Backup settings should use the machine-local settings file.");
+            Assert(
+                !File.Exists(Path.Combine(directory, "state.json")),
+                "Saving backup settings must not create or modify shared state.json.");
+            Assert(loaded.Backups.Enabled, "Backup enabled setting should persist.");
+            Assert(
+                loaded.Backups.FolderPath == settings.Backups.FolderPath,
+                "Machine-local backup folder should persist outside state.json.");
+            Assert(
+                loaded.Backups.IntervalMinutes == 30 &&
+                loaded.Backups.RetentionDays == 14 &&
+                loaded.Backups.MaximumFiles == 100,
+                "Backup defaults should remain stable across save/load.");
+            Assert(
+                loaded.Backups.LastBackupAttemptAtUtc ==
+                settings.Backups.LastBackupAttemptAtUtc,
+                "Backup attempt timestamp should persist for interval throttling.");
+        });
+    }
+
+    private static void BackupMetadataAndLatestDiscovery()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var statePath = Path.Combine(directory, "state.json");
+            var backupDirectory = Path.Combine(directory, "backups");
+            Directory.CreateDirectory(backupDirectory);
+            File.WriteAllText(statePath, "{\"tasks\":[],\"projects\":[]}");
+            var stateTimestamp = DateTime.SpecifyKind(
+                new DateTime(2026, 7, 3, 9, 25, 0),
+                DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(statePath, stateTimestamp);
+            var service = new BackupService(statePath);
+            var configuration = new BackupConfiguration(
+                true,
+                backupDirectory,
+                30,
+                14,
+                100);
+
+            var emptyCheck = service.CheckBackupFolder(configuration, "WORKPC");
+            Assert(
+                emptyCheck.Status == BackupFreshnessStatus.NoBackupsFound &&
+                !Directory.EnumerateFiles(backupDirectory).Any(),
+                "Freshness check must not create an automatic backup.");
+
+            var createdAt = DateTimeOffset.Parse("2026-07-03T16:46:00Z");
+            var backup = service.CreateBackup(
+                configuration,
+                requireEnabled: true,
+                createdAt,
+                "WORKPC");
+            Assert(backup.Succeeded, "Backup with metadata should succeed.");
+            var metadataPath = Path.Combine(
+                backupDirectory,
+                $"{Path.GetFileNameWithoutExtension(backup.BackupPath!)}.meta.json");
+            using var metadataDocument = JsonDocument.Parse(
+                File.ReadAllText(metadataPath));
+            var metadata = metadataDocument.RootElement;
+            Assert(
+                metadata.GetProperty("sourceMachine").GetString() == "WORKPC",
+                "Metadata should contain the source machine.");
+            Assert(
+                metadata.GetProperty("taskSpace").GetString() == "Work",
+                "Metadata should contain the task space.");
+            Assert(
+                metadata.GetProperty("backupCreatedAtUtc").GetDateTimeOffset() ==
+                createdAt,
+                "Metadata should contain the UTC creation timestamp.");
+            Assert(
+                metadata.GetProperty("stateLastWriteTimeUtc").GetDateTimeOffset() ==
+                new DateTimeOffset(stateTimestamp),
+                "Metadata should contain the source state timestamp.");
+
+            var check = service.CheckBackupFolder(configuration, "HOMEPC");
+            Assert(check.LatestBackup is not null, "Latest backup should be discovered.");
+            Assert(
+                check.LatestBackup!.MetadataPath == metadataPath &&
+                check.LatestBackup.SourceMachine == "WORKPC" &&
+                check.LatestBackup.TaskSpace == "Work",
+                "Discovery should prefer valid metadata values.");
+            Assert(
+                check.Status == BackupFreshnessStatus.UpToDate,
+                "Matching state timestamps should appear up to date.");
+        });
+    }
+
+    private static void BackupDiscoveryFallbackAndFreshness()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var statePath = Path.Combine(directory, "state.json");
+            var backupDirectory = Path.Combine(directory, "backups");
+            Directory.CreateDirectory(backupDirectory);
+            File.WriteAllText(statePath, "{\"tasks\":[],\"projects\":[]}");
+            File.SetLastWriteTimeUtc(
+                statePath,
+                DateTime.SpecifyKind(new DateTime(2026, 7, 2, 10, 0, 0), DateTimeKind.Utc));
+
+            var workBackup = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Work_REMOTE_PC_2026-07-03_12-00.json");
+            File.WriteAllText(workBackup, "{\"tasks\":[],\"projects\":[]}");
+            File.WriteAllText(
+                Path.Combine(
+                    backupDirectory,
+                    "TaskOverlay_Work_REMOTE_PC_2026-07-03_12-00.meta.json"),
+                "not valid json");
+            File.WriteAllText(
+                Path.Combine(
+                    backupDirectory,
+                    "TaskOverlay_Home_OTHERPC_2026-07-04_12-00.json"),
+                "{\"tasks\":[],\"projects\":[]}");
+            File.WriteAllText(
+                Path.Combine(backupDirectory, "unrelated.json"),
+                "{}");
+
+            var service = new BackupService(statePath);
+            var configuration = new BackupConfiguration(
+                true,
+                backupDirectory,
+                30,
+                14,
+                100);
+            var backupNewer = service.CheckBackupFolder(configuration, "LOCALPC");
+            Assert(
+                backupNewer.Status == BackupFreshnessStatus.BackupNewer,
+                "Filename timestamp fallback should detect a newer backup.");
+            Assert(
+                backupNewer.LatestBackup?.SourceMachine == "REMOTE_PC",
+                "Source machine should be inferred from filename when metadata is invalid.");
+            Assert(
+                backupNewer.LatestBackup?.BackupPath == workBackup,
+                "Discovery should ignore unrelated and future Home files.");
+
+            File.SetLastWriteTimeUtc(
+                statePath,
+                DateTime.SpecifyKind(new DateTime(2026, 7, 5, 10, 0, 0), DateTimeKind.Utc));
+            var localNewer = service.CheckBackupFolder(configuration, "LOCALPC");
+            Assert(
+                localNewer.Status == BackupFreshnessStatus.LocalNewer,
+                "Freshness comparison should detect newer local state.");
+        });
+    }
+
+    private static void BackupRestoreSafetyPair()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var localDirectory = Path.Combine(directory, "local");
+            var remoteDirectory = Path.Combine(directory, "remote");
+            var backupDirectory = Path.Combine(directory, "backups");
+            Directory.CreateDirectory(localDirectory);
+            Directory.CreateDirectory(remoteDirectory);
+            Directory.CreateDirectory(backupDirectory);
+            var localStatePath = Path.Combine(localDirectory, "state.json");
+            var remoteStatePath = Path.Combine(remoteDirectory, "state.json");
+            const string localJson =
+                "{\"tasks\":[{\"title\":\"local\"}],\"projects\":[]}";
+            const string remoteJson =
+                "{\"tasks\":[{\"title\":\"remote\"}],\"projects\":[]}";
+            File.WriteAllText(localStatePath, localJson);
+            File.WriteAllText(remoteStatePath, remoteJson);
+            File.SetLastWriteTimeUtc(
+                localStatePath,
+                DateTime.SpecifyKind(new DateTime(2026, 7, 3, 8, 0, 0), DateTimeKind.Utc));
+            File.SetLastWriteTimeUtc(
+                remoteStatePath,
+                DateTime.SpecifyKind(new DateTime(2026, 7, 3, 10, 0, 0), DateTimeKind.Utc));
+            var configuration = new BackupConfiguration(
+                true,
+                backupDirectory,
+                30,
+                14,
+                100);
+            var remoteBackup = new BackupService(remoteStatePath).CreateBackup(
+                configuration,
+                requireEnabled: true,
+                DateTimeOffset.Parse("2026-07-03T10:05:00Z"),
+                "REMOTEPC");
+            Assert(remoteBackup.Succeeded, "Remote test backup should be created.");
+
+            var localService = new BackupService(localStatePath);
+            var check = localService.CheckBackupFolder(configuration, "LOCALPC");
+            Assert(
+                check.Status == BackupFreshnessStatus.BackupNewer &&
+                check.LatestBackup is not null,
+                "Remote backup should be a restore candidate.");
+            var restored = localService.RestoreLatestBackup(
+                configuration,
+                check.LatestBackup!,
+                DateTimeOffset.Parse("2026-07-03T10:10:00Z"),
+                "LOCALPC");
+
+            Assert(restored.Succeeded, "Valid latest backup should restore.");
+            Assert(
+                File.ReadAllText(localStatePath) == remoteJson,
+                "Restore should replace local state with selected backup data.");
+            Assert(
+                File.Exists(remoteBackup.BackupPath!),
+                "Restore must not delete the selected backup.");
+            Assert(
+                restored.SafetyBackupPath is not null &&
+                File.ReadAllText(restored.SafetyBackupPath) == localJson,
+                "Restore should preserve current local state in a safety backup.");
+            var safetyMetadataPath = Path.Combine(
+                backupDirectory,
+                $"{Path.GetFileNameWithoutExtension(restored.SafetyBackupPath!)}.meta.json");
+            Assert(
+                File.Exists(safetyMetadataPath),
+                "Before-restore safety backup should include metadata.");
+            var afterRestoreBackup = localService.CreateBackup(
+                configuration with { MaximumFiles = 1 },
+                requireEnabled: true,
+                DateTimeOffset.Parse("2026-07-03T10:11:00Z"),
+                "LOCALPC");
+            Assert(afterRestoreBackup.Succeeded, "Backup should still work after restore.");
+            Assert(
+                File.Exists(restored.SafetyBackupPath),
+                "Retention must not delete a before-restore safety backup.");
+            Assert(
+                File.Exists(remoteBackup.BackupPath!),
+                "Local-machine retention must not delete the selected remote backup.");
+        });
+    }
+
+    private static void BackupRestoreRejectsInvalidState()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var statePath = Path.Combine(directory, "state.json");
+            var backupDirectory = Path.Combine(directory, "backups");
+            Directory.CreateDirectory(backupDirectory);
+            const string localJson = "{\"tasks\":[],\"projects\":[]}";
+            File.WriteAllText(statePath, localJson);
+            var invalidPath = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Work_REMOTEPC_2026-07-03_12-00.json");
+            File.WriteAllText(invalidPath, "not valid json");
+            var candidate = new BackupCandidate(
+                invalidPath,
+                null,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                "REMOTEPC",
+                "Work");
+            var result = new BackupService(statePath).RestoreLatestBackup(
+                new BackupConfiguration(true, backupDirectory, 30, 14, 100),
+                candidate,
+                DateTimeOffset.UtcNow,
+                "LOCALPC");
+
+            Assert(!result.Succeeded, "Invalid JSON backup must be rejected.");
+            Assert(
+                File.ReadAllText(statePath) == localJson,
+                "Invalid restore must not change local state.");
+            Assert(
+                !Directory.EnumerateFiles(backupDirectory, "*_before-restore.json").Any(),
+                "Invalid restore must not create a misleading safety backup.");
         });
     }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -25,10 +26,17 @@ public partial class App : System.Windows.Application
     private Forms.ToolStripMenuItem? _pinnedExpandedMenuItem;
     private GlobalHotkeyManager? _hotkeyManager;
     private AppStateStore? _stateStore;
+    private LocalSettingsStore? _localSettingsStore;
+    private LocalAppSettings? _localSettings;
+    private BackupService? _backupService;
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
     private SingleInstanceGuard? _singleInstanceGuard;
     private DispatcherTimer? _reminderTimer;
+    private DispatcherTimer? _backupTimer;
+    private readonly SemaphoreSlim _backupGate = new(1, 1);
+    private BackupFolderCheckResult? _latestBackupCheck;
+    private bool _stateWritesSuppressed;
     private volatile bool _isShuttingDown;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -51,6 +59,13 @@ public partial class App : System.Windows.Application
             _stateStore = new AppStateStore(
                 _diagnostics.StateDirectory,
                 (message, exception) => _diagnostics.Log(message, exception));
+            _localSettingsStore = new LocalSettingsStore(
+                _diagnostics.StateDirectory,
+                (message, exception) => _diagnostics.Log(message, exception));
+            _localSettings = _localSettingsStore.Load();
+            _backupService = new BackupService(
+                _stateStore.StatePath,
+                (message, exception) => _diagnostics.Log(message, exception));
             _state = _stateStore.Load();
             if (MvpProjectSeeder.EnsureSeedProjects(_state))
             {
@@ -58,12 +73,15 @@ public partial class App : System.Windows.Application
                 _diagnostics.Log("Daily MVP projects seeded.");
             }
 
+            RunStartupBackupFreshnessCheck();
+
             _overlayWindow = GetOrCreateOverlayWindow();
             _overlayWindow.Show();
 
             CreateTrayIcon();
             RegisterGlobalHotkeys();
             StartReminderTimer();
+            StartBackupTimer();
             _diagnostics.Log("Application startup completed.");
         }
         catch (Exception ex)
@@ -85,6 +103,7 @@ public partial class App : System.Windows.Application
 
         DisposeGlobalHotkeys();
         StopReminderTimer();
+        StopBackupTimer();
         try
         {
             _dueAttentionWindow?.CloseForExit();
@@ -627,6 +646,199 @@ public partial class App : System.Windows.Application
         _reminderTimer = null;
     }
 
+    private void StartBackupTimer()
+    {
+        if (_backupTimer is not null)
+        {
+            return;
+        }
+
+        _backupTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromMinutes(1)
+        };
+        _backupTimer.Tick += BackupTimer_OnTick;
+        _backupTimer.Start();
+        _ = RunAutomaticBackupAsync();
+    }
+
+    private async void BackupTimer_OnTick(object? sender, EventArgs e)
+    {
+        await RunAutomaticBackupAsync();
+    }
+
+    private async Task RunAutomaticBackupAsync()
+    {
+        if (_isShuttingDown ||
+            _localSettings is null ||
+            !BackupService.IsAutomaticBackupDue(
+                _localSettings.Backups,
+                DateTimeOffset.UtcNow))
+        {
+            return;
+        }
+
+        await RunBackupAsync(manual: false);
+    }
+
+    private void RunStartupBackupFreshnessCheck()
+    {
+        if (_localSettings is null ||
+            _backupService is null ||
+            !_localSettings.Backups.Enabled ||
+            string.IsNullOrWhiteSpace(_localSettings.Backups.FolderPath))
+        {
+            return;
+        }
+
+        _latestBackupCheck = _backupService.CheckBackupFolder(
+            _localSettings.Backups.Snapshot());
+        if (_latestBackupCheck.Status != BackupFreshnessStatus.BackupNewer ||
+            _latestBackupCheck.LatestBackup is not BackupCandidate candidate)
+        {
+            return;
+        }
+
+        if (!BackupRestorePromptWindow.ShowPrompt(_latestBackupCheck, owner: null))
+        {
+            _diagnostics?.Log("Startup backup restore skipped by user.");
+            return;
+        }
+
+        var restore = _backupService.RestoreLatestBackup(
+            _localSettings.Backups.Snapshot(),
+            candidate);
+        if (!restore.Succeeded)
+        {
+            MessageBox.Show(
+                restore.Message,
+                "TaskOverlay backup restore",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        _diagnostics?.Log("Startup backup restored before UI initialization.");
+        _state = _stateStore?.Load();
+        _latestBackupCheck = _backupService.CheckBackupFolder(
+            _localSettings.Backups.Snapshot());
+    }
+
+    private async Task<BackupFolderCheckResult> CheckBackupFolderAsync()
+    {
+        if (_localSettings is null || _backupService is null)
+        {
+            return new BackupFolderCheckResult(
+                BackupFreshnessStatus.Failed,
+                "Backup service is not available.",
+                null,
+                Environment.MachineName);
+        }
+
+        _latestBackupCheck = await Task.Run(() =>
+            _backupService.CheckBackupFolder(_localSettings.Backups.Snapshot()));
+        return _latestBackupCheck;
+    }
+
+    private async Task<RestoreResult> RestoreLatestBackupAsync()
+    {
+        if (_localSettings is null ||
+            _backupService is null ||
+            _latestBackupCheck?.LatestBackup is not BackupCandidate candidate)
+        {
+            return new RestoreResult(false, "No restore candidate is available.");
+        }
+
+        var result = await Task.Run(() => _backupService.RestoreLatestBackup(
+            _localSettings.Backups.Snapshot(),
+            candidate));
+        if (result.Succeeded)
+        {
+            _stateWritesSuppressed = true;
+            StopBackupTimer();
+            StopReminderTimer();
+            _diagnostics?.Log(
+                "Manual backup restore succeeded; state writes are suppressed until restart.");
+        }
+
+        return result;
+    }
+
+    private async Task<BackupResult> BackupNowAsync()
+    {
+        _diagnostics?.Log("Backup now requested.");
+        return await RunBackupAsync(manual: true);
+    }
+
+    private async Task<BackupResult> RunBackupAsync(bool manual)
+    {
+        if (_isShuttingDown ||
+            _localSettings is null ||
+            _backupService is null)
+        {
+            return new BackupResult(
+                BackupOutcome.Failed,
+                "Backup service is not available.");
+        }
+
+        if (!await _backupGate.WaitAsync(0))
+        {
+            return new BackupResult(
+                BackupOutcome.Failed,
+                "A backup is already in progress.");
+        }
+
+        try
+        {
+            var configuration = _localSettings.Backups.Snapshot();
+            var result = await Task.Run(() => _backupService.CreateBackup(
+                configuration,
+                requireEnabled: !manual,
+                DateTimeOffset.Now));
+            _localSettings.Backups.LastBackupAttemptAtUtc = DateTimeOffset.UtcNow;
+
+            if (result.Succeeded)
+            {
+                _localSettings.Backups.LastBackupAtUtc = DateTimeOffset.UtcNow;
+                _localSettings.Backups.LastError = string.Empty;
+            }
+            else if (result.Outcome == BackupOutcome.Failed)
+            {
+                _localSettings.Backups.LastError = result.Message;
+            }
+
+            SaveLocalSettings();
+            _utilityShellWindow?.RefreshSettings();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            const string message = "Backup operation failed unexpectedly.";
+            _diagnostics?.Log(message, ex);
+            _localSettings.Backups.LastBackupAttemptAtUtc = DateTimeOffset.UtcNow;
+            _localSettings.Backups.LastError = message;
+            SaveLocalSettings();
+            _utilityShellWindow?.RefreshSettings();
+            return new BackupResult(BackupOutcome.Failed, message);
+        }
+        finally
+        {
+            _backupGate.Release();
+        }
+    }
+
+    private void StopBackupTimer()
+    {
+        if (_backupTimer is null)
+        {
+            return;
+        }
+
+        _backupTimer.Stop();
+        _backupTimer.Tick -= BackupTimer_OnTick;
+        _backupTimer = null;
+    }
+
     private void ShowSettings()
     {
         ShowUtilityShell(AppWindowKind.Settings);
@@ -713,7 +925,14 @@ public partial class App : System.Windows.Application
                 SetOverlayMode,
                 () => OpenFolder(_diagnostics?.LogsDirectory),
                 () => OpenFolder(_stateStore?.StateDirectory),
-                ResetSavedWindowPositions),
+                ResetSavedWindowPositions,
+                GetBackupSettings,
+                SaveLocalSettings,
+                ChooseBackupFolder,
+                OpenConfiguredBackupFolder,
+                BackupNowAsync,
+                CheckBackupFolderAsync,
+                RestoreLatestBackupAsync),
             active => _overlayWindow?.SetModalInteractionActive(active));
         _utilityShellWindow.ActiveTabChanged += UtilityShellWindow_OnActiveTabChanged;
         _utilityShellWindow.Closed += UtilityShellWindow_OnClosed;
@@ -787,6 +1006,72 @@ public partial class App : System.Windows.Application
             FileName = path,
             UseShellExecute = true
         });
+    }
+
+    private BackupSettings GetBackupSettings()
+    {
+        return _localSettings?.Backups ??
+               throw new InvalidOperationException(
+                   "Local settings are not available before startup completes.");
+    }
+
+    private void SaveLocalSettings()
+    {
+        if (_localSettingsStore is null || _localSettings is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _localSettingsStore.Save(_localSettings);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            _diagnostics?.Log("Local settings save failed.", ex);
+        }
+    }
+
+    private string? ChooseBackupFolder()
+    {
+        using var dialog = new Forms.FolderBrowserDialog
+        {
+            Description = "Choose a local folder for TaskOverlay backups",
+            ShowNewFolderButton = true,
+            UseDescriptionForTitle = true
+        };
+        var currentPath = _localSettings?.Backups.FolderPath;
+        if (!string.IsNullOrWhiteSpace(currentPath) &&
+            System.IO.Directory.Exists(currentPath))
+        {
+            dialog.SelectedPath = currentPath;
+        }
+
+        return dialog.ShowDialog() == Forms.DialogResult.OK
+            ? dialog.SelectedPath
+            : null;
+    }
+
+    private bool OpenConfiguredBackupFolder()
+    {
+        var path = _localSettings?.Backups.FolderPath;
+        if (string.IsNullOrWhiteSpace(path) ||
+            !System.IO.Directory.Exists(path))
+        {
+            _diagnostics?.Log("Backup folder is missing or unavailable.");
+            return false;
+        }
+
+        try
+        {
+            OpenFolder(path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("Backup folder could not be opened.", ex);
+            return false;
+        }
     }
 
     private void ResetSavedWindowPositions()
@@ -984,6 +1269,7 @@ public partial class App : System.Windows.Application
         _diagnostics?.Log($"Application shutdown started. Reason: {reason}");
 
         StopReminderTimer();
+        StopBackupTimer();
         CaptureUtilityShellGeometry();
         StopOverlayAndPersist();
         DisposeGlobalHotkeys();
@@ -1040,7 +1326,8 @@ public partial class App : System.Windows.Application
 
     private void PersistState(bool allowDuringShutdown)
     {
-        if ((!allowDuringShutdown && _isShuttingDown) ||
+        if (_stateWritesSuppressed ||
+            (!allowDuringShutdown && _isShuttingDown) ||
             _stateStore is null ||
             _state is null)
         {
