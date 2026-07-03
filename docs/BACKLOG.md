@@ -123,6 +123,14 @@ product area so implementation work can be split into bounded changes.
 ## 7. Settings
 
 - Redesign Settings window.
+- Add Work/Home task spaces:
+  - Provide a Settings switch between Work mode and Home mode.
+  - Work mode is the current product/task space being developed now.
+  - Home mode should use the same app functionality but a completely separate task memory for household, home, personal chores, and non-work tasks.
+  - Work and Home tasks must be isolated and must not appear in each other's Tree Manager, overlay, reminders, calendar views, backups, or search by default.
+  - Switching mode should swap the active task store/context safely without mixing tasks.
+  - Store the active task space selection and make it visible in Settings and possibly on the handle/panel later.
+  - Plan for separate backup files per task space.
 - Add window size controls:
   - Auto quest tracker.
   - Collapsed hover panel.
