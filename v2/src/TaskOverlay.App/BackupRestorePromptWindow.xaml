@@ -40,6 +40,14 @@
                                Style="{StaticResource AppSubtitleStyle}" />
                 </StackPanel>
             </Border>
+            <TextBlock x:Name="LocalNewerWarningText"
+                       Margin="0,12,0,0"
+                       Foreground="#FFDB646A"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       Text="This backup is older than your local state. Restoring it will replace newer local data."
+                       TextWrapping="Wrap"
+                       Visibility="Collapsed" />
             <TextBlock Margin="0,12,0,0"
                        Foreground="{StaticResource AppTextBrush}"
                        FontSize="12"

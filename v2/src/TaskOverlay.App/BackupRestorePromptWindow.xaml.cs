@@ -21,6 +21,15 @@ public partial class BackupRestorePromptWindow : Window
                 "A Work backup is available in the shared backup folder.";
         }
 
+        LocalNewerWarningText.Visibility =
+            check.Status == BackupFreshnessStatus.LocalNewer
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        if (check.Status == BackupFreshnessStatus.LocalNewer)
+        {
+            Height = 320;
+        }
+
         LocalStateText.Text = check.LocalStateTimestampUtc is DateTimeOffset local
             ? $"Local state: {local.ToLocalTime():yyyy-MM-dd HH:mm}"
             : "Local state: missing";

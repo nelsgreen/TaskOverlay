@@ -373,6 +373,7 @@ public partial class SettingsView : UserControl
             BackupLocalStateText.Text = "Local state: not checked";
             BackupLatestStateText.Text = "Latest backup: not checked";
             BackupFreshnessText.Text = "Click Check backup folder to compare.";
+            BackupRestoreWarningText.Visibility = Visibility.Collapsed;
             RestoreLatestBackupButton.IsEnabled = false;
             return;
         }
@@ -385,6 +386,10 @@ public partial class SettingsView : UserControl
               $"{backup.SourceMachine}, {backup.TaskSpace}"
             : "Latest backup: none";
         BackupFreshnessText.Text = $"Status: {check.Message}";
+        BackupRestoreWarningText.Visibility =
+            check.Status == BackupFreshnessStatus.LocalNewer
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         RestoreLatestBackupButton.IsEnabled =
             check.LatestBackup is not null;
     }
