@@ -31,8 +31,6 @@ public partial class QuickAddView : UserControl
                                       projects.FirstOrDefault();
         StatusListBox.ItemsSource = TaskAttentionUiOptions.QuickAddStatuses;
         StatusListBox.SelectedIndex = 0;
-        ReminderListBox.ItemsSource = TaskAttentionUiOptions.QuickAddReminderPresets;
-        ReminderListBox.SelectedIndex = 0;
         UpdatePlaceholders();
         UpdateWaitingField();
     }
@@ -74,7 +72,7 @@ public partial class QuickAddView : UserControl
 
         if (ProjectListBox.SelectedItem is not ProjectItem project ||
             StatusListBox.SelectedItem is not TaskStatusOption status ||
-            ReminderListBox.SelectedItem is not ReminderPresetOption reminder)
+            ReminderSelector.SelectedPreset is not ReminderPreset reminder)
         {
             ValidationText.Text = "Choose a project, status, and reminder.";
             return;
@@ -84,7 +82,7 @@ public partial class QuickAddView : UserControl
             TitleTextBox.Text,
             project.Id,
             status.Value,
-            reminder.Value,
+            reminder,
             WaitingForTextBox.Text,
             DescriptionTextBox.Text);
         if (!_addTask(values))

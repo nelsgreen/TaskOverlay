@@ -141,17 +141,21 @@ public static class TaskInteractionService
     {
         ArgumentNullException.ThrowIfNull(task);
 
-        if (task.Completed)
+        var timestamp = now ?? DateTimeOffset.UtcNow;
+        var reminderResolved = ReminderService.ApplyPreset(
+            task,
+            ReminderPreset.None,
+            timestamp);
+        if (task.Completed && task.Status == TaskStatus.Done)
         {
-            return false;
+            return reminderResolved;
         }
 
         task.Completed = true;
         task.InWork = false;
         task.Status = TaskStatus.Done;
-        task.ReminderActive = false;
-        task.CompletedAtUtc = now ?? DateTimeOffset.UtcNow;
-        task.UpdatedAtUtc = task.CompletedAtUtc.Value;
+        task.CompletedAtUtc = timestamp;
+        task.UpdatedAtUtc = timestamp;
         return true;
     }
 

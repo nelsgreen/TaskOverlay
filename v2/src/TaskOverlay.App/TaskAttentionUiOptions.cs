@@ -27,12 +27,13 @@ internal static class TaskAttentionUiOptions
             new TaskStatusOption(TaskStatus.Done, "DONE")
         };
 
-    public static IReadOnlyList<ReminderPresetOption> QuickAddReminderPresets { get; } =
+    public static IReadOnlyList<ReminderPresetOption> CompactReminderPresets { get; } =
         new[]
         {
             new ReminderPresetOption(ReminderPreset.None, "No reminder"),
             new ReminderPresetOption(ReminderPreset.In30Minutes, "In 30 minutes"),
             new ReminderPresetOption(ReminderPreset.In1Hour, "In 1 hour"),
+            new ReminderPresetOption(ReminderPreset.In2Hours, "In 2 hours"),
             new ReminderPresetOption(ReminderPreset.TomorrowMorning, "Tomorrow morning")
         };
 

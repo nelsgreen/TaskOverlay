@@ -1,6 +1,7 @@
 <UserControl x:Class="TaskOverlay.App.TaskDetailsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:TaskOverlay.App"
              Background="#FF111318"
              FontFamily="Segoe UI">
     <UserControl.Resources>
@@ -196,9 +197,9 @@
         <Style x:Key="StepperButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource ActionButtonBase}">
-            <Setter Property="MinHeight" Value="22" />
-            <Setter Property="Padding" Value="4,1" />
-            <Setter Property="FontSize" Value="10" />
+            <Setter Property="MinHeight" Value="18" />
+            <Setter Property="Padding" Value="3,0" />
+            <Setter Property="FontSize" Value="8" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Background" Value="Transparent" />
         </Style>
@@ -292,9 +293,11 @@
                     </StackPanel>
                 </Border>
 
-                <Border Margin="0,10,0,0" Style="{StaticResource SectionCardStyle}">
+                <Border Margin="0,10,0,0"
+                        Padding="10"
+                        Style="{StaticResource SectionCardStyle}">
                     <StackPanel>
-                        <DockPanel Margin="0,0,0,10">
+                        <DockPanel Margin="0,0,0,7">
                             <TextBlock VerticalAlignment="Center"
                                        Style="{StaticResource SectionTitleStyle}"
                                        Text="REMIND" />
@@ -306,32 +309,36 @@
                                           Unchecked="ReminderToggleButton_OnChanged" />
                         </DockPanel>
 
+                        <local:ReminderPresetSelector x:Name="ReminderSelector"
+                                                      SelectedPresetChanged="ReminderSelector_OnSelectedPresetChanged" />
+
                         <TextBlock x:Name="ReminderOffText"
+                                   Margin="0,6,0,0"
                                    Foreground="#FF71717A"
-                                   FontSize="12"
+                                   FontSize="11"
                                    Text="REMIND is off." />
 
-                        <StackPanel x:Name="ReminderControlsPanel">
+                        <StackPanel x:Name="ReminderControlsPanel" Margin="0,8,0,0">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="148" />
+                                    <ColumnDefinition Width="132" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="48" />
                                     <ColumnDefinition Width="12" />
-                                    <ColumnDefinition Width="56" />
-                                    <ColumnDefinition Width="18" />
-                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="48" />
                                 </Grid.ColumnDefinitions>
 
                                 <StackPanel Grid.Column="0" VerticalAlignment="Bottom">
                                     <TextBlock Style="{StaticResource FieldLabelStyle}" Text="DATE" />
                                     <DatePicker x:Name="ReminderDatePicker"
-                                                Width="148"
-                                                Height="38"
-                                                Padding="6"
+                                                Width="132"
+                                                Height="32"
+                                                Padding="5"
                                                 HorizontalAlignment="Left"
                                                 Foreground="#FFF4F4F5"
                                                 Background="#FF24272E"
                                                 BorderBrush="#FF4B505B"
-                                                FontSize="12"
+                                                FontSize="11"
                                                 SelectedDateFormat="Short"
                                                 SelectedDateChanged="ReminderDatePicker_OnSelectedDateChanged">
                                         <DatePicker.Resources>
@@ -363,9 +370,9 @@
                                                     Click="HourUpButton_OnClick" />
                                             <TextBlock x:Name="ReminderHourText"
                                                        HorizontalAlignment="Center"
-                                                       Margin="0,2"
+                                                       Margin="0,1"
                                                        Foreground="#FFF4F4F5"
-                                                       FontSize="18"
+                                                       FontSize="15"
                                                        FontWeight="SemiBold" />
                                             <Button Style="{StaticResource StepperButtonStyle}"
                                                     Content="▼"
@@ -375,7 +382,7 @@
                                 </StackPanel>
 
                                 <TextBlock Grid.Column="3"
-                                           Margin="0,26,0,0"
+                                           Margin="0,22,0,0"
                                            HorizontalAlignment="Center"
                                            VerticalAlignment="Center"
                                            Foreground="#FF60A5FA"
@@ -397,9 +404,9 @@
                                                     Click="MinuteUpButton_OnClick" />
                                             <TextBlock x:Name="ReminderMinuteText"
                                                        HorizontalAlignment="Center"
-                                                       Margin="0,2"
+                                                       Margin="0,1"
                                                        Foreground="#FFF4F4F5"
-                                                       FontSize="18"
+                                                       FontSize="15"
                                                        FontWeight="SemiBold" />
                                             <Button Style="{StaticResource StepperButtonStyle}"
                                                     Content="▼"
@@ -409,7 +416,7 @@
                                 </StackPanel>
                             </Grid>
 
-                            <WrapPanel Margin="0,12,0,0">
+                            <WrapPanel Margin="0,8,0,0">
                                 <Button Style="{StaticResource QuickButtonStyle}"
                                         Content="+10m"
                                         Click="Add10MinutesButton_OnClick" />
@@ -422,19 +429,15 @@
                                 <Button Style="{StaticResource QuickButtonStyle}"
                                         Content="+1d"
                                         Click="TomorrowButton_OnClick" />
-                                <Button Style="{StaticResource QuickButtonStyle}"
-                                        Foreground="#FFFCA5A5"
-                                        Content="Clear"
-                                        Click="ClearReminderButton_OnClick" />
                             </WrapPanel>
 
-                            <TextBlock Margin="0,3,0,7"
+                            <TextBlock Margin="0,2,0,5"
                                        Style="{StaticResource FieldLabelStyle}"
-                                       Text="PRESET" />
-                            <ListBox x:Name="ReminderPresetListBox"
+                                       Text="MORE" />
+                            <ListBox x:Name="ReminderAdvancedPresetListBox"
                                      Style="{StaticResource ChipListStyle}"
                                      ItemContainerStyle="{StaticResource ChipItemStyle}"
-                                     SelectionChanged="ReminderPresetListBox_OnSelectionChanged">
+                                     SelectionChanged="ReminderAdvancedPresetListBox_OnSelectionChanged">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <TextBlock FontSize="11" Text="{Binding Label}" />

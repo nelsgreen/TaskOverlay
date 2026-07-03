@@ -18,6 +18,11 @@ public static class ReminderService
             return false;
         }
 
+        if (task.Status == TaskStatus.Done && preset != ReminderPreset.None)
+        {
+            preset = ReminderPreset.None;
+        }
+
         var timestamp = now ?? DateTimeOffset.UtcNow;
         var previous = new ReminderSnapshot(
             task.RemindAtUtc,
@@ -136,6 +141,12 @@ public static class ReminderService
         DateTimeOffset? now = null)
     {
         ArgumentNullException.ThrowIfNull(task);
+        if (task.Status == TaskStatus.Done)
+        {
+            remindAtUtc = null;
+            repeatMinutes = null;
+        }
+
         if (repeatMinutes <= 0)
         {
             repeatMinutes = null;

@@ -18,14 +18,10 @@ public partial class TaskDetailsView : UserControl
             new TaskStatusOption(TaskStatus.Done, "DONE")
         };
 
-    private static readonly IReadOnlyList<ReminderPresetOption> DetailReminderPresets =
+    private static readonly IReadOnlyList<ReminderPresetOption> DetailAdvancedReminderPresets =
         new[]
         {
             new ReminderPresetOption(ReminderPreset.KeepCurrent, "Custom time"),
-            new ReminderPresetOption(ReminderPreset.In30Minutes, "In 30 minutes"),
-            new ReminderPresetOption(ReminderPreset.In1Hour, "In 1 hour"),
-            new ReminderPresetOption(ReminderPreset.In2Hours, "In 2 hours"),
-            new ReminderPresetOption(ReminderPreset.TomorrowMorning, "Tomorrow morning"),
             new ReminderPresetOption(ReminderPreset.RepeatEvery2Hours, "Every 2 hours"),
             new ReminderPresetOption(ReminderPreset.RepeatDaily, "Daily")
         };
@@ -37,8 +33,6 @@ public partial class TaskDetailsView : UserControl
     private readonly Action _closeShell;
     private readonly DateTimeOffset? _originalRemindAtUtc;
     private readonly int? _originalRepeatMinutes;
-    private readonly ReminderPreset _originalReminderPreset;
-    private readonly DateTime? _originalReminderLocalDateTime;
 
     private DateTime? _reminderLocalDateTime;
     private int? _pendingRepeatMinutes;
@@ -61,12 +55,8 @@ public partial class TaskDetailsView : UserControl
         _closeShell = closeShell;
         _originalRemindAtUtc = task.RemindAtUtc;
         _originalRepeatMinutes = task.RemindEveryMinutes;
-        _originalReminderPreset = ReminderService.DetectPreset(task);
         _reminderLocalDateTime = NormalizeToMinute(
             task.RemindAtUtc?.ToLocalTime().DateTime ?? DateTime.Now.AddHours(1));
-        _originalReminderLocalDateTime = task.RemindAtUtc is DateTimeOffset remindAtUtc
-            ? NormalizeToMinute(remindAtUtc.ToLocalTime().DateTime)
-            : null;
         _pendingRepeatMinutes = task.RemindEveryMinutes;
 
         _initializing = true;
@@ -88,13 +78,9 @@ public partial class TaskDetailsView : UserControl
         StatusListBox.SelectedItem = DetailStatuses
             .First(option => option.Value == task.Status);
 
-        ReminderPresetListBox.ItemsSource = DetailReminderPresets;
+        ReminderAdvancedPresetListBox.ItemsSource = DetailAdvancedReminderPresets;
         var detectedPreset = ReminderService.DetectPreset(task);
-        ReminderPresetListBox.SelectedItem = DetailReminderPresets
-            .First(option => option.Value ==
-                (detectedPreset == ReminderPreset.None
-                    ? ReminderPreset.KeepCurrent
-                    : detectedPreset));
+        SelectReminderPresetCore(detectedPreset);
 
         ReminderToggleButton.IsChecked = task.RemindAtUtc is not null;
         ReminderDatePicker.SelectedDate = _reminderLocalDateTime?.Date;
@@ -142,6 +128,18 @@ public partial class TaskDetailsView : UserControl
 
             SelectReminderPreset(ReminderPreset.KeepCurrent);
         }
+        else
+        {
+            _reminderLocalDateTime = null;
+            _pendingRepeatMinutes = null;
+            UpdateReminderControls(
+                () =>
+                {
+                    ReminderDatePicker.SelectedDate = null;
+                    SelectReminderPresetCore(ReminderPreset.None);
+                    UpdateReminderTimeText();
+                });
+        }
 
         UpdateReminderVisibility();
     }
@@ -167,42 +165,68 @@ public partial class TaskDetailsView : UserControl
         SelectReminderPreset(ReminderPreset.KeepCurrent);
     }
 
-    private void ReminderPresetListBox_OnSelectionChanged(
+    private void ReminderSelector_OnSelectedPresetChanged(
+        object? sender,
+        EventArgs e)
+    {
+        if (_initializing ||
+            _updatingReminderControls ||
+            ReminderSelector.SelectedPreset is not ReminderPreset preset)
+        {
+            return;
+        }
+
+        ApplyReminderPreset(preset);
+    }
+
+    private void ReminderAdvancedPresetListBox_OnSelectionChanged(
         object sender,
         SelectionChangedEventArgs e)
     {
         if (_initializing ||
             _updatingReminderControls ||
-            ReminderPresetListBox.SelectedItem is not ReminderPresetOption option)
+            ReminderAdvancedPresetListBox.SelectedItem is not ReminderPresetOption option)
         {
             return;
         }
 
+        ApplyReminderPreset(option.Value);
+    }
+
+    private void ApplyReminderPreset(ReminderPreset preset)
+    {
         var now = DateTime.Now;
-        switch (option.Value)
+        switch (preset)
         {
             case ReminderPreset.KeepCurrent:
+                SetPendingReminder(
+                    _reminderLocalDateTime ?? now.AddHours(1),
+                    preset,
+                    null);
+                return;
+            case ReminderPreset.None:
+                SetPendingNoReminder();
                 return;
             case ReminderPreset.In30Minutes:
-                SetPendingReminder(now.AddMinutes(30), option.Value, null);
+                SetPendingReminder(now.AddMinutes(30), preset, null);
                 return;
             case ReminderPreset.In1Hour:
-                SetPendingReminder(now.AddHours(1), option.Value, null);
+                SetPendingReminder(now.AddHours(1), preset, null);
                 return;
             case ReminderPreset.In2Hours:
-                SetPendingReminder(now.AddHours(2), option.Value, null);
+                SetPendingReminder(now.AddHours(2), preset, null);
                 return;
             case ReminderPreset.TomorrowMorning:
                 SetPendingReminder(
                     DateTime.Today.AddDays(1).AddHours(9),
-                    option.Value,
+                    preset,
                     null);
                 return;
             case ReminderPreset.RepeatEvery2Hours:
-                SetPendingReminder(now.AddHours(2), option.Value, 120);
+                SetPendingReminder(now.AddHours(2), preset, 120);
                 return;
             case ReminderPreset.RepeatDaily:
-                SetPendingReminder(now.AddDays(1), option.Value, 1440);
+                SetPendingReminder(now.AddDays(1), preset, 1440);
                 return;
         }
     }
@@ -230,11 +254,6 @@ public partial class TaskDetailsView : UserControl
 
     private void TomorrowButton_OnClick(object sender, RoutedEventArgs e) =>
         AddQuickReminder(TimeSpan.FromDays(1));
-
-    private void ClearReminderButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        ResetReminderInputs();
-    }
 
     private void AddQuickReminder(TimeSpan increment)
     {
@@ -275,19 +294,17 @@ public partial class TaskDetailsView : UserControl
         UpdateReminderVisibility();
     }
 
-    private void ResetReminderInputs()
+    private void SetPendingNoReminder()
     {
-        _reminderLocalDateTime = _originalReminderLocalDateTime;
-        _pendingRepeatMinutes = _originalRepeatMinutes;
-        _reminderScheduleEdited = false;
+        _reminderLocalDateTime = null;
+        _pendingRepeatMinutes = null;
+        _reminderScheduleEdited = true;
         UpdateReminderControls(
             () =>
             {
-                ReminderToggleButton.IsChecked = true;
-                ReminderDatePicker.SelectedDate = _reminderLocalDateTime?.Date;
-                SelectReminderPresetCore(_originalReminderPreset == ReminderPreset.None
-                    ? ReminderPreset.KeepCurrent
-                    : _originalReminderPreset);
+                ReminderToggleButton.IsChecked = false;
+                ReminderDatePicker.SelectedDate = null;
+                SelectReminderPresetCore(ReminderPreset.None);
                 UpdateReminderTimeText();
             });
         UpdateReminderVisibility();
@@ -311,7 +328,16 @@ public partial class TaskDetailsView : UserControl
 
     private void SelectReminderPresetCore(ReminderPreset preset)
     {
-        ReminderPresetListBox.SelectedItem = DetailReminderPresets
+        if (TaskAttentionUiOptions.CompactReminderPresets.Any(
+                option => option.Value == preset))
+        {
+            ReminderSelector.SelectPreset(preset);
+            ReminderAdvancedPresetListBox.SelectedItem = null;
+            return;
+        }
+
+        ReminderSelector.ClearSelection();
+        ReminderAdvancedPresetListBox.SelectedItem = DetailAdvancedReminderPresets
             .First(option => option.Value == preset);
     }
 
