@@ -31,7 +31,9 @@ product area so implementation work can be split into bounded changes.
   - MEET is not a task and not a task status.
   - MEET is a separate calendar-like item for meeting attention and countdown.
   - MEET does not combine with TODO / FOCUS / WAIT / DONE / REMIND because it is not a task lifecycle item.
-  - MEET should support project, title, description/notes, date, time, optional duration, optional location, and optional link.
+  - MEET should support project, title, description/notes, explicit date, explicit time, optional duration, optional location, and optional meeting link.
+  - MEET should not use relative reminder-style presets such as +30 min, +1 hour, Tomorrow morning, or Next workday morning.
+  - MEET creation should optimize for exact future date/time entry, for example Tuesday 15:00, plus the meeting link.
   - MEET should have a fast compact editor similar in density to the REMIND editor, but with separate meeting-specific behavior.
   - The handle should show time to the next meeting or current/next meetings.
   - Manual MEET items first; external calendar integration later.
