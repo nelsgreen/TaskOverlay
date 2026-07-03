@@ -16,13 +16,30 @@ product area so implementation work can be split into bounded changes.
 - Handle redesign:
   - Make the handle prettier.
   - Make the handle more functional.
+  - Show countdown to the next MEET item on the handle.
+  - Support compact attention counters for FOCUS / REMIND / WAIT / Panel where useful.
+  - Preserve the handle anchor invariant: handle position is the source of truth and must not be derived from panel position.
 - Window size controls per mode in Settings.
 
-## 2. Reminder And Scheduling
+## 2. Reminder, Calendar, Meetings, And Scheduling
 
 - Deadlines for tasks.
+- Deadline should be an optional task field.
 - Keep Deadline separate from REMIND.
-- Meetings reminder module.
+- Show task deadlines in future calendar views.
+- Meetings module:
+  - MEET is not a task and not a task status.
+  - MEET is a separate calendar-like item for meeting attention and countdown.
+  - MEET does not combine with TODO / FOCUS / WAIT / DONE / REMIND because it is not a task lifecycle item.
+  - MEET should support project, title, description/notes, date, time, optional duration, optional location, and optional link.
+  - MEET should have a fast compact editor similar in density to the REMIND editor, but with separate meeting-specific behavior.
+  - The handle should show time to the next meeting or current/next meetings.
+  - Manual MEET items first; external calendar integration later.
+- Application calendar:
+  - Add an internal calendar/timeline view to TaskOverlay.
+  - Calendar should show MEET items, task REMIND items, and task Deadline items together.
+  - Calendar should keep the concepts visually separate: MEET, REMIND, and Deadline are different item types.
+  - Calendar is an app-level planning/attention view, not a replacement for Tree Manager.
 - REMIND display settings.
 - Upcoming reminder display settings.
 - Reminder/date/time UX improvements.
