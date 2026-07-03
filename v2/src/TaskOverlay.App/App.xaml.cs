@@ -16,6 +16,7 @@ public partial class App : System.Windows.Application
     private OverlayWindow? _overlayWindow;
     private UtilityShellWindow? _utilityShellWindow;
     private TreeManagerWindow? _treeManagerWindow;
+    private WorkspaceWindow? _workspaceWindow;
     private DueAttentionWindow? _dueAttentionWindow;
     private Forms.NotifyIcon? _trayIcon;
     private Drawing.Icon? _trayApplicationIcon;
@@ -196,6 +197,10 @@ public partial class App : System.Windows.Application
         _trayMenu.Items.Add(_overlayModeMenuItem);
         UpdateOverlayModeUi(_state?.OverlaySettings.OverlayMode ??
                             OverlayMode.Working);
+        _trayMenu.Items.Add(
+            "Open Workspace",
+            null,
+            (_, _) => RunCommand("Tray", "Open Workspace", ShowWorkspace));
         _trayMenu.Items.Add(
             "Open Tree Manager",
             null,
@@ -869,6 +874,34 @@ public partial class App : System.Windows.Application
         _treeManagerWindow.Activate();
     }
 
+    private void ShowWorkspace()
+    {
+        if (_isShuttingDown)
+        {
+            return;
+        }
+
+        if (_workspaceWindow is null)
+        {
+            _workspaceWindow = new WorkspaceWindow();
+            _workspaceWindow.Closed += WorkspaceWindow_OnClosed;
+        }
+
+        _workspaceWindow.Show();
+        _workspaceWindow.Activate();
+    }
+
+    private void WorkspaceWindow_OnClosed(object? sender, EventArgs e)
+    {
+        if (_workspaceWindow is null)
+        {
+            return;
+        }
+
+        _workspaceWindow.Closed -= WorkspaceWindow_OnClosed;
+        _workspaceWindow = null;
+    }
+
     private void TreeManagerWindow_OnClosed(object? sender, EventArgs e)
     {
         if (_treeManagerWindow is null)
@@ -1281,6 +1314,8 @@ public partial class App : System.Windows.Application
             _utilityShellWindow = null;
             _treeManagerWindow?.Close();
             _treeManagerWindow = null;
+            _workspaceWindow?.Close();
+            _workspaceWindow = null;
             _dueAttentionWindow?.CloseForExit();
             _dueAttentionWindow = null;
             if (_overlayWindow is not null)

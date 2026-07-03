@@ -20,6 +20,34 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10.12.1'
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: 'pnpm'
+          cache-dependency-path: v2/workspace-ui/pnpm-lock.yaml
+
+      - name: Install Workspace frontend
+        run: pnpm --dir .\v2\workspace-ui install --frozen-lockfile
+
+      - name: Build Workspace static export
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: pnpm --dir .\v2\workspace-ui build
+
+      - name: Verify Workspace static export
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath '.\v2\workspace-ui\out\index.html')) {
+            throw "Workspace static export is missing index.html."
+          }
+
       - name: Restore WPF v2
         run: dotnet restore .\v2\TaskOverlay.sln --configfile .\v2\NuGet.Config
 
@@ -45,6 +73,11 @@ jobs:
 
           if ($legacyExe) {
             throw "TaskOverlay.exe must not be included in the WPF v2 artifact."
+          }
+
+          $workspaceIndex = Join-Path $publishDir 'WorkspaceWeb\index.html'
+          if (-not (Test-Path -LiteralPath $workspaceIndex)) {
+            throw "WorkspaceWeb/index.html is missing from publish output."
           }
 
       - name: Upload WPF v2 framework-dependent artifact

@@ -22,6 +22,22 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TaskOverlay.Core\TaskOverlay.Core.csproj" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\workspace-ui\out\**\*">
+      <Link>WorkspaceWeb\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="ValidateWorkspaceStaticExport"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="!Exists('..\..\workspace-ui\out\index.html')"
+           Text="Workspace static export is missing. Run 'pnpm --dir v2/workspace-ui install --frozen-lockfile' and 'pnpm --dir v2/workspace-ui build' before building WPF v2." />
+  </Target>
 
 </Project>
