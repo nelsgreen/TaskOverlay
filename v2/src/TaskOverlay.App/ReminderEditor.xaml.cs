@@ -38,7 +38,7 @@ public partial class ReminderEditor : UserControl
         _localDateTime = remindAtUtc?.ToLocalTime().DateTime;
         _repeatMinutes = remindAtUtc is null ? null : repeatMinutes;
         _selectedPreset = remindAtUtc is null ? ReminderPreset.None : null;
-        _repeatExpanded = false;
+        _repeatExpanded = _repeatMinutes is not null;
         _edited = false;
         RefreshUi();
     }
@@ -216,9 +216,9 @@ public partial class ReminderEditor : UserControl
 
     private void RepeatButton_OnClick(object sender, RoutedEventArgs e)
     {
-        _repeatExpanded = true;
         if (_repeatMinutes is null)
         {
+            _repeatExpanded = true;
             SetReminder(
                 _localDateTime ?? DateTime.Now.AddHours(1),
                 null,
@@ -226,7 +226,11 @@ public partial class ReminderEditor : UserControl
             return;
         }
 
-        RefreshUi();
+        _repeatExpanded = false;
+        SetReminder(
+            _localDateTime ?? DateTime.Now.AddHours(1),
+            null,
+            null);
     }
 
     private void Add(TimeSpan increment)

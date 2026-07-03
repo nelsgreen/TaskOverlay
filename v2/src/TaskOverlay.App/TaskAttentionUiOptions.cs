@@ -39,7 +39,6 @@ internal static class TaskAttentionUiOptions
     public static IReadOnlyList<RepeatOption> RepeatOptions { get; } =
         new[]
         {
-            new RepeatOption(null, "Off"),
             new RepeatOption(60, "Every 1 hour"),
             new RepeatOption(120, "Every 2 hours"),
             new RepeatOption(1440, "Daily"),
