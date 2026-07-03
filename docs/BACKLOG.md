@@ -16,6 +16,9 @@ product area so implementation work can be split into bounded changes.
 - Handle redesign:
   - Make the handle prettier.
   - Make the handle more functional.
+  - Keep the v0 attention-hub direction: a wider pill-shaped handle with MEET countdown, counters, project/task color dots, and a strong dark/purple visual identity is acceptable and preferred.
+  - Do not over-compact the handle just because it is a handle; the v0 size felt usable and visually successful.
+  - Colored compact counters/dots may represent projects or current task counts if the meaning stays discoverable through hover/tooltips.
   - Show countdown to the next MEET item on the handle.
   - Support compact attention counters for FOCUS / REMIND / WAIT / Panel where useful.
   - Preserve the handle anchor invariant: handle position is the source of truth and must not be derived from panel position.
