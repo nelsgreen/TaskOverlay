@@ -66,9 +66,11 @@ product area so implementation work can be split into bounded changes.
 ## 4. Task Interactions
 
 - WAIT fast flow:
-  - Switching task to WAIT opens Task Details.
-  - Cursor focuses Waiting for.
-  - Enter saves.
+  - When a task status is changed to WAIT, show a Waiting for field immediately in Task Details and Quick Add.
+  - Waiting for is where the user writes what or whom the task is waiting for.
+  - In Task Details, switching task to WAIT focuses Waiting for.
+  - In Quick Add, selecting WAIT should reveal the same compact Waiting for field before task creation.
+  - Enter saves where appropriate.
 - Empty status area left click opens quick status menu.
 - Task Details keyboard shortcuts:
   - Enter saves and closes.
