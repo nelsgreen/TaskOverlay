@@ -1615,7 +1615,7 @@ internal static class Program
             (ReminderPreset.In30Minutes, now.AddMinutes(30)),
             (ReminderPreset.In1Hour, now.AddHours(1)),
             (ReminderPreset.In2Hours, now.AddHours(2)),
-            (ReminderPreset.TomorrowMorning, DateTimeOffset.Parse("2026-07-04T09:00:00Z"))
+            (ReminderPreset.TomorrowMorning, DateTimeOffset.Parse("2026-07-04T10:00:00Z"))
         };
         foreach (var (preset, expected) in cases)
         {
@@ -1674,6 +1674,24 @@ internal static class Program
         Assert(
             custom!.RemindAtUtc == customAt && custom.RemindEveryMinutes == 1440,
             "Quick Add should store an explicit custom schedule and repeat interval.");
+
+        var weekly = TaskCaptureService.CreateQuickTask(
+            state,
+            new QuickTaskValues(
+                "Quick weekly reminder",
+                project.Id,
+                TaskStatus.Todo,
+                ReminderPreset.KeepCurrent,
+                string.Empty,
+                string.Empty,
+                customAt,
+                7 * 24 * 60,
+                true),
+            now,
+            TimeZoneInfo.Utc);
+        Assert(
+            weekly is not null && weekly.RemindEveryMinutes == 10080,
+            "Quick Add should store the weekly repeat interval.");
 
         var done = TaskCaptureService.CreateQuickTask(
             state,

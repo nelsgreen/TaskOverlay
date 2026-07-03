@@ -30,7 +30,6 @@ internal static class TaskAttentionUiOptions
     public static IReadOnlyList<ReminderPresetOption> CompactReminderPresets { get; } =
         new[]
         {
-            new ReminderPresetOption(ReminderPreset.None, "No reminder"),
             new ReminderPresetOption(ReminderPreset.In30Minutes, "In 30 minutes"),
             new ReminderPresetOption(ReminderPreset.In1Hour, "In 1 hour"),
             new ReminderPresetOption(ReminderPreset.In2Hours, "In 2 hours"),
@@ -41,7 +40,9 @@ internal static class TaskAttentionUiOptions
         new[]
         {
             new RepeatOption(null, "Off"),
+            new RepeatOption(60, "Every 1 hour"),
             new RepeatOption(120, "Every 2 hours"),
-            new RepeatOption(1440, "Daily")
+            new RepeatOption(1440, "Daily"),
+            new RepeatOption(10080, "Weekly")
         };
 }

@@ -61,14 +61,15 @@
 
     <Border Style="{StaticResource AppCardStyle}">
         <StackPanel>
-            <DockPanel Margin="0,0,0,8">
+            <DockPanel x:Name="HeaderPanel" Margin="0,0,0,8">
                 <TextBlock VerticalAlignment="Center"
                            Foreground="#FFF4B942"
                            FontSize="10"
                            FontWeight="Bold"
                            Text="REMIND" />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Border Margin="0,0,7,0"
+                    <Border x:Name="SummaryBorder"
+                            Margin="0,0,7,0"
                             Padding="8,4"
                             VerticalAlignment="Center"
                             Background="#332D2411"
@@ -99,8 +100,13 @@
             </ListBox>
 
             <StackPanel x:Name="SchedulePanel" Margin="0,3,0,0">
-                <WrapPanel>
-                    <DatePicker x:Name="ReminderDatePicker"
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <WrapPanel Grid.Column="0">
+                        <DatePicker x:Name="ReminderDatePicker"
                                 Width="126"
                                 Height="30"
                                 Margin="0,0,7,6"
@@ -120,8 +126,8 @@
                                 <Setter Property="VerticalContentAlignment" Value="Center" />
                             </Style>
                         </DatePicker.Resources>
-                    </DatePicker>
-                    <TextBox x:Name="ReminderTimeTextBox"
+                        </DatePicker>
+                        <TextBox x:Name="ReminderTimeTextBox"
                              Width="62"
                              Margin="0,0,7,6"
                              Style="{StaticResource ReminderInputStyle}"
@@ -130,23 +136,28 @@
                              ToolTip="Time in HH:mm format"
                              LostKeyboardFocus="ReminderTimeTextBox_OnLostKeyboardFocus"
                              KeyDown="ReminderTimeTextBox_OnKeyDown" />
-                    <Button Style="{StaticResource ReminderButtonStyle}"
+                        <Button Style="{StaticResource ReminderButtonStyle}"
                             Content="+10m"
                             Click="Add10MinutesButton_OnClick" />
-                    <Button Style="{StaticResource ReminderButtonStyle}"
+                        <Button Style="{StaticResource ReminderButtonStyle}"
                             Content="+30m"
                             Click="Add30MinutesButton_OnClick" />
-                    <Button Style="{StaticResource ReminderButtonStyle}"
+                        <Button Style="{StaticResource ReminderButtonStyle}"
                             Content="+1h"
                             Click="Add1HourButton_OnClick" />
-                    <Button Style="{StaticResource ReminderButtonStyle}"
+                        <Button Style="{StaticResource ReminderButtonStyle}"
                             Content="+1d"
                             Click="Add1DayButton_OnClick" />
-                    <Button x:Name="MoreButton"
+                    </WrapPanel>
+                    <Button x:Name="RepeatButton"
+                            Grid.Column="1"
+                            Margin="6,0,0,6"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
                             Style="{StaticResource ReminderButtonStyle}"
-                            Content="More"
-                            Click="MoreButton_OnClick" />
-                </WrapPanel>
+                            Content="Repeat"
+                            Click="RepeatButton_OnClick" />
+                </Grid>
 
                 <StackPanel x:Name="AdvancedPanel" Visibility="Collapsed">
                     <Separator Margin="0,1,0,7" Background="#FF343842" />
@@ -155,10 +166,6 @@
                                    VerticalAlignment="Center"
                                    Style="{StaticResource AppSectionLabelStyle}"
                                    Text="REPEAT" />
-                        <Button DockPanel.Dock="Right"
-                                Style="{StaticResource ReminderButtonStyle}"
-                                Content="Custom time"
-                                Click="CustomTimeButton_OnClick" />
                         <ListBox x:Name="RepeatListBox"
                                  Style="{StaticResource AppChipListStyle}"
                                  ItemContainerStyle="{StaticResource AppChipItemStyle}"

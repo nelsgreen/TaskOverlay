@@ -20,7 +20,7 @@ public partial class ReminderEditor : UserControl
     private int? _originalRepeatMinutes;
     private ReminderPreset? _selectedPreset;
     private bool _updating;
-    private bool _moreExpanded;
+    private bool _repeatExpanded;
     private bool _edited;
 
     public ReminderEditor()
@@ -38,6 +38,7 @@ public partial class ReminderEditor : UserControl
         _localDateTime = remindAtUtc?.ToLocalTime().DateTime;
         _repeatMinutes = remindAtUtc is null ? null : repeatMinutes;
         _selectedPreset = remindAtUtc is null ? ReminderPreset.None : null;
+        _repeatExpanded = false;
         _edited = false;
         RefreshUi();
     }
@@ -137,7 +138,7 @@ public partial class ReminderEditor : UserControl
                 SetReminder(now.AddHours(2), option.Value, null);
                 break;
             case ReminderPreset.TomorrowMorning:
-                SetReminder(DateTime.Today.AddDays(1).AddHours(9), option.Value, null);
+                SetReminder(DateTime.Today.AddDays(1).AddHours(10), option.Value, null);
                 break;
         }
     }
@@ -213,20 +214,19 @@ public partial class ReminderEditor : UserControl
     private void Add1DayButton_OnClick(object sender, RoutedEventArgs e) =>
         Add(TimeSpan.FromDays(1));
 
-    private void MoreButton_OnClick(object sender, RoutedEventArgs e)
+    private void RepeatButton_OnClick(object sender, RoutedEventArgs e)
     {
-        _moreExpanded = !_moreExpanded;
-        RefreshUi();
-    }
-
-    private void CustomTimeButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        if (_localDateTime is null)
+        _repeatExpanded = true;
+        if (_repeatMinutes is null)
         {
-            SetReminder(DateTime.Now.AddHours(1), null, _repeatMinutes);
+            SetReminder(
+                _localDateTime ?? DateTime.Now.AddHours(1),
+                null,
+                60);
+            return;
         }
 
-        FocusDateTime();
+        RefreshUi();
     }
 
     private void Add(TimeSpan increment)
@@ -243,6 +243,7 @@ public partial class ReminderEditor : UserControl
         _localDateTime = null;
         _repeatMinutes = null;
         _selectedPreset = ReminderPreset.None;
+        _repeatExpanded = false;
         RefreshUi();
     }
 
@@ -290,15 +291,24 @@ public partial class ReminderEditor : UserControl
         {
             var enabled = _localDateTime is not null;
             ReminderToggleButton.IsChecked = enabled;
-            SchedulePanel.IsEnabled = enabled;
-            SchedulePanel.Opacity = enabled ? 1 : 0.46;
+            HeaderPanel.Margin = enabled
+                ? new Thickness(0, 0, 0, 8)
+                : new Thickness(0);
+            SummaryBorder.Visibility = enabled
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            PresetListBox.Visibility = enabled
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            SchedulePanel.Visibility = enabled
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             ReminderDatePicker.SelectedDate = _localDateTime?.Date;
             ReminderTimeTextBox.Text = _localDateTime?.ToString("HH:mm") ?? "--:--";
             SummaryText.Text = BuildSummary();
-            AdvancedPanel.Visibility = _moreExpanded
+            AdvancedPanel.Visibility = enabled && _repeatExpanded
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            MoreButton.Content = _moreExpanded ? "Less" : "More";
 
             PresetListBox.SelectedItem = TaskAttentionUiOptions.CompactReminderPresets
                 .FirstOrDefault(option => option.Value == _selectedPreset);
@@ -315,13 +325,15 @@ public partial class ReminderEditor : UserControl
     {
         if (_localDateTime is null)
         {
-            return "No reminder";
+            return string.Empty;
         }
 
         var repeat = _repeatMinutes switch
         {
+            60 => " · 1h",
             120 => " · 2h",
             1440 => " · daily",
+            10080 => " · weekly",
             _ => string.Empty
         };
         return $"{_localDateTime:dd.MM.yyyy HH:mm}{repeat}";
