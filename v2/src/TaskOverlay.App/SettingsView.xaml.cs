@@ -30,6 +30,8 @@ public partial class SettingsView : UserControl
     private readonly Action _closeShell;
     private bool _updatingControls;
     private bool _workingSettingsDirty;
+    private BackupFolderCheckResult? _backupFolderCheck;
+    private string _checkedBackupFolder = string.Empty;
 
     public SettingsView(
         AppState state,
@@ -225,6 +227,8 @@ public partial class SettingsView : UserControl
         var settings = _actions.GetBackupSettings();
         settings.FolderPath = selectedPath;
         settings.LastError = string.Empty;
+        _backupFolderCheck = null;
+        _checkedBackupFolder = string.Empty;
         _actions.SaveBackupSettings();
         UpdateBackupControls();
     }
@@ -248,6 +252,10 @@ public partial class SettingsView : UserControl
             {
                 BackupStatusText.Text = result.Message;
             }
+            else
+            {
+                await CheckBackupFolderCoreAsync();
+            }
         }
         finally
         {
@@ -255,6 +263,60 @@ public partial class SettingsView : UserControl
                 !string.IsNullOrWhiteSpace(
                     _actions.GetBackupSettings().FolderPath);
         }
+    }
+
+    private async void CheckBackupFolderButton_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        await CheckBackupFolderCoreAsync();
+    }
+
+    private async System.Threading.Tasks.Task CheckBackupFolderCoreAsync()
+    {
+        CheckBackupFolderButton.IsEnabled = false;
+        BackupFreshnessText.Text = "Checking backup folder...";
+        try
+        {
+            _backupFolderCheck = await _actions.CheckBackupFolder();
+            _checkedBackupFolder = _actions.GetBackupSettings().FolderPath;
+            UpdateBackupFreshnessDisplay();
+        }
+        finally
+        {
+            CheckBackupFolderButton.IsEnabled = true;
+        }
+    }
+
+    private async void RestoreLatestBackupButton_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_backupFolderCheck?.LatestBackup is null ||
+            !BackupRestorePromptWindow.ShowPrompt(
+                _backupFolderCheck,
+                Window.GetWindow(this)))
+        {
+            return;
+        }
+
+        RestoreLatestBackupButton.IsEnabled = false;
+        BackupFreshnessText.Text = "Restoring latest backup...";
+        var result = await _actions.RestoreLatestBackup();
+        if (!result.Succeeded)
+        {
+            BackupFreshnessText.Text = result.Message;
+            RestoreLatestBackupButton.IsEnabled = true;
+            return;
+        }
+
+        MessageBox.Show(
+            Window.GetWindow(this),
+            result.Message,
+            "TaskOverlay backup restore",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+        Application.Current.Shutdown();
     }
 
     private void UpdateBackupControls()
@@ -274,6 +336,7 @@ public partial class SettingsView : UserControl
             var hasFolder = !string.IsNullOrWhiteSpace(settings.FolderPath);
             OpenBackupFolderButton.IsEnabled = hasFolder;
             BackupNowButton.IsEnabled = hasFolder;
+            CheckBackupFolderButton.IsEnabled = true;
             BackupPolicyText.Text =
                 $"Automatic backups run every {settings.IntervalMinutes} minutes. " +
                 $"Keeps {settings.RetentionDays} days and at most " +
@@ -286,11 +349,44 @@ public partial class SettingsView : UserControl
                     : hasFolder
                         ? "No backup has been created yet."
                         : "Choose a local folder to enable backups.";
+            if (!string.Equals(
+                    _checkedBackupFolder,
+                    settings.FolderPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _backupFolderCheck = null;
+            }
+
+            UpdateBackupFreshnessDisplay();
         }
         finally
         {
             _updatingControls = wasUpdating;
         }
+    }
+
+    private void UpdateBackupFreshnessDisplay()
+    {
+        var check = _backupFolderCheck;
+        if (check is null)
+        {
+            BackupLocalStateText.Text = "Local state: not checked";
+            BackupLatestStateText.Text = "Latest backup: not checked";
+            BackupFreshnessText.Text = "Click Check backup folder to compare.";
+            RestoreLatestBackupButton.IsEnabled = false;
+            return;
+        }
+
+        BackupLocalStateText.Text = check.LocalStateTimestampUtc is DateTimeOffset local
+            ? $"Local state: {local.ToLocalTime():yyyy-MM-dd HH:mm}, {check.CurrentMachine}"
+            : $"Local state: missing, {check.CurrentMachine}";
+        BackupLatestStateText.Text = check.LatestBackup is BackupCandidate backup
+            ? $"Latest backup: {backup.FreshnessUtc.ToLocalTime():yyyy-MM-dd HH:mm}, " +
+              $"{backup.SourceMachine}, {backup.TaskSpace}"
+            : "Latest backup: none";
+        BackupFreshnessText.Text = $"Status: {check.Message}";
+        RestoreLatestBackupButton.IsEnabled =
+            check.LatestBackup is not null;
     }
 
     private void ResetWindowPositionsButton_OnClick(

@@ -35,6 +35,8 @@ public partial class App : System.Windows.Application
     private DispatcherTimer? _reminderTimer;
     private DispatcherTimer? _backupTimer;
     private readonly SemaphoreSlim _backupGate = new(1, 1);
+    private BackupFolderCheckResult? _latestBackupCheck;
+    private bool _stateWritesSuppressed;
     private volatile bool _isShuttingDown;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -70,6 +72,8 @@ public partial class App : System.Windows.Application
                 PersistState();
                 _diagnostics.Log("Daily MVP projects seeded.");
             }
+
+            RunStartupBackupFreshnessCheck();
 
             _overlayWindow = GetOrCreateOverlayWindow();
             _overlayWindow.Show();
@@ -677,6 +681,89 @@ public partial class App : System.Windows.Application
         await RunBackupAsync(manual: false);
     }
 
+    private void RunStartupBackupFreshnessCheck()
+    {
+        if (_localSettings is null ||
+            _backupService is null ||
+            !_localSettings.Backups.Enabled ||
+            string.IsNullOrWhiteSpace(_localSettings.Backups.FolderPath))
+        {
+            return;
+        }
+
+        _latestBackupCheck = _backupService.CheckBackupFolder(
+            _localSettings.Backups.Snapshot());
+        if (_latestBackupCheck.Status != BackupFreshnessStatus.BackupNewer ||
+            _latestBackupCheck.LatestBackup is not BackupCandidate candidate)
+        {
+            return;
+        }
+
+        if (!BackupRestorePromptWindow.ShowPrompt(_latestBackupCheck, owner: null))
+        {
+            _diagnostics?.Log("Startup backup restore skipped by user.");
+            return;
+        }
+
+        var restore = _backupService.RestoreLatestBackup(
+            _localSettings.Backups.Snapshot(),
+            candidate);
+        if (!restore.Succeeded)
+        {
+            MessageBox.Show(
+                restore.Message,
+                "TaskOverlay backup restore",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        _diagnostics?.Log("Startup backup restored before UI initialization.");
+        _state = _stateStore?.Load();
+        _latestBackupCheck = _backupService.CheckBackupFolder(
+            _localSettings.Backups.Snapshot());
+    }
+
+    private async Task<BackupFolderCheckResult> CheckBackupFolderAsync()
+    {
+        if (_localSettings is null || _backupService is null)
+        {
+            return new BackupFolderCheckResult(
+                BackupFreshnessStatus.Failed,
+                "Backup service is not available.",
+                null,
+                Environment.MachineName);
+        }
+
+        _latestBackupCheck = await Task.Run(() =>
+            _backupService.CheckBackupFolder(_localSettings.Backups.Snapshot()));
+        return _latestBackupCheck;
+    }
+
+    private async Task<RestoreResult> RestoreLatestBackupAsync()
+    {
+        if (_localSettings is null ||
+            _backupService is null ||
+            _latestBackupCheck?.LatestBackup is not BackupCandidate candidate)
+        {
+            return new RestoreResult(false, "No restore candidate is available.");
+        }
+
+        var result = await Task.Run(() => _backupService.RestoreLatestBackup(
+            _localSettings.Backups.Snapshot(),
+            candidate));
+        if (result.Succeeded)
+        {
+            _stateWritesSuppressed = true;
+            StopBackupTimer();
+            StopReminderTimer();
+            _diagnostics?.Log(
+                "Manual backup restore succeeded; state writes are suppressed until restart.");
+        }
+
+        return result;
+    }
+
     private async Task<BackupResult> BackupNowAsync()
     {
         _diagnostics?.Log("Backup now requested.");
@@ -843,7 +930,9 @@ public partial class App : System.Windows.Application
                 SaveLocalSettings,
                 ChooseBackupFolder,
                 OpenConfiguredBackupFolder,
-                BackupNowAsync),
+                BackupNowAsync,
+                CheckBackupFolderAsync,
+                RestoreLatestBackupAsync),
             active => _overlayWindow?.SetModalInteractionActive(active));
         _utilityShellWindow.ActiveTabChanged += UtilityShellWindow_OnActiveTabChanged;
         _utilityShellWindow.Closed += UtilityShellWindow_OnClosed;
@@ -1237,7 +1326,8 @@ public partial class App : System.Windows.Application
 
     private void PersistState(bool allowDuringShutdown)
     {
-        if ((!allowDuringShutdown && _isShuttingDown) ||
+        if (_stateWritesSuppressed ||
+            (!allowDuringShutdown && _isShuttingDown) ||
             _stateStore is null ||
             _state is null)
         {

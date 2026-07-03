@@ -336,10 +336,20 @@
                                     Content="Open folder"
                                     Click="OpenBackupFolderButton_OnClick" />
                             <Button x:Name="BackupNowButton"
-                                    Margin="0,0,0,8"
+                                    Margin="0,0,8,8"
                                     Style="{StaticResource AppPrimaryButtonStyle}"
                                     Content="Backup now"
                                     Click="BackupNowButton_OnClick" />
+                            <Button x:Name="CheckBackupFolderButton"
+                                    Margin="0,0,8,8"
+                                    Style="{StaticResource AppButtonStyle}"
+                                    Content="Check backup folder"
+                                    Click="CheckBackupFolderButton_OnClick" />
+                            <Button x:Name="RestoreLatestBackupButton"
+                                    Margin="0,0,0,8"
+                                    Style="{StaticResource AppButtonStyle}"
+                                    Content="Restore latest backup"
+                                    Click="RestoreLatestBackupButton_OnClick" />
                         </WrapPanel>
                         <TextBlock x:Name="BackupPolicyText"
                                    Style="{StaticResource AppSubtitleStyle}" />
@@ -347,6 +357,28 @@
                                    Margin="0,6,0,0"
                                    TextWrapping="Wrap"
                                    Style="{StaticResource AppSubtitleStyle}" />
+                        <Border Margin="0,10,0,0"
+                                Padding="10"
+                                Background="#FF15181D"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6">
+                            <StackPanel>
+                                <TextBlock x:Name="BackupLocalStateText"
+                                           Foreground="{StaticResource AppTextBrush}"
+                                           FontSize="11" />
+                                <TextBlock x:Name="BackupLatestStateText"
+                                           Margin="0,4,0,0"
+                                           Foreground="{StaticResource AppTextBrush}"
+                                           FontSize="11" />
+                                <TextBlock x:Name="BackupFreshnessText"
+                                           Margin="0,6,0,0"
+                                           Foreground="#FFE5C469"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </Border>
 

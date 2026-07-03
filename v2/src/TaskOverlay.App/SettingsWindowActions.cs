@@ -15,7 +15,9 @@ public sealed class SettingsWindowActions
         Action saveBackupSettings,
         Func<string?> chooseBackupFolder,
         Func<bool> openBackupFolder,
-        Func<Task<BackupResult>> backupNow)
+        Func<Task<BackupResult>> backupNow,
+        Func<Task<BackupFolderCheckResult>> checkBackupFolder,
+        Func<Task<RestoreResult>> restoreLatestBackup)
     {
         SetOverlayMode = setOverlayMode;
         OpenLogs = openLogs;
@@ -26,6 +28,8 @@ public sealed class SettingsWindowActions
         ChooseBackupFolder = chooseBackupFolder;
         OpenBackupFolder = openBackupFolder;
         BackupNow = backupNow;
+        CheckBackupFolder = checkBackupFolder;
+        RestoreLatestBackup = restoreLatestBackup;
     }
 
     public Action<OverlayMode> SetOverlayMode { get; }
@@ -37,4 +41,6 @@ public sealed class SettingsWindowActions
     public Func<string?> ChooseBackupFolder { get; }
     public Func<bool> OpenBackupFolder { get; }
     public Func<Task<BackupResult>> BackupNow { get; }
+    public Func<Task<BackupFolderCheckResult>> CheckBackupFolder { get; }
+    public Func<Task<RestoreResult>> RestoreLatestBackup { get; }
 }
