@@ -97,6 +97,12 @@ internal static class Program
             ("corrupted state backup", CorruptedStateBackup),
             ("crash log contents", CrashLogContents),
             ("diagnostic callback isolation", DiagnosticCallbackIsolation),
+            ("backup filename generation", BackupFilenameGeneration),
+            ("backup machine name sanitization", BackupMachineNameSanitization),
+            ("backup retention selection", BackupRetentionSelection),
+            ("backup disabled and missing state", BackupDisabledAndMissingState),
+            ("backup copy and scoped retention", BackupCopyAndScopedRetention),
+            ("local backup settings persistence", LocalBackupSettingsPersistence),
             ("clipboard lines create multiple tasks", ClipboardLinesCreateMultipleTasks),
             ("single clipboard task collapses lines", SingleClipboardTaskCollapsesLines),
             ("clipboard task with description", ClipboardTaskWithDescription),
@@ -3008,6 +3014,204 @@ internal static class Program
             store.Save(state);
 
             Assert(File.Exists(store.StatePath), "Logger failures must not break storage.");
+        });
+    }
+
+    private static void BackupFilenameGeneration()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-07-03T09:30:00+06:00");
+        var fileName = BackupService.BuildFileName(
+            "Work",
+            "WORKPC",
+            timestamp);
+
+        Assert(
+            fileName == "TaskOverlay_Work_WORKPC_2026-07-03_09-30.json",
+            "Backup filename should include space, machine, and local timestamp.");
+    }
+
+    private static void BackupMachineNameSanitization()
+    {
+        Assert(
+            BackupService.SanitizeMachineName(" Work PC:/01 ") == "Work_PC_01",
+            "Machine name should be safe for a filename.");
+        Assert(
+            BackupService.SanitizeMachineName("***") == "UnknownMachine",
+            "An unusable machine name should use a stable fallback.");
+    }
+
+    private static void BackupRetentionSelection()
+    {
+        var now = DateTimeOffset.Parse("2026-07-03T10:00:00Z");
+        var files = new[]
+        {
+            new BackupFileInfo("newest.json", now.AddHours(-1)),
+            new BackupFileInfo("second.json", now.AddHours(-2)),
+            new BackupFileInfo("third.json", now.AddHours(-3)),
+            new BackupFileInfo("expired.json", now.AddDays(-20))
+        };
+
+        var selected = BackupService.SelectRetentionFiles(
+            files,
+            now,
+            retentionDays: 14,
+            maximumFiles: 2);
+        Assert(selected.Count == 2, "Retention should select age and count overflow.");
+        Assert(selected.Contains("third.json"), "Retention should enforce maximum files.");
+        Assert(selected.Contains("expired.json"), "Retention should remove expired files.");
+    }
+
+    private static void BackupDisabledAndMissingState()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var missingStatePath = Path.Combine(directory, "missing-state.json");
+            var service = new BackupService(missingStatePath);
+            var disabled = service.CreateBackup(
+                new BackupConfiguration(false, directory, 30, 14, 100),
+                requireEnabled: true,
+                DateTimeOffset.UtcNow,
+                "TESTPC");
+            Assert(
+                disabled.Outcome == BackupOutcome.SkippedDisabled,
+                "Disabled automatic backup should skip before file access.");
+            var schedule = new BackupSettings
+            {
+                Enabled = false,
+                FolderPath = directory
+            };
+            var scheduleNow = DateTimeOffset.Parse("2026-07-03T10:00:00Z");
+            Assert(
+                !BackupService.IsAutomaticBackupDue(schedule, scheduleNow),
+                "Disabled automatic backup should never be due.");
+            schedule.Enabled = true;
+            schedule.LastBackupAttemptAtUtc = scheduleNow.AddMinutes(-29);
+            Assert(
+                !BackupService.IsAutomaticBackupDue(schedule, scheduleNow),
+                "A failed or successful attempt should throttle the next run.");
+            schedule.LastBackupAttemptAtUtc = scheduleNow.AddMinutes(-30);
+            Assert(
+                BackupService.IsAutomaticBackupDue(schedule, scheduleNow),
+                "Automatic backup should become due at the configured interval.");
+
+            var missing = service.CreateBackup(
+                new BackupConfiguration(true, directory, 30, 14, 100),
+                requireEnabled: true,
+                DateTimeOffset.UtcNow,
+                "TESTPC");
+            Assert(
+                missing.Outcome == BackupOutcome.Failed &&
+                missing.Message.Contains("State file is missing"),
+                "Missing state should fail safely without throwing.");
+
+            File.WriteAllText(missingStatePath, "{}");
+            var unavailableFolder = service.CreateBackup(
+                new BackupConfiguration(
+                    true,
+                    Path.Combine(directory, "unavailable"),
+                    30,
+                    14,
+                    100),
+                requireEnabled: true,
+                DateTimeOffset.UtcNow,
+                "TESTPC");
+            Assert(
+                unavailableFolder.Outcome == BackupOutcome.Failed &&
+                unavailableFolder.Message.Contains("unavailable"),
+                "Unavailable backup folder should fail safely without being created.");
+        });
+    }
+
+    private static void BackupCopyAndScopedRetention()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var stateDirectory = Path.Combine(directory, "state");
+            var backupDirectory = Path.Combine(directory, "backups");
+            Directory.CreateDirectory(stateDirectory);
+            Directory.CreateDirectory(backupDirectory);
+            var statePath = Path.Combine(stateDirectory, "state.json");
+            const string stateJson = "{\"schemaVersion\":2,\"tasks\":[]}";
+            File.WriteAllText(statePath, stateJson);
+
+            var oldWork = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Work_TEST_PC_2026-06-01_10-00.json");
+            var homeBackup = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Home_TESTPC_2026-06-01_10-00.json");
+            var otherMachineBackup = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Work_OTHERPC_2026-06-01_10-00.json");
+            var unrelated = Path.Combine(backupDirectory, "notes.json");
+            File.WriteAllText(oldWork, "old work");
+            File.WriteAllText(homeBackup, "old home");
+            File.WriteAllText(otherMachineBackup, "other machine");
+            File.WriteAllText(unrelated, "unrelated");
+            var expiredTimestamp = DateTime.SpecifyKind(
+                new DateTime(2026, 6, 1, 10, 0, 0),
+                DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(oldWork, expiredTimestamp);
+            File.SetLastWriteTimeUtc(homeBackup, expiredTimestamp);
+            File.SetLastWriteTimeUtc(otherMachineBackup, expiredTimestamp);
+
+            var result = new BackupService(statePath).CreateBackup(
+                new BackupConfiguration(true, backupDirectory, 30, 14, 100),
+                requireEnabled: true,
+                DateTimeOffset.Parse("2026-07-03T09:30:00Z"),
+                "TEST_PC");
+
+            Assert(result.Succeeded, "Backup copy should succeed in a local folder.");
+            Assert(
+                result.BackupPath is not null &&
+                File.ReadAllText(result.BackupPath) == stateJson,
+                "Backup should contain an unchanged copy of state data.");
+            Assert(!File.Exists(oldWork), "Expired Work backup should be removed.");
+            Assert(File.Exists(homeBackup), "Work retention must not remove Home backups.");
+            Assert(
+                File.Exists(otherMachineBackup),
+                "Retention must not remove another machine's Work backups.");
+            Assert(File.Exists(unrelated), "Retention must not remove unrelated files.");
+            Assert(
+                !Directory.EnumerateFiles(backupDirectory, "*.tmp").Any(),
+                "Successful backup should leave no temporary files.");
+        });
+    }
+
+    private static void LocalBackupSettingsPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new LocalSettingsStore(directory);
+            var settings = new LocalAppSettings();
+            settings.Backups.Enabled = true;
+            settings.Backups.FolderPath = Path.Combine(directory, "Backups");
+            settings.Backups.LastBackupAtUtc =
+                DateTimeOffset.Parse("2026-07-03T03:30:00Z");
+            settings.Backups.LastBackupAttemptAtUtc =
+                DateTimeOffset.Parse("2026-07-03T03:31:00Z");
+            store.Save(settings);
+
+            var loaded = new LocalSettingsStore(directory).Load();
+            Assert(
+                File.Exists(Path.Combine(directory, "localSettings.json")),
+                "Backup settings should use the machine-local settings file.");
+            Assert(
+                !File.Exists(Path.Combine(directory, "state.json")),
+                "Saving backup settings must not create or modify shared state.json.");
+            Assert(loaded.Backups.Enabled, "Backup enabled setting should persist.");
+            Assert(
+                loaded.Backups.FolderPath == settings.Backups.FolderPath,
+                "Machine-local backup folder should persist outside state.json.");
+            Assert(
+                loaded.Backups.IntervalMinutes == 30 &&
+                loaded.Backups.RetentionDays == 14 &&
+                loaded.Backups.MaximumFiles == 100,
+                "Backup defaults should remain stable across save/load.");
+            Assert(
+                loaded.Backups.LastBackupAttemptAtUtc ==
+                settings.Backups.LastBackupAttemptAtUtc,
+                "Backup attempt timestamp should persist for interval throttling.");
         });
     }
 
