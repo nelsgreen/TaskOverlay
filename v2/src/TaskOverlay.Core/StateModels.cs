@@ -226,6 +226,10 @@ public sealed class OverlaySettings
     public bool PinnedActiveMode { get; set; }
 
     public InWorkMode InWorkMode { get; set; } = InWorkMode.MultipleTasks;
+    public OverlayPanelFilter PanelFilter { get; set; } = OverlayPanelFilter.Panel;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? WaitGroupExpanded { get; set; }
     public Guid? LastSelectedProjectId { get; set; }
     public bool MvpProjectsSeeded { get; set; }
 
@@ -270,6 +274,17 @@ public sealed class OverlaySettings
         WorkingWindowWidth = windowWidth;
         WorkingWindowHeight = windowHeight;
         return changed;
+    }
+
+    public bool NormalizePanelPresentation()
+    {
+        if (Enum.IsDefined(PanelFilter))
+        {
+            return false;
+        }
+
+        PanelFilter = OverlayPanelFilter.Panel;
+        return true;
     }
 
     public static double ClampWorkingIdleFontSize(double value)

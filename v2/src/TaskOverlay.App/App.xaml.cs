@@ -283,6 +283,18 @@ public partial class App : System.Windows.Application
                     "Ctrl+Alt+1 - Cycle overlay mode",
                     () => ApplyOverlayModeShortcut(OverlayModeShortcut.Cycle));
                 break;
+            case GlobalHotkeyCommand.OpenSettings:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+S - Open Settings",
+                    ShowSettings);
+                break;
+            case GlobalHotkeyCommand.OpenTreeManager:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+D - Open Tree Manager",
+                    ShowTreeManager);
+                break;
         }
     }
 

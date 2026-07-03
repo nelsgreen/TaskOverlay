@@ -78,6 +78,7 @@ internal static class Program
             ("global hotkey bindings", GlobalHotkeyBindingBehavior),
             ("user-facing overlay mode labels", UserFacingOverlayModeLabels),
             ("working mode task filtering", WorkingModeTaskFiltering),
+            ("overlay panel task filtering", OverlayPanelTaskFiltering),
             ("working mode focus badge", WorkingModeFocusBadge),
             ("handle surface ownership across modes", HandleSurfaceOwnershipAcrossModes),
             ("single task in-work mode", SingleTaskInWorkMode),
@@ -1577,6 +1578,8 @@ internal static class Program
             var store = new AppStateStore(directory);
             var state = store.Load();
             state.OverlaySettings.OverlayMode = OverlayMode.Working;
+            state.OverlaySettings.PanelFilter = OverlayPanelFilter.Wait;
+            state.OverlaySettings.WaitGroupExpanded = true;
 
             store.Save(state);
 
@@ -1589,6 +1592,10 @@ internal static class Program
             Assert(
                 loaded.OverlaySettings.OverlayMode == OverlayMode.Working,
                 "Overlay mode should survive a save/load roundtrip.");
+            Assert(
+                loaded.OverlaySettings.PanelFilter == OverlayPanelFilter.Wait &&
+                loaded.OverlaySettings.WaitGroupExpanded == true,
+                "Overlay panel filter state should survive a save/load roundtrip.");
             Assert(
                 !json.Contains("\"collapsedMode\"") &&
                 !json.Contains("\"pinnedActiveMode\""),
@@ -2173,7 +2180,15 @@ internal static class Program
 
         Assert(
             displayNames.SequenceEqual(
-                new[] { "Ctrl+Alt+A", "Ctrl+Alt+Q", "Ctrl+Alt+T", "Ctrl+Alt+1" }),
+                new[]
+                {
+                    "Ctrl+Alt+A",
+                    "Ctrl+Alt+Q",
+                    "Ctrl+Alt+T",
+                    "Ctrl+Alt+1",
+                    "Ctrl+Alt+S",
+                    "Ctrl+Alt+D"
+                }),
             "Only the final fixed hotkey set should be registered.");
         Assert(
             bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+A").Command ==
@@ -2192,13 +2207,19 @@ internal static class Program
             GlobalHotkeyCommand.CycleOverlayMode,
             "Ctrl+Alt+1 should cycle overlay modes.");
         Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+S").Command ==
+            GlobalHotkeyCommand.OpenSettings,
+            "Ctrl+Alt+S should open Settings instead of clipboard capture.");
+        Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+D").Command ==
+            GlobalHotkeyCommand.OpenTreeManager,
+            "Ctrl+Alt+D should open Tree Manager instead of clipboard capture.");
+        Assert(
             displayNames.All(name =>
                 name is not "Ctrl+Alt+M" and
                 not "Ctrl+Alt+2" and
-                not "Ctrl+Alt+3" and
-                not "Ctrl+Alt+D" and
-                not "Ctrl+Alt+S"),
-            "Removed mode and clipboard hotkeys must not be registered.");
+                not "Ctrl+Alt+3"),
+            "Removed mode hotkeys must not be registered.");
     }
 
     private static void UtilityShellGeometryPersistence()
@@ -2323,17 +2344,22 @@ internal static class Program
     {
         var now = DateTimeOffset.Parse("2026-06-27T10:00:00Z");
         var todo = TaskItem.Create("TODO", now.AddMinutes(-4));
+        todo.PinToPanel = true;
         var focus = TaskItem.Create("FOCUS", now.AddMinutes(-3));
         focus.Status = TaskStatus.InWork;
         focus.InWork = true;
         var waiting = TaskItem.Create("WAIT", now.AddMinutes(-2));
         waiting.Status = TaskStatus.Waiting;
+        waiting.PinToPanel = true;
         var remind = TaskItem.Create("REMIND", now.AddMinutes(-1));
         remind.RemindAtUtc = now;
+        var scheduled = TaskItem.Create("Scheduled REMIND", now);
+        scheduled.RemindAtUtc = now.AddHours(2);
         var done = TaskItem.Create("DONE", now);
         done.Status = TaskStatus.Done;
         done.Completed = true;
-        var tasks = new[] { todo, focus, waiting, remind, done };
+        done.RemindAtUtc = now.AddHours(1);
+        var tasks = new[] { todo, focus, waiting, remind, scheduled, done };
         var sourceIds = tasks.Select(task => task.Id).ToArray();
         var ordered = ReminderAttentionService.OrderForOverlay(tasks, now).ToList();
 
@@ -2344,8 +2370,13 @@ internal static class Program
         Assert(working.Count == 2, "Working should show only FOCUS and active REMIND tasks.");
         Assert(working.Any(task => task.Id == focus.Id), "Working should include FOCUS tasks.");
         Assert(working.Any(task => task.Id == remind.Id), "Working should preserve REMIND attention items.");
-        Assert(working.All(task => task.Id != todo.Id && task.Id != waiting.Id && task.Id != done.Id),
-            "Working should hide normal TODO, WAIT, and DONE tasks.");
+        Assert(
+            working.All(task =>
+                task.Id != todo.Id &&
+                task.Id != waiting.Id &&
+                task.Id != scheduled.Id &&
+                task.Id != done.Id),
+            "Working should hide normal TODO, scheduled-only REMIND, pinned WAIT, and DONE tasks.");
         Assert(
             tasks.Select(task => task.Id).SequenceEqual(sourceIds),
             "Working filtering must not mutate or reorder the source list.");
@@ -2354,8 +2385,9 @@ internal static class Program
             .SelectForMode(ordered, OverlayMode.PinnedExpanded, now)
             .ToList();
         Assert(
-            pinned.Count == ordered.Count,
-            "Switching Working to Pinned should immediately restore the full task set.");
+            pinned.Select(task => task.Id).ToHashSet().SetEquals(
+                new[] { todo.Id, waiting.Id }),
+            "Pinned should use PinToPanel tasks instead of restoring the full task set.");
         Assert(
             OverlayTaskPresentationPolicy.ShouldShowFocusBadge(
                 focus,
@@ -2363,7 +2395,7 @@ internal static class Program
             "Switching Working to Pinned should immediately restore the FOCUS badge.");
 
         var returnedToWorking = OverlayTaskFilter
-            .SelectForMode(pinned, OverlayMode.Working, now)
+            .SelectForMode(ordered, OverlayMode.Working, now)
             .ToList();
         Assert(
             returnedToWorking.Count == 2 &&
@@ -2377,6 +2409,81 @@ internal static class Program
             OverlayMode.Working,
             now);
         Assert(!noFocus.Any(), "Working should return an empty projection without FOCUS or REMIND tasks.");
+    }
+
+    private static void OverlayPanelTaskFiltering()
+    {
+        var now = DateTimeOffset.Parse("2026-07-01T10:00:00Z");
+        var panelTodo = TaskItem.Create("Panel TODO", now.AddMinutes(-6));
+        panelTodo.PinToPanel = true;
+        var focus = TaskItem.Create("FOCUS", now.AddMinutes(-5));
+        focus.Status = TaskStatus.InWork;
+        focus.InWork = true;
+        var wait = TaskItem.Create("WAIT", now.AddMinutes(-4));
+        wait.Status = TaskStatus.Waiting;
+        wait.PinToPanel = true;
+        var scheduledRemind = TaskItem.Create("Scheduled REMIND", now.AddMinutes(-3));
+        scheduledRemind.RemindAtUtc = now.AddHours(2);
+        var activeRemind = TaskItem.Create("Active REMIND", now.AddMinutes(-2));
+        activeRemind.RemindAtUtc = now.AddMinutes(-1);
+        var todo = TaskItem.Create("TODO", now.AddMinutes(-2));
+        var done = TaskItem.Create("DONE", now.AddMinutes(-1));
+        done.PinToPanel = true;
+        done.RemindAtUtc = now.AddHours(1);
+        TaskInteractionService.Complete(done, now);
+        var tasks = new[]
+        {
+            panelTodo,
+            focus,
+            wait,
+            scheduledRemind,
+            activeRemind,
+            todo,
+            done
+        };
+        var sourceIds = tasks.Select(task => task.Id).ToArray();
+
+        Assert(
+            OverlayTaskFilter.SelectForPanel(tasks, OverlayPanelFilter.Panel, now)
+                .Select(task => task.Id)
+                .SequenceEqual(new[] { panelTodo.Id, wait.Id }),
+            "Panel should include only non-DONE PinToPanel tasks.");
+        Assert(
+            OverlayTaskFilter.SelectForPanel(tasks, OverlayPanelFilter.Focus, now)
+                .Single().Id == focus.Id,
+            "FOCUS should include only focused tasks.");
+        Assert(
+            OverlayTaskFilter.SelectForPanel(tasks, OverlayPanelFilter.Wait, now)
+                .Single().Id == wait.Id,
+            "WAIT should include only waiting tasks.");
+        Assert(
+            OverlayTaskFilter.SelectForPanel(tasks, OverlayPanelFilter.Remind, now)
+                .Select(task => task.Id)
+                .SequenceEqual(new[] { activeRemind.Id, scheduledRemind.Id }),
+            "REMIND should put active attention before scheduled reminder metadata and exclude DONE.");
+        Assert(
+            OverlayTaskFilter.SelectForPanel(tasks, OverlayPanelFilter.Todo, now)
+                .Select(task => task.Id)
+                .ToHashSet()
+                .SetEquals(new[]
+                {
+                    panelTodo.Id,
+                    scheduledRemind.Id,
+                    activeRemind.Id,
+                    todo.Id
+                }),
+            "TODO should follow task status and exclude DONE.");
+        Assert(
+            tasks.Select(task => task.Id).SequenceEqual(sourceIds),
+            "Overlay panel projections must not mutate or reorder source tasks.");
+
+        var invalid = new OverlaySettings
+        {
+            PanelFilter = (OverlayPanelFilter)999
+        };
+        Assert(invalid.NormalizePanelPresentation(), "Invalid panel filter should repair to Panel.");
+        Assert(invalid.PanelFilter == OverlayPanelFilter.Panel, "Panel should be the safe fallback.");
+        Assert(!invalid.NormalizePanelPresentation(), "Panel filter repair should be idempotent.");
     }
 
     private static void WorkingModeFocusBadge()

@@ -7,7 +7,9 @@ public enum GlobalHotkeyCommand
     CreateTaskWithDescription,
     QuickAddTask,
     CollapseOrToggleOverlay,
-    CycleOverlayMode
+    CycleOverlayMode,
+    OpenSettings,
+    OpenTreeManager
 }
 
 public sealed record GlobalHotkeyBinding(
@@ -40,6 +42,16 @@ public static class GlobalHotkeyBindings
                 4,
                 "Ctrl+Alt+1",
                 0x31,
-                GlobalHotkeyCommand.CycleOverlayMode)
+                GlobalHotkeyCommand.CycleOverlayMode),
+            new GlobalHotkeyBinding(
+                5,
+                "Ctrl+Alt+S",
+                0x53,
+                GlobalHotkeyCommand.OpenSettings),
+            new GlobalHotkeyBinding(
+                6,
+                "Ctrl+Alt+D",
+                0x44,
+                GlobalHotkeyCommand.OpenTreeManager)
         };
 }

@@ -18,7 +18,9 @@ public partial class SettingsView : UserControl
             GlobalHotkeyCommand.CycleOverlayMode,
             GlobalHotkeyCommand.CreateTaskWithDescription,
             GlobalHotkeyCommand.QuickAddTask,
-            GlobalHotkeyCommand.CollapseOrToggleOverlay
+            GlobalHotkeyCommand.CollapseOrToggleOverlay,
+            GlobalHotkeyCommand.OpenSettings,
+            GlobalHotkeyCommand.OpenTreeManager
         };
 
     private readonly AppState _state;
@@ -231,6 +233,8 @@ public partial class SettingsView : UserControl
             GlobalHotkeyCommand.CreateTaskWithDescription =>
                 "Create one task from clipboard with description",
             GlobalHotkeyCommand.QuickAddTask => "Quick Add task",
+            GlobalHotkeyCommand.OpenSettings => "Open Settings",
+            GlobalHotkeyCommand.OpenTreeManager => "Open Tree Manager",
             _ => "Collapse / show overlay"
         };
     }
