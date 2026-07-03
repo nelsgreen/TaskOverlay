@@ -12,6 +12,7 @@ product area so implementation work can be split into bounded changes.
   - Use a lower contrast idle display.
   - On hover, tasks become normal contrast and descriptions appear.
 - Hide or remove Auto quest tracker mode for now.
+- Do not show TaskOverlay overlay/handle/panel windows in Alt+Tab or the normal Windows app switcher.
 - Future functional handle / attention hub.
 - Handle redesign:
   - Make the handle prettier.
