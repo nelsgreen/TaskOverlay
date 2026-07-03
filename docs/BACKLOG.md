@@ -18,6 +18,7 @@ product area so implementation work can be split into bounded changes.
   - Make the handle more functional.
   - Keep the v0 attention-hub direction: a wider pill-shaped handle with MEET countdown, counters, project/task color dots, and a strong dark/purple visual identity is acceptable and preferred.
   - Do not over-compact the handle just because it is a handle; the v0 size felt usable and visually successful.
+  - Do not show static app logo or the literal TaskOverlay name on the handle by default; that space should be used for functional attention information.
   - Colored compact counters/dots may represent projects or current task counts if the meaning stays discoverable through hover/tooltips.
   - Show countdown to the next MEET item on the handle.
   - Support compact attention counters for FOCUS / REMIND / WAIT / Panel where useful.
