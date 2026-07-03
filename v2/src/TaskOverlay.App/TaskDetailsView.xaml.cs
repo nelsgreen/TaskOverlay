@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
@@ -18,14 +20,6 @@ public partial class TaskDetailsView : UserControl
             new TaskStatusOption(TaskStatus.Done, "DONE")
         };
 
-    private static readonly IReadOnlyList<ReminderPresetOption> DetailAdvancedReminderPresets =
-        new[]
-        {
-            new ReminderPresetOption(ReminderPreset.KeepCurrent, "Custom time"),
-            new ReminderPresetOption(ReminderPreset.RepeatEvery2Hours, "Every 2 hours"),
-            new ReminderPresetOption(ReminderPreset.RepeatDaily, "Daily")
-        };
-
     private readonly TaskItem _task;
     private readonly Action<TaskItem, TaskEditValues> _saveTask;
     private readonly Action<TaskItem> _deleteTask;
@@ -33,12 +27,7 @@ public partial class TaskDetailsView : UserControl
     private readonly Action _closeShell;
     private readonly DateTimeOffset? _originalRemindAtUtc;
     private readonly int? _originalRepeatMinutes;
-
-    private DateTime? _reminderLocalDateTime;
-    private int? _pendingRepeatMinutes;
     private bool _initializing;
-    private bool _updatingReminderControls;
-    private bool _reminderScheduleEdited;
 
     public TaskDetailsView(
         AppState state,
@@ -55,9 +44,6 @@ public partial class TaskDetailsView : UserControl
         _closeShell = closeShell;
         _originalRemindAtUtc = task.RemindAtUtc;
         _originalRepeatMinutes = task.RemindEveryMinutes;
-        _reminderLocalDateTime = NormalizeToMinute(
-            task.RemindAtUtc?.ToLocalTime().DateTime ?? DateTime.Now.AddHours(1));
-        _pendingRepeatMinutes = task.RemindEveryMinutes;
 
         _initializing = true;
         InitializeComponent();
@@ -77,18 +63,10 @@ public partial class TaskDetailsView : UserControl
         StatusListBox.ItemsSource = DetailStatuses;
         StatusListBox.SelectedItem = DetailStatuses
             .First(option => option.Value == task.Status);
-
-        ReminderAdvancedPresetListBox.ItemsSource = DetailAdvancedReminderPresets;
-        var detectedPreset = ReminderService.DetectPreset(task);
-        SelectReminderPresetCore(detectedPreset);
-
-        ReminderToggleButton.IsChecked = task.RemindAtUtc is not null;
-        ReminderDatePicker.SelectedDate = _reminderLocalDateTime?.Date;
-        UpdateReminderTimeText();
+        CompactReminderEditor.Initialize(task.RemindAtUtc, task.RemindEveryMinutes);
 
         _initializing = false;
         UpdateWaitingField();
-        UpdateReminderVisibility();
     }
 
     public Guid TaskId => _task.Id;
@@ -106,275 +84,16 @@ public partial class TaskDetailsView : UserControl
         SelectionChangedEventArgs e)
     {
         UpdateWaitingField();
-    }
-
-    private void ReminderToggleButton_OnChanged(object sender, RoutedEventArgs e)
-    {
-        if (_initializing || _updatingReminderControls)
-        {
-            return;
-        }
-
-        _reminderScheduleEdited = true;
-        if (ReminderToggleButton.IsChecked == true)
-        {
-            if (_reminderLocalDateTime is null)
+        if (!_initializing &&
+            StatusListBox.SelectedItem is TaskStatusOption
             {
-                _reminderLocalDateTime = NormalizeToMinute(DateTime.Now.AddHours(1));
-                UpdateReminderControls(
-                    () => ReminderDatePicker.SelectedDate = _reminderLocalDateTime.Value.Date);
-                UpdateReminderTimeText();
-            }
-
-            SelectReminderPreset(ReminderPreset.KeepCurrent);
-        }
-        else
+                Value: TaskStatus.Waiting
+            })
         {
-            _reminderLocalDateTime = null;
-            _pendingRepeatMinutes = null;
-            UpdateReminderControls(
-                () =>
-                {
-                    ReminderDatePicker.SelectedDate = null;
-                    SelectReminderPresetCore(ReminderPreset.None);
-                    UpdateReminderTimeText();
-                });
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Input,
+                new Action(() => WaitingForTextBox.Focus()));
         }
-
-        UpdateReminderVisibility();
-    }
-
-    private void ReminderDatePicker_OnSelectedDateChanged(
-        object? sender,
-        SelectionChangedEventArgs e)
-    {
-        if (_initializing ||
-            _updatingReminderControls ||
-            ReminderDatePicker.SelectedDate is not DateTime selectedDate)
-        {
-            return;
-        }
-
-        var currentTime = _reminderLocalDateTime ??
-                          NormalizeToMinute(DateTime.Now.AddHours(1));
-        _reminderLocalDateTime = selectedDate.Date
-            .AddHours(currentTime.Hour)
-            .AddMinutes(currentTime.Minute);
-        _reminderScheduleEdited = true;
-        EnsureReminderEnabled();
-        SelectReminderPreset(ReminderPreset.KeepCurrent);
-    }
-
-    private void ReminderSelector_OnSelectedPresetChanged(
-        object? sender,
-        EventArgs e)
-    {
-        if (_initializing ||
-            _updatingReminderControls ||
-            ReminderSelector.SelectedPreset is not ReminderPreset preset)
-        {
-            return;
-        }
-
-        ApplyReminderPreset(preset);
-    }
-
-    private void ReminderAdvancedPresetListBox_OnSelectionChanged(
-        object sender,
-        SelectionChangedEventArgs e)
-    {
-        if (_initializing ||
-            _updatingReminderControls ||
-            ReminderAdvancedPresetListBox.SelectedItem is not ReminderPresetOption option)
-        {
-            return;
-        }
-
-        ApplyReminderPreset(option.Value);
-    }
-
-    private void ApplyReminderPreset(ReminderPreset preset)
-    {
-        var now = DateTime.Now;
-        switch (preset)
-        {
-            case ReminderPreset.KeepCurrent:
-                SetPendingReminder(
-                    _reminderLocalDateTime ?? now.AddHours(1),
-                    preset,
-                    null);
-                return;
-            case ReminderPreset.None:
-                SetPendingNoReminder();
-                return;
-            case ReminderPreset.In30Minutes:
-                SetPendingReminder(now.AddMinutes(30), preset, null);
-                return;
-            case ReminderPreset.In1Hour:
-                SetPendingReminder(now.AddHours(1), preset, null);
-                return;
-            case ReminderPreset.In2Hours:
-                SetPendingReminder(now.AddHours(2), preset, null);
-                return;
-            case ReminderPreset.TomorrowMorning:
-                SetPendingReminder(
-                    DateTime.Today.AddDays(1).AddHours(9),
-                    preset,
-                    null);
-                return;
-            case ReminderPreset.RepeatEvery2Hours:
-                SetPendingReminder(now.AddHours(2), preset, 120);
-                return;
-            case ReminderPreset.RepeatDaily:
-                SetPendingReminder(now.AddDays(1), preset, 1440);
-                return;
-        }
-    }
-
-    private void HourUpButton_OnClick(object sender, RoutedEventArgs e) =>
-        AdjustReminderTime(TimeSpan.FromHours(1));
-
-    private void HourDownButton_OnClick(object sender, RoutedEventArgs e) =>
-        AdjustReminderTime(TimeSpan.FromHours(-1));
-
-    private void MinuteUpButton_OnClick(object sender, RoutedEventArgs e) =>
-        AdjustReminderTime(TimeSpan.FromMinutes(5));
-
-    private void MinuteDownButton_OnClick(object sender, RoutedEventArgs e) =>
-        AdjustReminderTime(TimeSpan.FromMinutes(-5));
-
-    private void Add10MinutesButton_OnClick(object sender, RoutedEventArgs e) =>
-        AddQuickReminder(TimeSpan.FromMinutes(10));
-
-    private void Add30MinutesButton_OnClick(object sender, RoutedEventArgs e) =>
-        AddQuickReminder(TimeSpan.FromMinutes(30));
-
-    private void Add1HourButton_OnClick(object sender, RoutedEventArgs e) =>
-        AddQuickReminder(TimeSpan.FromHours(1));
-
-    private void TomorrowButton_OnClick(object sender, RoutedEventArgs e) =>
-        AddQuickReminder(TimeSpan.FromDays(1));
-
-    private void AddQuickReminder(TimeSpan increment)
-    {
-        var baseTime = _reminderLocalDateTime ?? NormalizeToMinute(DateTime.Now);
-        SetPendingReminder(
-            baseTime.Add(increment),
-            ReminderPreset.KeepCurrent,
-            _pendingRepeatMinutes);
-    }
-
-    private void AdjustReminderTime(TimeSpan adjustment)
-    {
-        var currentTime = _reminderLocalDateTime ??
-                          NormalizeToMinute(DateTime.Now.AddHours(1));
-        SetPendingReminder(
-            currentTime.Add(adjustment),
-            ReminderPreset.KeepCurrent,
-            _pendingRepeatMinutes);
-    }
-
-    private void SetPendingReminder(
-        DateTime localDateTime,
-        ReminderPreset selectedPreset,
-        int? repeatMinutes)
-    {
-        _reminderLocalDateTime = NormalizeToMinute(localDateTime);
-        _pendingRepeatMinutes = repeatMinutes;
-        _reminderScheduleEdited = true;
-
-        UpdateReminderControls(
-            () =>
-            {
-                ReminderToggleButton.IsChecked = true;
-                ReminderDatePicker.SelectedDate = _reminderLocalDateTime.Value.Date;
-                SelectReminderPresetCore(selectedPreset);
-                UpdateReminderTimeText();
-            });
-        UpdateReminderVisibility();
-    }
-
-    private void SetPendingNoReminder()
-    {
-        _reminderLocalDateTime = null;
-        _pendingRepeatMinutes = null;
-        _reminderScheduleEdited = true;
-        UpdateReminderControls(
-            () =>
-            {
-                ReminderToggleButton.IsChecked = false;
-                ReminderDatePicker.SelectedDate = null;
-                SelectReminderPresetCore(ReminderPreset.None);
-                UpdateReminderTimeText();
-            });
-        UpdateReminderVisibility();
-    }
-
-    private void EnsureReminderEnabled()
-    {
-        if (ReminderToggleButton.IsChecked == true)
-        {
-            return;
-        }
-
-        UpdateReminderControls(() => ReminderToggleButton.IsChecked = true);
-        UpdateReminderVisibility();
-    }
-
-    private void SelectReminderPreset(ReminderPreset preset)
-    {
-        UpdateReminderControls(() => SelectReminderPresetCore(preset));
-    }
-
-    private void SelectReminderPresetCore(ReminderPreset preset)
-    {
-        if (TaskAttentionUiOptions.CompactReminderPresets.Any(
-                option => option.Value == preset))
-        {
-            ReminderSelector.SelectPreset(preset);
-            ReminderAdvancedPresetListBox.SelectedItem = null;
-            return;
-        }
-
-        ReminderSelector.ClearSelection();
-        ReminderAdvancedPresetListBox.SelectedItem = DetailAdvancedReminderPresets
-            .First(option => option.Value == preset);
-    }
-
-    private void UpdateReminderControls(Action update)
-    {
-        var wasUpdating = _updatingReminderControls;
-        _updatingReminderControls = true;
-        try
-        {
-            update();
-        }
-        finally
-        {
-            _updatingReminderControls = wasUpdating;
-        }
-    }
-
-    private void UpdateReminderTimeText()
-    {
-        ReminderHourText.Text = _reminderLocalDateTime?.Hour.ToString("00") ?? "--";
-        ReminderMinuteText.Text = _reminderLocalDateTime?.Minute.ToString("00") ?? "--";
-    }
-
-    private void UpdateReminderVisibility()
-    {
-        if (ReminderControlsPanel is null || ReminderOffText is null)
-        {
-            return;
-        }
-
-        var enabled = ReminderToggleButton.IsChecked == true;
-        ReminderControlsPanel.Visibility = enabled
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        ReminderOffText.Visibility = enabled
-            ? Visibility.Collapsed
-            : Visibility.Visible;
     }
 
     private void SaveButton_OnClick(object sender, RoutedEventArgs e)
@@ -393,21 +112,16 @@ public partial class TaskDetailsView : UserControl
             return;
         }
 
-        DateTimeOffset? remindAtUtc = null;
-        var repeatMinutes = ReminderToggleButton.IsChecked == true
-            ? _pendingRepeatMinutes
-            : null;
-        if (ReminderToggleButton.IsChecked == true &&
-            !TryBuildReminderTime(out remindAtUtc))
+        if (!CompactReminderEditor.TryGetValue(out var reminder))
         {
             ShowWarning("Choose a valid reminder date and time.");
+            CompactReminderEditor.FocusDateTime();
             return;
         }
 
-        var replaceSchedule = _reminderScheduleEdited &&
-                              (_originalRemindAtUtc != remindAtUtc ||
-                               _originalRepeatMinutes != repeatMinutes);
-
+        var replaceSchedule =
+            _originalRemindAtUtc != reminder.RemindAtUtc ||
+            _originalRepeatMinutes != reminder.RepeatMinutes;
         _saveTask(
             _task,
             new TaskEditValues(
@@ -419,46 +133,14 @@ public partial class TaskDetailsView : UserControl
                 status.Value,
                 ReminderPreset.KeepCurrent,
                 WaitingForTextBox.Text,
-                remindAtUtc,
-                repeatMinutes,
+                reminder.RemindAtUtc,
+                reminder.RepeatMinutes,
                 replaceSchedule));
         _closeShell();
     }
 
-    private bool TryBuildReminderTime(out DateTimeOffset? remindAtUtc)
-    {
-        remindAtUtc = null;
-        if (ReminderDatePicker.SelectedDate is not DateTime selectedDate ||
-            _reminderLocalDateTime is not DateTime localTime)
-        {
-            return false;
-        }
-
-        var local = DateTime.SpecifyKind(
-            selectedDate.Date
-                .AddHours(localTime.Hour)
-                .AddMinutes(localTime.Minute),
-            DateTimeKind.Local);
-        if (TimeZoneInfo.Local.IsInvalidTime(local))
-        {
-            return false;
-        }
-
-        try
-        {
-            remindAtUtc = new DateTimeOffset(local).ToUniversalTime();
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
-
-    private void CancelButton_OnClick(object sender, RoutedEventArgs e)
-    {
+    private void CancelButton_OnClick(object sender, RoutedEventArgs e) =>
         _closeShell();
-    }
 
     private void DeleteButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -469,7 +151,6 @@ public partial class TaskDetailsView : UserControl
                 "Delete task",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning));
-
         if (result != MessageBoxResult.Yes)
         {
             return;
@@ -491,6 +172,29 @@ public partial class TaskDetailsView : UserControl
             {
                 Value: TaskStatus.Waiting
             }
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        UpdateWaitingPlaceholder();
+    }
+
+    private void WaitingForTextBox_OnChanged(object sender, TextChangedEventArgs e) =>
+        UpdateWaitingPlaceholder();
+
+    private void WaitingForTextBox_OnFocusChanged(
+        object sender,
+        KeyboardFocusChangedEventArgs e) =>
+        UpdateWaitingPlaceholder();
+
+    private void UpdateWaitingPlaceholder()
+    {
+        if (WaitingForPlaceholder is null)
+        {
+            return;
+        }
+
+        WaitingForPlaceholder.Visibility =
+            string.IsNullOrEmpty(WaitingForTextBox.Text) &&
+            !WaitingForTextBox.IsKeyboardFocusWithin
                 ? Visibility.Visible
                 : Visibility.Collapsed;
     }
@@ -518,14 +222,4 @@ public partial class TaskDetailsView : UserControl
             _modalInteractionChanged(false);
         }
     }
-
-    private static DateTime NormalizeToMinute(DateTime value) =>
-        new(
-            value.Year,
-            value.Month,
-            value.Day,
-            value.Hour,
-            value.Minute,
-            0,
-            DateTimeKind.Unspecified);
 }

@@ -37,23 +37,10 @@ internal static class TaskAttentionUiOptions
             new ReminderPresetOption(ReminderPreset.TomorrowMorning, "Tomorrow morning")
         };
 
-    public static IReadOnlyList<ReminderPresetOption> EditorReminderPresets { get; } =
-        new[]
-        {
-            new ReminderPresetOption(ReminderPreset.KeepCurrent, "Use reminder time below"),
-            new ReminderPresetOption(ReminderPreset.None, "No reminder"),
-            new ReminderPresetOption(ReminderPreset.In30Minutes, "In 30 minutes"),
-            new ReminderPresetOption(ReminderPreset.In1Hour, "In 1 hour"),
-            new ReminderPresetOption(ReminderPreset.In2Hours, "In 2 hours"),
-            new ReminderPresetOption(ReminderPreset.TomorrowMorning, "Tomorrow morning"),
-            new ReminderPresetOption(ReminderPreset.RepeatEvery2Hours, "Repeat every 2 hours"),
-            new ReminderPresetOption(ReminderPreset.RepeatDaily, "Repeat daily")
-        };
-
     public static IReadOnlyList<RepeatOption> RepeatOptions { get; } =
         new[]
         {
-            new RepeatOption(null, "No repeat"),
+            new RepeatOption(null, "Off"),
             new RepeatOption(120, "Every 2 hours"),
             new RepeatOption(1440, "Daily")
         };

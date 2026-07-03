@@ -31,6 +31,7 @@ public partial class QuickAddView : UserControl
                                       projects.FirstOrDefault();
         StatusListBox.ItemsSource = TaskAttentionUiOptions.QuickAddStatuses;
         StatusListBox.SelectedIndex = 0;
+        ReminderEditor.Initialize(null, null);
         UpdatePlaceholders();
         UpdateWaitingField();
     }
@@ -58,6 +59,15 @@ public partial class QuickAddView : UserControl
         SelectionChangedEventArgs e)
     {
         UpdateWaitingField();
+        if (StatusListBox.SelectedItem is TaskStatusOption
+            {
+                Value: TaskStatus.Waiting
+            })
+        {
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Input,
+                new Action(() => WaitingForTextBox.Focus()));
+        }
     }
 
     private void AddButton_OnClick(object sender, RoutedEventArgs e)
@@ -71,10 +81,16 @@ public partial class QuickAddView : UserControl
         }
 
         if (ProjectListBox.SelectedItem is not ProjectItem project ||
-            StatusListBox.SelectedItem is not TaskStatusOption status ||
-            ReminderSelector.SelectedPreset is not ReminderPreset reminder)
+            StatusListBox.SelectedItem is not TaskStatusOption status)
         {
-            ValidationText.Text = "Choose a project, status, and reminder.";
+            ValidationText.Text = "Choose a project and status.";
+            return;
+        }
+
+        if (!ReminderEditor.TryGetValue(out var reminder))
+        {
+            ValidationText.Text = "Choose a valid reminder date and time.";
+            ReminderEditor.FocusDateTime();
             return;
         }
 
@@ -82,9 +98,12 @@ public partial class QuickAddView : UserControl
             TitleTextBox.Text,
             project.Id,
             status.Value,
-            reminder,
+            ReminderPreset.KeepCurrent,
             WaitingForTextBox.Text,
-            DescriptionTextBox.Text);
+            DescriptionTextBox.Text,
+            reminder.RemindAtUtc,
+            reminder.RepeatMinutes,
+            true);
         if (!_addTask(values))
         {
             ValidationText.Text = "The task could not be created.";
@@ -114,6 +133,29 @@ public partial class QuickAddView : UserControl
         WaitingCard.Visibility = waiting
             ? Visibility.Visible
             : Visibility.Collapsed;
+        UpdateWaitingPlaceholder();
+    }
+
+    private void WaitingForTextBox_OnChanged(object sender, TextChangedEventArgs e) =>
+        UpdateWaitingPlaceholder();
+
+    private void WaitingForTextBox_OnFocusChanged(
+        object sender,
+        KeyboardFocusChangedEventArgs e) =>
+        UpdateWaitingPlaceholder();
+
+    private void UpdateWaitingPlaceholder()
+    {
+        if (WaitingForPlaceholder is null)
+        {
+            return;
+        }
+
+        WaitingForPlaceholder.Visibility =
+            string.IsNullOrEmpty(WaitingForTextBox.Text) &&
+            !WaitingForTextBox.IsKeyboardFocusWithin
+                ? Visibility.Visible
+                : Visibility.Collapsed;
     }
 
     private void InputTextBox_OnTextChanged(

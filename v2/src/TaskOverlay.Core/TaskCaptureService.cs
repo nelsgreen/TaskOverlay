@@ -58,7 +58,18 @@ public static class TaskCaptureService
         task.Description = values.Description.Trim();
         task.WaitingFor = values.WaitingFor.Trim();
         TaskInteractionService.SetStatus(state, task, values.Status, timestamp);
-        ReminderService.ApplyPreset(task, values.ReminderPreset, timestamp, timeZone);
+        if (values.ReplaceReminderSchedule)
+        {
+            ReminderService.SetSchedule(
+                task,
+                values.RemindAtUtc,
+                values.RemindEveryMinutes,
+                timestamp);
+        }
+        else
+        {
+            ReminderService.ApplyPreset(task, values.ReminderPreset, timestamp, timeZone);
+        }
         state.OverlaySettings.LastSelectedProjectId = project.Id;
         return task;
     }
@@ -70,4 +81,7 @@ public readonly record struct QuickTaskValues(
     TaskStatus Status,
     ReminderPreset ReminderPreset,
     string WaitingFor,
-    string Description);
+    string Description,
+    DateTimeOffset? RemindAtUtc = null,
+    int? RemindEveryMinutes = null,
+    bool ReplaceReminderSchedule = false);

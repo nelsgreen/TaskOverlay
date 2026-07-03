@@ -136,32 +136,33 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
+
+                        <StackPanel x:Name="WaitingCard"
+                                    Margin="0,5,0,0"
+                                    Visibility="Collapsed">
+                            <TextBlock Style="{StaticResource AppSectionLabelStyle}"
+                                       Text="WAITING FOR" />
+                            <Grid Margin="0,8,0,0">
+                                <TextBox x:Name="WaitingForTextBox"
+                                         Style="{StaticResource AppTextBoxStyle}"
+                                         MaxLength="300"
+                                         TextChanged="WaitingForTextBox_OnChanged"
+                                         GotKeyboardFocus="WaitingForTextBox_OnFocusChanged"
+                                         LostKeyboardFocus="WaitingForTextBox_OnFocusChanged" />
+                                <TextBlock x:Name="WaitingForPlaceholder"
+                                           Margin="12,0"
+                                           VerticalAlignment="Center"
+                                           IsHitTestVisible="False"
+                                           Foreground="#FF747B87"
+                                           FontSize="11"
+                                           Text="What are we waiting for?" />
+                            </Grid>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <Border Margin="0,12,0,0"
-                        Style="{StaticResource AppCardStyle}">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource AppSectionLabelStyle}"
-                                   Text="REMIND" />
-                        <local:ReminderPresetSelector x:Name="ReminderSelector"
-                                                      Margin="0,8,0,0" />
-                    </StackPanel>
-                </Border>
-
-                <Border x:Name="WaitingCard"
-                        Margin="0,12,0,0"
-                        Style="{StaticResource AppCardStyle}"
-                        Visibility="Collapsed">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource AppSectionLabelStyle}"
-                                   Text="WAITING FOR" />
-                        <TextBox x:Name="WaitingForTextBox"
-                                 Margin="0,9,0,0"
-                                 Style="{StaticResource AppTextBoxStyle}"
-                                 MaxLength="300" />
-                    </StackPanel>
-                </Border>
+                <local:ReminderEditor x:Name="ReminderEditor"
+                                      Margin="0,12,0,0" />
 
                 <Border Margin="0,12,0,0"
                         Style="{StaticResource AppCardStyle}">

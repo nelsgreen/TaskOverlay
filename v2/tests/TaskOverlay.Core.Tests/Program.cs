@@ -1655,6 +1655,26 @@ internal static class Program
             !noReminder.ReminderActive,
             "No reminder should create no reminder metadata.");
 
+        var customAt = now.AddDays(3).AddMinutes(17);
+        var custom = TaskCaptureService.CreateQuickTask(
+            state,
+            new QuickTaskValues(
+                "Quick custom reminder",
+                project.Id,
+                TaskStatus.Waiting,
+                ReminderPreset.KeepCurrent,
+                "Review response",
+                string.Empty,
+                customAt,
+                1440,
+                true),
+            now,
+            TimeZoneInfo.Utc);
+        Assert(custom is not null, "Quick Add should create a custom scheduled task.");
+        Assert(
+            custom!.RemindAtUtc == customAt && custom.RemindEveryMinutes == 1440,
+            "Quick Add should store an explicit custom schedule and repeat interval.");
+
         var done = TaskCaptureService.CreateQuickTask(
             state,
             new QuickTaskValues(
