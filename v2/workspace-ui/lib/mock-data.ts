@@ -1,0 +1,340 @@
+import type { MeetItem, Project, Section, Task, TimelineItem } from "./types"
+
+export const projects: Project[] = [
+  { id: "kazchess", name: "KazChess", color: "oklch(0.72 0.15 155)" },
+  { id: "plhiv", name: "PLHIV", color: "oklch(0.74 0.13 220)" },
+  { id: "taskoverlay", name: "TaskOverlay", color: "oklch(0.78 0.15 65)" },
+  { id: "personal", name: "Personal", color: "oklch(0.7 0.12 300)" },
+]
+
+export const sections: Section[] = [
+  // KazChess
+  { id: "kc-smartbridge", projectId: "kazchess", name: "SmartBridge" },
+  { id: "kc-parents", projectId: "kazchess", name: "Родители / Дети" },
+  { id: "kc-docs", projectId: "kazchess", name: "Документы" },
+  // TaskOverlay
+  { id: "to-overlay", projectId: "taskoverlay", name: "Overlay" },
+  { id: "to-tree", projectId: "taskoverlay", name: "Tree Manager" },
+  { id: "to-backups", projectId: "taskoverlay", name: "Backups" },
+  // PLHIV
+  { id: "ph-general", projectId: "plhiv", name: "Общее" },
+  // Personal
+  { id: "pe-home", projectId: "personal", name: "Дом" },
+]
+
+export const initialTasks: Task[] = [
+  // --- KazChess / SmartBridge ---
+  {
+    id: "t-sb-1",
+    projectId: "kazchess",
+    sectionId: "kc-smartbridge",
+    parentId: null,
+    title: "Интеграция со SmartBridge",
+    status: "WAIT",
+    pinned: true,
+    reminder: "none",
+    waitingFor: "ответа от Мадины",
+    notes: "Ждём подтверждения схемы вебхуков с их стороны.",
+  },
+  {
+    id: "t-sb-2",
+    projectId: "kazchess",
+    sectionId: "kc-smartbridge",
+    parentId: "t-sb-1",
+    title: "Описать схему вебхуков",
+    status: "TODO",
+    pinned: false,
+    reminder: "none",
+  },
+  {
+    id: "t-sb-3",
+    projectId: "kazchess",
+    sectionId: "kc-smartbridge",
+    parentId: "t-sb-1",
+    title: "Согласовать формат ответа",
+    status: "DONE",
+    pinned: false,
+    reminder: "none",
+  },
+  {
+    id: "t-sb-4",
+    projectId: "kazchess",
+    sectionId: "kc-smartbridge",
+    parentId: null,
+    title: "По итогам мита — посчитать сроки",
+    status: "TODO",
+    pinned: true,
+    reminder: "1h",
+  },
+  {
+    id: "t-sb-5",
+    projectId: "kazchess",
+    sectionId: "kc-smartbridge",
+    parentId: null,
+    title: "Запросить ключи для ШЭБ",
+    status: "DONE",
+    pinned: false,
+    reminder: "none",
+  },
+
+  // --- KazChess / Родители / Дети ---
+  {
+    id: "t-pr-1",
+    projectId: "kazchess",
+    sectionId: "kc-parents",
+    parentId: null,
+    title: "Дополнить ТЗ по родителям",
+    status: "FOCUS",
+    pinned: false,
+    reminder: "none",
+    deadline: "12 июля",
+    notes: "Добавить раздел про доступы и сценарии ошибок.",
+  },
+  {
+    id: "t-pr-2",
+    projectId: "kazchess",
+    sectionId: "kc-parents",
+    parentId: "t-pr-1",
+    title: "Раздел про доступы",
+    status: "FOCUS",
+    pinned: false,
+    reminder: "none",
+  },
+  {
+    id: "t-pr-3",
+    projectId: "kazchess",
+    sectionId: "kc-parents",
+    parentId: "t-pr-1",
+    title: "Сценарии ошибок",
+    status: "TODO",
+    pinned: false,
+    reminder: "none",
+  },
+  {
+    id: "t-pr-4",
+    projectId: "kazchess",
+    sectionId: "kc-parents",
+    parentId: null,
+    title: "Посмотреть задачи Даши",
+    status: "FOCUS",
+    pinned: false,
+    reminder: "30m",
+  },
+
+  // --- KazChess / Документы ---
+  {
+    id: "t-doc-1",
+    projectId: "kazchess",
+    sectionId: "kc-docs",
+    parentId: null,
+    title: "Закрывающие документы по облаку Яндекса",
+    status: "WAIT",
+    pinned: true,
+    reminder: "none",
+    waitingFor: "когда Кирилл подготовит договор",
+  },
+  {
+    id: "t-doc-2",
+    projectId: "kazchess",
+    sectionId: "kc-docs",
+    parentId: null,
+    title: "Посмотреть по задачам Даши",
+    status: "WAIT",
+    pinned: false,
+    reminder: "none",
+    waitingFor: "ответа от Мадины",
+  },
+
+  // --- TaskOverlay / Overlay ---
+  {
+    id: "t-ov-1",
+    projectId: "taskoverlay",
+    sectionId: "to-overlay",
+    parentId: null,
+    title: "Проверить backup restore",
+    status: "TODO",
+    pinned: false,
+    reminder: "none",
+  },
+  {
+    id: "t-ov-2",
+    projectId: "taskoverlay",
+    sectionId: "to-overlay",
+    parentId: null,
+    title: "WebView2 Management Window",
+    status: "FOCUS",
+    pinned: true,
+    reminder: "none",
+    deadline: "сегодня",
+    notes: "Встроить React UI в WPF через WebView2.",
+  },
+
+  // --- TaskOverlay / Tree Manager ---
+  {
+    id: "t-tm-1",
+    projectId: "taskoverlay",
+    sectionId: "to-tree",
+    parentId: null,
+    title: "Улучшить визуальную иерархию",
+    status: "FOCUS",
+    pinned: false,
+    reminder: "none",
+  },
+  {
+    id: "t-tm-2",
+    projectId: "taskoverlay",
+    sectionId: "to-tree",
+    parentId: null,
+    title: "Details panel redesign",
+    status: "TODO",
+    pinned: false,
+    reminder: "none",
+  },
+
+  // --- TaskOverlay / Backups ---
+  {
+    id: "t-bk-1",
+    projectId: "taskoverlay",
+    sectionId: "to-backups",
+    parentId: null,
+    title: "Проверка свежего backup при запуске",
+    status: "WAIT",
+    pinned: false,
+    reminder: "morning",
+    waitingFor: "ночного бэкапа",
+  },
+
+  // --- PLHIV ---
+  {
+    id: "t-ph-1",
+    projectId: "plhiv",
+    sectionId: "ph-general",
+    parentId: null,
+    title: "Обновить отчёт по когорте",
+    status: "TODO",
+    pinned: false,
+    reminder: "none",
+    deadline: "15 июля",
+  },
+
+  // --- Personal ---
+  {
+    id: "t-pe-1",
+    projectId: "personal",
+    sectionId: "pe-home",
+    parentId: null,
+    title: "Записаться к стоматологу",
+    status: "TODO",
+    pinned: false,
+    reminder: "morning",
+  },
+]
+
+// ─── MEET items (first-class, not tasks) ────────────────────────────────────
+// Future: feed the handle "next meeting" display.
+// Settings later: countdown threshold, show next meeting on handle, default duration.
+export const initialMeetItems: MeetItem[] = [
+  {
+    id: "m-1",
+    projectId: "kazchess",
+    title: "KazChess sync call",
+    notes: "Discuss SmartBridge answer format",
+    date: new Date().toISOString().slice(0, 10), // today
+    startTime: "12:30",
+    duration: "30m",
+    location: "Room 4",
+    link: "meet.example.com/freedom",
+    linkedTaskId: "t-sb-1",
+  },
+  {
+    id: "m-2",
+    projectId: "plhiv",
+    title: "PLHIV onboarding",
+    date: (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })(),
+    startTime: "10:00",
+    duration: "1h",
+    location: "Online",
+  },
+  {
+    id: "m-3",
+    projectId: "personal",
+    title: "Quarter review",
+    date: "2026-07-14",
+    startTime: "14:00",
+    duration: "1h",
+    notes: "Review Q2 targets and plan Q3",
+  },
+]
+
+export const timelineItems: TimelineItem[] = [
+  {
+    id: "tl-1",
+    kind: "MEET",
+    title: "KazChess sync call",
+    projectPath: "KazChess",
+    time: "12:30",
+    bucket: "today",
+    meta: "30m · Room 4",
+    projectId: "kazchess",
+  },
+  {
+    id: "tl-2",
+    kind: "REMIND",
+    title: "Check Freedom answer",
+    projectPath: "KazChess",
+    time: "15:00",
+    bucket: "today",
+    meta: "task reminder",
+    projectId: "kazchess",
+  },
+  {
+    id: "tl-3",
+    kind: "DEADLINE",
+    title: "Draft parent-child spec",
+    projectPath: "KazChess",
+    time: "17:00",
+    bucket: "today",
+    meta: "task deadline",
+    projectId: "kazchess",
+  },
+  {
+    id: "tl-4",
+    kind: "MEET",
+    title: "PLHIV onboarding",
+    projectPath: "PLHIV",
+    time: "10:00",
+    bucket: "tomorrow",
+    meta: "60m",
+    projectId: "plhiv",
+  },
+  {
+    id: "tl-5",
+    kind: "DEADLINE",
+    title: "Submit parent-child spec",
+    projectPath: "KazChess",
+    time: "Fri 18:00",
+    bucket: "week",
+    meta: "Friday · task deadline",
+    projectId: "kazchess",
+  },
+  {
+    id: "tl-6",
+    kind: "REMIND",
+    title: "Follow up with Madina",
+    projectPath: "TaskOverlay",
+    time: "Thu 11:00",
+    bucket: "week",
+    meta: "task reminder",
+    projectId: "taskoverlay",
+  },
+  {
+    id: "tl-7",
+    kind: "MEET",
+    title: "Quarter review",
+    projectPath: "Default",
+    time: "Jul 14",
+    bucket: "later",
+    meta: "60m",
+    projectId: "personal",
+  },
+]
