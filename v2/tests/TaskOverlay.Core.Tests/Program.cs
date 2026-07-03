@@ -57,7 +57,9 @@ internal static class Program
             ("reminder notification snooze persistence", ReminderNotificationSnoozePersistence),
             ("reminder attention ordering", ReminderAttentionOrdering),
             ("done and clear remove reminder attention", DoneAndClearRemoveReminderAttention),
+            ("done resolves reminder schedule", DoneResolvesReminderSchedule),
             ("quick task capture", QuickTaskCapture),
+            ("quick task reminder presets", QuickTaskReminderPresets),
             ("save/load roundtrip", SaveLoadRoundtrip),
             ("overlay mode serialization", OverlayModeSerialization),
             ("working presentation settings", WorkingPresentationSettings),
@@ -1363,6 +1365,7 @@ internal static class Program
         Assert(ReminderService.Snooze(task, 30, now), "Snooze should succeed.");
         Assert(task.RemindAtUtc == now.AddMinutes(30), "Snooze should set the requested time.");
         Assert(!task.ReminderActive, "Snooze should dismiss the REMIND badge.");
+        Assert(task.Status == TaskStatus.Waiting, "Snooze must not change task status.");
 
         task.RemindEveryMinutes = null;
         Assert(ReminderService.MarkStillWaiting(task, now), "Still waiting should succeed.");
@@ -1450,6 +1453,9 @@ internal static class Program
                 loaded.ReminderSnoozedUntilUtc == now.AddMinutes(30),
                 "Notification snooze should survive restart.");
             Assert(
+                loaded.Status == TaskStatus.Todo,
+                "Notification snooze must not change task status.");
+            Assert(
                 !ReminderAttentionService.ShouldShowNotification(loaded, now.AddMinutes(29)),
                 "The notification should remain hidden during the snooze.");
             Assert(
@@ -1508,8 +1514,67 @@ internal static class Program
             !ReminderAttentionService.ShouldShowNotification(cleared, now),
             "Removing a reminder should dismiss its notification.");
         Assert(
-            cleared.Status != TaskStatus.Done && cleared.Title == "Clear me",
+            cleared.Status == TaskStatus.Todo && cleared.Title == "Clear me",
             "Removing a reminder must not complete or delete the task.");
+        Assert(
+            cleared.RemindAtUtc is null &&
+            cleared.RemindEveryMinutes is null &&
+            !cleared.ReminderActive,
+            "Removing a reminder should clear schedule and attention metadata.");
+    }
+
+    private static void DoneResolvesReminderSchedule()
+    {
+        var start = DateTimeOffset.Parse("2026-07-03T08:00:00Z");
+        var repeating = TaskItem.Create("Complete repeating reminder", start);
+        ReminderService.ApplyPreset(
+            repeating,
+            ReminderPreset.RepeatEvery2Hours,
+            start,
+            TimeZoneInfo.Utc);
+        ReminderService.ProcessDueReminders(new[] { repeating }, start.AddHours(2));
+
+        Assert(repeating.ReminderActive, "Repeating reminder should be active before DONE.");
+        Assert(
+            TaskInteractionService.Complete(repeating, start.AddHours(2).AddMinutes(1)),
+            "DONE should complete an active reminder task.");
+        Assert(
+            repeating.Status == TaskStatus.Done && repeating.Completed,
+            "DONE should persist completed task state.");
+        Assert(
+            repeating.RemindAtUtc is null &&
+            repeating.RemindEveryMinutes is null &&
+            repeating.LastReminderAtUtc is null &&
+            !repeating.ReminderActive &&
+            repeating.ReminderAcknowledgedAtUtc is null &&
+            repeating.ReminderSnoozedUntilUtc is null,
+            "DONE should resolve all reminder schedule and attention metadata.");
+        Assert(
+            ReminderService.ProcessDueReminders(
+                new[] { repeating },
+                start.AddDays(2)).Count == 0,
+            "DONE should prevent future repeating reminder activations.");
+
+        var legacyDone = TaskItem.Create("Legacy DONE reminder", start);
+        legacyDone.Status = TaskStatus.Done;
+        legacyDone.Completed = true;
+        legacyDone.RemindAtUtc = start.AddMinutes(-1);
+        legacyDone.RemindEveryMinutes = 120;
+        legacyDone.ReminderActive = true;
+        legacyDone.LastReminderAtUtc = start.AddMinutes(-1);
+
+        Assert(
+            ReminderService.ProcessDueReminders(new[] { legacyDone }, start).Count == 0 &&
+            !ReminderAttentionService.ShouldShowNotification(legacyDone, start),
+            "DONE tasks with old metadata must be ignored by reminder scanning.");
+        Assert(
+            TaskInteractionService.Complete(legacyDone, start),
+            "Completing legacy DONE state should report reminder cleanup.");
+        Assert(
+            legacyDone.RemindAtUtc is null &&
+            legacyDone.RemindEveryMinutes is null &&
+            !legacyDone.ReminderActive,
+            "Completing legacy DONE state should clear stale reminder metadata.");
     }
 
     private static void QuickTaskCapture()
@@ -1537,6 +1602,112 @@ internal static class Program
         Assert(task.WaitingFor == "Madina", "Quick task should store waitingFor.");
         Assert(task.RemindAtUtc == now.AddHours(2), "Repeat preset should schedule first reminder.");
         Assert(task.RemindEveryMinutes == 120, "Repeat preset should store interval.");
+    }
+
+    private static void QuickTaskReminderPresets()
+    {
+        var state = AppState.CreateDefault();
+        var project = state.Projects.Single();
+        var now = DateTimeOffset.Parse("2026-07-03T10:15:00Z");
+
+        var cases = new[]
+        {
+            (ReminderPreset.In30Minutes, now.AddMinutes(30)),
+            (ReminderPreset.In1Hour, now.AddHours(1)),
+            (ReminderPreset.In2Hours, now.AddHours(2)),
+            (ReminderPreset.TomorrowMorning, DateTimeOffset.Parse("2026-07-04T10:00:00Z"))
+        };
+        foreach (var (preset, expected) in cases)
+        {
+            var task = TaskCaptureService.CreateQuickTask(
+                state,
+                new QuickTaskValues(
+                    $"Quick {preset}",
+                    project.Id,
+                    TaskStatus.Todo,
+                    preset,
+                    string.Empty,
+                    string.Empty),
+                now,
+                TimeZoneInfo.Utc);
+
+            Assert(task is not null, $"Quick Add should create a task for {preset}.");
+            Assert(
+                task!.RemindAtUtc == expected && task.RemindEveryMinutes is null,
+                $"Quick Add should store the expected one-shot schedule for {preset}.");
+        }
+
+        var noReminder = TaskCaptureService.CreateQuickTask(
+            state,
+            new QuickTaskValues(
+                "Quick no reminder",
+                project.Id,
+                TaskStatus.Todo,
+                ReminderPreset.None,
+                string.Empty,
+                string.Empty),
+            now,
+            TimeZoneInfo.Utc);
+        Assert(noReminder is not null, "Quick Add should create a task without reminder.");
+        Assert(
+            noReminder!.RemindAtUtc is null &&
+            noReminder.RemindEveryMinutes is null &&
+            !noReminder.ReminderActive,
+            "No reminder should create no reminder metadata.");
+
+        var customAt = now.AddDays(3).AddMinutes(17);
+        var custom = TaskCaptureService.CreateQuickTask(
+            state,
+            new QuickTaskValues(
+                "Quick custom reminder",
+                project.Id,
+                TaskStatus.Waiting,
+                ReminderPreset.KeepCurrent,
+                "Review response",
+                string.Empty,
+                customAt,
+                1440,
+                true),
+            now,
+            TimeZoneInfo.Utc);
+        Assert(custom is not null, "Quick Add should create a custom scheduled task.");
+        Assert(
+            custom!.RemindAtUtc == customAt && custom.RemindEveryMinutes == 1440,
+            "Quick Add should store an explicit custom schedule and repeat interval.");
+
+        var weekly = TaskCaptureService.CreateQuickTask(
+            state,
+            new QuickTaskValues(
+                "Quick weekly reminder",
+                project.Id,
+                TaskStatus.Todo,
+                ReminderPreset.KeepCurrent,
+                string.Empty,
+                string.Empty,
+                customAt,
+                7 * 24 * 60,
+                true),
+            now,
+            TimeZoneInfo.Utc);
+        Assert(
+            weekly is not null && weekly.RemindEveryMinutes == 10080,
+            "Quick Add should store the weekly repeat interval.");
+
+        var done = TaskCaptureService.CreateQuickTask(
+            state,
+            new QuickTaskValues(
+                "Quick DONE",
+                project.Id,
+                TaskStatus.Done,
+                ReminderPreset.In1Hour,
+                string.Empty,
+                string.Empty),
+            now,
+            TimeZoneInfo.Utc);
+        Assert(done is not null && done.Status == TaskStatus.Done, "Quick Add should create DONE state.");
+        Assert(
+            done!.RemindAtUtc is null && done.RemindEveryMinutes is null,
+            "DONE tasks must not retain a Quick Add reminder schedule.");
     }
 
     private static void SaveLoadRoundtrip()
