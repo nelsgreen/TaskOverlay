@@ -14,6 +14,7 @@ interface Props {
   onSelect: (id: string) => void
   onToggleCollapse: (id: string) => void
   onTogglePin: (id: string) => void
+  readOnly?: boolean
 }
 
 export function TaskRow({
@@ -25,6 +26,7 @@ export function TaskRow({
   onSelect,
   onToggleCollapse,
   onTogglePin,
+  readOnly,
 }: Props) {
   const isDone = task.status === "DONE"
 
@@ -102,6 +104,8 @@ export function TaskRow({
 
       {/* pin */}
       <button
+        disabled={readOnly}
+        title={readOnly ? "Workspace is read-only" : undefined}
         onClick={(e) => {
           e.stopPropagation()
           onTogglePin(task.id)
@@ -111,6 +115,7 @@ export function TaskRow({
           task.pinned
             ? "text-primary hover:bg-primary/10"
             : "text-muted-foreground/40 opacity-0 hover:bg-accent hover:text-foreground group-hover:opacity-100",
+          readOnly && "cursor-not-allowed opacity-40 group-hover:opacity-40",
         )}
         aria-label={task.pinned ? "Unpin from panel" : "Pin to panel"}
         aria-pressed={task.pinned}

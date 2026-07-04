@@ -1,17 +1,26 @@
 using System;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
+using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
 
 public partial class WorkspaceWindow : Window
 {
     private const string WorkspaceHostName = "taskoverlay.workspace";
+    private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    private readonly AppState _state;
     private bool _initialized;
 
-    public WorkspaceWindow()
+    public WorkspaceWindow(AppState state)
     {
+        _state = state ?? throw new ArgumentNullException(nameof(state));
         InitializeComponent();
     }
 
@@ -56,6 +65,10 @@ public partial class WorkspaceWindow : Window
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreDefaultContextMenusEnabled = false;
             core.Settings.IsStatusBarEnabled = false;
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(
+                "window.__taskOverlayWorkspaceMessages = [];" +
+                "window.chrome.webview.addEventListener('message', " +
+                "event => window.__taskOverlayWorkspaceMessages.push(event.data));");
             core.NewWindowRequested += CoreWebView2_OnNewWindowRequested;
             core.NavigationStarting += CoreWebView2_OnNavigationStarting;
             core.NavigationCompleted += CoreWebView2_OnNavigationCompleted;
@@ -100,6 +113,18 @@ public partial class WorkspaceWindow : Window
     {
         if (e.IsSuccess)
         {
+            try
+            {
+                var snapshot = WorkspaceSnapshotFactory.Create(_state);
+                var json = JsonSerializer.Serialize(snapshot, SnapshotJsonOptions);
+                WorkspaceWebView.CoreWebView2.PostWebMessageAsJson(json);
+            }
+            catch (Exception ex)
+            {
+                ShowError($"Workspace state could not be loaded: {ex.Message}");
+                return;
+            }
+
             LoadingPanel.Visibility = Visibility.Collapsed;
             return;
         }

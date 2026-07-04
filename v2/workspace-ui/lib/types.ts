@@ -52,6 +52,12 @@ export interface Task {
   /** legacy/display-only deadline label kept for inline display */
   deadline?: string
   notes?: string
+  /** source timestamp supplied by the read-only WPF bridge */
+  remindAtUtc?: string
+  /** true only while the current reminder occurrence needs attention */
+  reminderActive?: boolean
+  /** source deadline timestamp supplied by the read-only WPF bridge */
+  deadlineAtUtc?: string
 }
 
 export type TimelineKind = "MEET" | "REMIND" | "DEADLINE"
@@ -111,4 +117,65 @@ export type TabKey = "tree" | "status" | "timeline" | "calendar" | "workstreams"
 export interface ProjectScope {
   /** ids of currently selected projects (>=1) */
   ids: string[]
+}
+
+export interface WorkspaceSnapshotContract {
+  schemaVersion: 1
+  generatedAtUtc: string
+  mode: "readonly"
+  projects: WorkspaceProjectSnapshot[]
+  sections: WorkspaceSectionSnapshot[]
+  tasks: WorkspaceTaskSnapshot[]
+  activeNow: WorkspaceActiveNowSnapshot[]
+  timelineItems: WorkspaceTimelineSnapshot[]
+}
+
+export interface WorkspaceProjectSnapshot {
+  id: string
+  name: string
+  color: string
+  sortOrder: number
+}
+
+export interface WorkspaceSectionSnapshot {
+  id: string
+  projectId: string
+  name: string
+  sortOrder: number
+  isProjectRoot: boolean
+}
+
+export interface WorkspaceTaskSnapshot {
+  id: string
+  projectId: string
+  sectionId: string
+  parentId: string | null
+  title: string
+  description: string
+  status: Status
+  waitingFor: string
+  pinToPanel: boolean
+  sortOrder: number
+  createdAtUtc: string
+  updatedAtUtc: string
+  reminderAtUtc: string | null
+  reminderEveryMinutes: number | null
+  reminderActive: boolean
+  deadlineAtUtc: string | null
+}
+
+export interface WorkspaceActiveNowSnapshot {
+  taskId: string
+  kind: "FOCUS" | "REMIND"
+}
+
+export interface WorkspaceTimelineSnapshot {
+  id: string
+  kind: "REMIND" | "DEADLINE"
+  title: string
+  projectId: string
+  projectPath: string
+  linkedTaskId: string
+  occursAtUtc: string
+  meta: string | null
 }

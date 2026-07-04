@@ -12,9 +12,10 @@ interface Props {
   onSelectOnly: (id: string) => void
   /** cmd/ctrl click or checkbox — add/remove from multi-selection */
   onToggleProject: (id: string) => void
+  readOnly?: boolean
 }
 
-export function ProjectSidebar({ projects, tasks, selectedProjectIds, onSelectOnly, onToggleProject }: Props) {
+export function ProjectSidebar({ projects, tasks, selectedProjectIds, onSelectOnly, onToggleProject, readOnly }: Props) {
   const activeCount = (projectId: string) =>
     tasks.filter((t) => t.projectId === projectId && (t.status === "FOCUS" || t.status === "WAIT")).length
 
@@ -27,7 +28,9 @@ export function ProjectSidebar({ projects, tasks, selectedProjectIds, onSelectOn
       <div className="flex items-center justify-between px-4 pb-2 pt-4">
         <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Projects</span>
         <button
-          className="flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          disabled={readOnly}
+          title={readOnly ? "Workspace is read-only" : "New project"}
+          className="flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="New project"
         >
           <Plus className="size-4" />

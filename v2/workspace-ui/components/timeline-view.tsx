@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Bell, Flag, Plus, Video } from "lucide-react"
-import type { TimelineItem, TimelineKind } from "@/lib/types"
-import { timelineItems, projects } from "@/lib/mock-data"
+import type { Project, TimelineItem, TimelineKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -100,6 +99,8 @@ const buckets: { key: TimelineItem["bucket"]; label: string }[] = [
 
 interface TimelineViewProps {
   projectIds?: string[]
+  projects: Project[]
+  items: TimelineItem[]
   selectedTimelineItemId?: string | null
   /** called with the timeline item and linked MeetItem ids when user clicks a MEET row */
   onSelectMeet?: (timelineItemId: string, meetId: string) => void
@@ -107,14 +108,18 @@ interface TimelineViewProps {
   onSelectTask?: (timelineItemId: string, taskId: string) => void
   /** called when user clicks "New MEET" */
   onNewMeet?: () => void
+  readOnly?: boolean
 }
 
 export function TimelineView({
   projectIds,
+  projects,
+  items,
   selectedTimelineItemId,
   onSelectMeet,
   onSelectTask,
   onNewMeet,
+  readOnly,
 }: TimelineViewProps) {
   const [nowMins, setNowMins] = useState<number>(getNowMinutes)
 
@@ -131,8 +136,8 @@ export function TimelineView({
   // Combined time view across the selected projects
   const scopedItems =
     projectIds && projectIds.length > 0
-      ? timelineItems.filter((i) => !i.projectId || projectIds.includes(i.projectId))
-      : timelineItems
+      ? items.filter((i) => !i.projectId || projectIds.includes(i.projectId))
+      : items
 
   // Collect today scrubber dots from items that have parseable times
   const todayItems = scopedItems.filter((i) => i.bucket === "today")
@@ -155,7 +160,9 @@ export function TimelineView({
           <div className="ml-auto">
             <button
               onClick={onNewMeet}
-              className="flex items-center gap-1.5 rounded-md border border-status-meet/40 bg-status-meet/10 px-2.5 py-1.5 text-[11px] font-semibold text-status-meet transition-colors hover:bg-status-meet/20"
+              disabled={readOnly}
+              title={readOnly ? "MEET is not persisted in the current app state" : "New MEET"}
+              className="flex items-center gap-1.5 rounded-md border border-status-meet/40 bg-status-meet/10 px-2.5 py-1.5 text-[11px] font-semibold text-status-meet transition-colors hover:bg-status-meet/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Plus className="size-3.5" />
               New MEET
@@ -274,6 +281,7 @@ export function TimelineView({
                       <TimelineRow
                         key={item.id}
                         item={item}
+                        projects={projects}
                         isPast={isPast}
                         isNear={isNear}
                         selected={selected}
@@ -314,12 +322,14 @@ function KindPill({ kind }: { kind: TimelineKind }) {
 
 function TimelineRow({
   item,
+  projects,
   isPast,
   isNear,
   selected,
   onSelect,
 }: {
   item: TimelineItem
+  projects: Project[]
   isPast: boolean
   isNear: boolean
   selected?: boolean
