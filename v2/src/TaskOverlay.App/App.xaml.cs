@@ -881,10 +881,15 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (_workspaceWindow is null && _state is not null)
+        {
+            _workspaceWindow = new WorkspaceWindow(_state);
+            _workspaceWindow.Closed += WorkspaceWindow_OnClosed;
+        }
+
         if (_workspaceWindow is null)
         {
-            _workspaceWindow = new WorkspaceWindow();
-            _workspaceWindow.Closed += WorkspaceWindow_OnClosed;
+            return;
         }
 
         _workspaceWindow.Show();

@@ -13,6 +13,7 @@ interface Props {
   /** Called on every draft change — auto-apply, no Save button */
   onApply: (task: Task) => void
   onDelete: (id: string) => void
+  readOnly?: boolean
 }
 
 const statuses: Status[] = ["TODO", "FOCUS", "WAIT", "DONE"]
@@ -101,7 +102,7 @@ function getDeadlinePresets() {
   ]
 }
 
-export function DetailsPanel({ task, projects, sections, onApply, onDelete }: Props) {
+export function DetailsPanel({ task, projects, sections, onApply, onDelete, readOnly }: Props) {
   const [draft, setDraft] = useState<Task | null>(task)
   const [reminderOpen, setReminderOpen] = useState(false)
   const [deadlineOpen, setDeadlineOpen] = useState(false)
@@ -121,9 +122,9 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete }: Pr
 
   // Auto-apply: push every draft change up to parent immediately
   useEffect(() => {
-    if (!draft) return
+    if (!draft || readOnly) return
     onApply(draft)
-  }, [draft])
+  }, [draft, readOnly])
 
   if (!draft) {
     return (
@@ -174,11 +175,19 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete }: Pr
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">Details</h2>
-        <span className="rounded-md bg-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Task
-        </span>
+        <div className="flex items-center gap-1.5">
+          {readOnly && (
+            <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+              Read-only
+            </span>
+          )}
+          <span className="rounded-md bg-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Task
+          </span>
+        </div>
       </div>
 
+      <fieldset disabled={readOnly} className="contents">
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
 
         {/* ── Title ── */}
@@ -269,7 +278,7 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete }: Pr
               {hasReminder && (
                 <span
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); clearReminder() }}
+                  onClick={(e) => { e.stopPropagation(); if (!readOnly) clearReminder() }}
                   aria-label="Clear reminder"
                   className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
                 >
@@ -429,7 +438,7 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete }: Pr
               {hasDeadline && (
                 <span
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); clearDeadline() }}
+                  onClick={(e) => { e.stopPropagation(); if (!readOnly) clearDeadline() }}
                   aria-label="Clear deadline"
                   className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
                 >
@@ -606,6 +615,7 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete }: Pr
           Revert
         </button>
       </div>
+      </fieldset>
     </aside>
   )
 }

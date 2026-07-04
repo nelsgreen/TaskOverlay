@@ -30,6 +30,7 @@ interface Props {
   onFilterChange: (f: TreeFilter) => void
   search: string
   onSearchChange: (v: string) => void
+  readOnly?: boolean
 }
 
 const tabs: { key: TabKey; label: string; icon: typeof FolderTree; later?: boolean }[] = [
@@ -61,6 +62,7 @@ export function WorkspaceHeader({
   onFilterChange,
   search,
   onSearchChange,
+  readOnly,
 }: Props) {
   const [open, setOpen] = useState(false)
 
@@ -211,11 +213,19 @@ export function WorkspaceHeader({
               <span className="size-1.5 rounded-full" style={{ backgroundColor: treeProject.color }} />
               into {treeProject.name}
             </span>
-            <button className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent">
+            <button
+              disabled={readOnly}
+              title={readOnly ? "Workspace is read-only" : "New section"}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
               <Plus className="size-4" />
               New section
             </button>
-            <button className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+            <button
+              disabled={readOnly}
+              title={readOnly ? "Workspace is read-only" : "New task"}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
               <Plus className="size-4" />
               New task
             </button>

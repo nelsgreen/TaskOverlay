@@ -16,6 +16,7 @@ interface Props {
   onToggleSection: (id: string) => void
   onToggleTask: (id: string) => void
   onTogglePin: (id: string) => void
+  readOnly?: boolean
 }
 
 const isActive = (t: Task) => t.status === "FOCUS" || t.status === "WAIT"
@@ -31,6 +32,7 @@ export function TreeView({
   onToggleSection,
   onToggleTask,
   onTogglePin,
+  readOnly,
 }: Props) {
   // Determine which tasks pass the filter (keeping ancestors when needed)
   const visibleIds = new Set<string>()
@@ -70,6 +72,7 @@ export function TreeView({
             onSelect={onSelectTask}
             onToggleCollapse={onToggleTask}
             onTogglePin={onTogglePin}
+            readOnly={readOnly}
           />
           {!collapsed && kids.length > 0 && renderChildren(task.id, sectionId, depth + 1)}
         </div>

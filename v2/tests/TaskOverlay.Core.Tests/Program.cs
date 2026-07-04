@@ -110,7 +110,10 @@ internal static class Program
             ("clipboard lines create multiple tasks", ClipboardLinesCreateMultipleTasks),
             ("single clipboard task collapses lines", SingleClipboardTaskCollapsesLines),
             ("clipboard task with description", ClipboardTaskWithDescription),
-            ("empty clipboard text", EmptyClipboardText)
+            ("empty clipboard text", EmptyClipboardText),
+            ("workspace snapshot contract", WorkspaceSnapshotContract),
+            ("workspace timeline consistency", WorkspaceTimelineConsistency),
+            ("workspace orphan fallback", WorkspaceOrphanFallback)
         };
 
         foreach (var test in tests)
@@ -3539,6 +3542,140 @@ internal static class Program
         Assert(
             ClipboardTaskFactory.CreateWithDescription(" \r\n\t\r\n ") is null,
             "Whitespace-only clipboard should create no described task.");
+    }
+
+    private static void WorkspaceSnapshotContract()
+    {
+        var now = DateTimeOffset.Parse("2026-07-04T09:00:00Z");
+        var state = AppState.CreateDefault(now);
+        state.Tasks.Clear();
+        var project = state.Projects[0];
+        project.ColorHex = "#22AA77";
+        var group = new GroupItem
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Id,
+            Name = "Delivery",
+            SortOrder = 2,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.Groups.Add(group);
+        var waiting = TaskItem.Create("Await review", now, project.Id);
+        waiting.GroupId = group.Id;
+        waiting.Status = TaskStatus.Waiting;
+        waiting.WaitingFor = "reviewer";
+        waiting.PinToPanel = true;
+        waiting.RemindAtUtc = now.AddMinutes(-5);
+        waiting.LastReminderAtUtc = waiting.RemindAtUtc;
+        waiting.ReminderActive = true;
+        waiting.DueAtUtc = now.AddDays(1);
+        var focus = TaskItem.Create("Current work", now.AddMinutes(1), project.Id);
+        focus.Status = TaskStatus.InWork;
+        state.Tasks.Add(waiting);
+        state.Tasks.Add(focus);
+
+        var snapshot = WorkspaceSnapshotFactory.Create(state, now);
+        var waitingSnapshot = snapshot.Tasks.Single(task =>
+            task.Id == waiting.Id.ToString("N"));
+
+        Assert(snapshot.SchemaVersion == 1, "Workspace contract version should be 1.");
+        Assert(snapshot.Mode == "readonly", "Workspace contract should be read-only.");
+        Assert(snapshot.GeneratedAtUtc == now, "Workspace snapshot timestamp mismatch.");
+        Assert(snapshot.Projects.Single().Color == "#22AA77", "Project color should be projected.");
+        Assert(waitingSnapshot.Status == "WAIT", "Waiting status should be projected.");
+        Assert(waitingSnapshot.WaitingFor == "reviewer", "Waiting metadata should be projected.");
+        Assert(waitingSnapshot.PinToPanel, "Panel pin should be projected.");
+        Assert(waitingSnapshot.ReminderActive, "Active reminder should be projected.");
+        Assert(
+            snapshot.ActiveNow.Select(item => item.TaskId).OrderBy(id => id).SequenceEqual(
+                new[] { waiting.Id.ToString("N"), focus.Id.ToString("N") }.OrderBy(id => id)),
+            "Active now should contain FOCUS and active REMIND tasks.");
+
+        var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        });
+        var document = JsonDocument.Parse(json);
+        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 1,
+            "Serialized workspace contract should use camelCase fields.");
+        Assert(document.RootElement.GetProperty("mode").GetString() == "readonly",
+            "Serialized workspace contract mode mismatch.");
+    }
+
+    private static void WorkspaceTimelineConsistency()
+    {
+        var now = DateTimeOffset.Parse("2026-07-04T09:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        state.Tasks.Clear();
+        var reminderTask = TaskItem.Create("Reminder task", now, project.Id);
+        reminderTask.RemindAtUtc = now.AddHours(1);
+        var deadlineTask = TaskItem.Create("Deadline task", now, project.Id);
+        deadlineTask.DueAtUtc = now.AddDays(2);
+        var plainTask = TaskItem.Create("Plain task", now, project.Id);
+        state.Tasks.Add(reminderTask);
+        state.Tasks.Add(deadlineTask);
+        state.Tasks.Add(plainTask);
+
+        var snapshot = WorkspaceSnapshotFactory.Create(state, now);
+        Assert(snapshot.TimelineItems.Count == 2,
+            "Only tasks with reminder/deadline metadata should appear in Timeline.");
+        foreach (var item in snapshot.TimelineItems)
+        {
+            var linkedTask = snapshot.Tasks.Single(task => task.Id == item.LinkedTaskId);
+            if (item.Kind == "REMIND")
+            {
+                Assert(linkedTask.ReminderAtUtc == item.OccursAtUtc,
+                    "REMIND must use the linked task reminder timestamp.");
+            }
+            else if (item.Kind == "DEADLINE")
+            {
+                Assert(linkedTask.DeadlineAtUtc == item.OccursAtUtc,
+                    "DEADLINE must use the linked task deadline timestamp.");
+            }
+            else
+            {
+                throw new InvalidOperationException("Unexpected real Timeline kind.");
+            }
+        }
+
+        Assert(snapshot.TimelineItems.All(item => item.LinkedTaskId != plainTask.Id.ToString("N")),
+            "Task without attention metadata must not produce a Timeline row.");
+    }
+
+    private static void WorkspaceOrphanFallback()
+    {
+        var now = DateTimeOffset.Parse("2026-07-04T09:00:00Z");
+        var state = new AppState
+        {
+            Projects = new(),
+            Groups = new(),
+            Tasks =
+            {
+                new TaskItem
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = Guid.NewGuid(),
+                    GroupId = Guid.NewGuid(),
+                    Title = "Orphan task",
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now
+                }
+            }
+        };
+
+        var snapshot = WorkspaceSnapshotFactory.Create(state, now);
+        Assert(snapshot.Projects.Count == 1, "Empty state should expose a safe Default project.");
+        Assert(snapshot.Projects[0].Name == ProjectItem.DefaultName,
+            "Fallback project should be Default.");
+        Assert(snapshot.Tasks.Single().ProjectId == snapshot.Projects[0].Id,
+            "Orphan task should resolve to the snapshot Default project.");
+        Assert(snapshot.Sections.Any(section =>
+                section.Id == snapshot.Tasks[0].SectionId && section.IsProjectRoot),
+            "Orphan task should resolve to a visible project-root section.");
+        Assert(state.Projects.Count == 0,
+            "Workspace snapshot creation must not mutate source state.");
     }
 
     private static AppState CreateEmptyTreeState()

@@ -11,10 +11,14 @@ interface Props {
   sections: Section[]
   selectedTaskId: string | null
   onSelectTask: (id: string) => void
+  taskIds?: string[]
 }
 
-export function ActiveNowStrip({ tasks, projects, sections, selectedTaskId, onSelectTask }: Props) {
-  const active = tasks.filter((t) => t.status === "FOCUS" || (t.reminder !== "none" && t.status !== "DONE"))
+export function ActiveNowStrip({ tasks, projects, sections, selectedTaskId, onSelectTask, taskIds }: Props) {
+  const bridgedIds = taskIds ? new Set(taskIds) : null
+  const active = tasks.filter((t) => bridgedIds
+    ? bridgedIds.has(t.id)
+    : t.status === "FOCUS" || (t.reminder !== "none" && t.status !== "DONE"))
 
   const pathFor = (t: Task) => {
     const p = projects.find((x) => x.id === t.projectId)
