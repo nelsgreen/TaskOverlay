@@ -175,7 +175,7 @@ function StatusRow({
       {/* Right-side metadata */}
       <div className="flex shrink-0 items-center gap-2">
         {/* WAIT — waiting for */}
-        {task.waitingFor && (
+        {task.status === "WAIT" && task.waitingFor && (
           <span className="hidden max-w-32 truncate text-[11px] text-status-wait md:block">
             {task.waitingFor}
           </span>

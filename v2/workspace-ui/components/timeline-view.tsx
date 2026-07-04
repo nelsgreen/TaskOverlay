@@ -101,7 +101,8 @@ const buckets: { key: TimelineItem["bucket"]; label: string }[] = [
 interface TimelineViewProps {
   projectIds?: string[]
   selectedMeetId?: string | null
-  /** called when user clicks a MEET row */
+  selectedTaskId?: string | null
+  /** called with the linked MeetItem id when user clicks a MEET row */
   onSelectMeet?: (meetId: string) => void
   /** called when user clicks a REMIND or DEADLINE row that has a linked task */
   onSelectTask?: (taskId: string) => void
@@ -112,6 +113,7 @@ interface TimelineViewProps {
 export function TimelineView({
   projectIds,
   selectedMeetId,
+  selectedTaskId,
   onSelectMeet,
   onSelectTask,
   onNewMeet,
@@ -269,19 +271,19 @@ export function TimelineView({
                     const isPast = nowPos === "in-range" && mins !== null && mins < nowMins
                     const isNear =
                       nowPos === "in-range" && mins !== null && mins >= nowMins && mins - nowMins <= 30
-                    // MEET rows map to the meet with the same title (by convention)
-                    // REMIND/DEADLINE rows can select a linked task via onSelectTask
-                    const isMeetSelected = item.kind === "MEET" && selectedMeetId === item.id
+                    const selected = item.kind === "MEET"
+                      ? selectedMeetId === item.linkedMeetId
+                      : selectedTaskId === item.linkedTaskId
                     return (
                       <TimelineRow
                         key={item.id}
                         item={item}
                         isPast={isPast}
                         isNear={isNear}
-                        selected={isMeetSelected}
+                        selected={selected}
                         onSelect={() => {
-                          if (item.kind === "MEET") onSelectMeet?.(item.id)
-                          else onSelectTask?.(item.id)
+                          if (item.kind === "MEET" && item.linkedMeetId) onSelectMeet?.(item.linkedMeetId)
+                          else if (item.linkedTaskId) onSelectTask?.(item.linkedTaskId)
                         }}
                       />
                     )
@@ -330,7 +332,7 @@ function TimelineRow({
   const c = kindConfig[item.kind]
   const Icon = c.Icon
   const project = item.projectId ? projects.find((p) => p.id === item.projectId) : null
-  const isClickable = item.kind === "MEET"
+  const isClickable = item.kind === "MEET" ? !!item.linkedMeetId : !!item.linkedTaskId
 
   return (
     <div

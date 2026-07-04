@@ -276,6 +276,7 @@ export const timelineItems: TimelineItem[] = [
     bucket: "today",
     meta: "30m · Room 4",
     projectId: "kazchess",
+    linkedMeetId: "m-1",
   },
   {
     id: "tl-2",
@@ -286,6 +287,7 @@ export const timelineItems: TimelineItem[] = [
     bucket: "today",
     meta: "task reminder",
     projectId: "kazchess",
+    linkedTaskId: "t-sb-1",
   },
   {
     id: "tl-3",
@@ -296,6 +298,7 @@ export const timelineItems: TimelineItem[] = [
     bucket: "today",
     meta: "task deadline",
     projectId: "kazchess",
+    linkedTaskId: "t-pr-1",
   },
   {
     id: "tl-4",
@@ -306,6 +309,7 @@ export const timelineItems: TimelineItem[] = [
     bucket: "tomorrow",
     meta: "60m",
     projectId: "plhiv",
+    linkedMeetId: "m-2",
   },
   {
     id: "tl-5",
@@ -316,6 +320,7 @@ export const timelineItems: TimelineItem[] = [
     bucket: "week",
     meta: "Friday · task deadline",
     projectId: "kazchess",
+    linkedTaskId: "t-pr-1",
   },
   {
     id: "tl-6",
@@ -326,6 +331,7 @@ export const timelineItems: TimelineItem[] = [
     bucket: "week",
     meta: "task reminder",
     projectId: "taskoverlay",
+    linkedTaskId: "t-bk-1",
   },
   {
     id: "tl-7",
@@ -336,5 +342,6 @@ export const timelineItems: TimelineItem[] = [
     bucket: "later",
     meta: "60m",
     projectId: "personal",
+    linkedMeetId: "m-3",
   },
 ]

@@ -58,6 +58,7 @@ public partial class WorkspaceWindow : Window
             core.Settings.IsStatusBarEnabled = false;
             core.NewWindowRequested += CoreWebView2_OnNewWindowRequested;
             core.NavigationStarting += CoreWebView2_OnNavigationStarting;
+            core.NavigationCompleted += CoreWebView2_OnNavigationCompleted;
             core.Navigate($"https://{WorkspaceHostName}/index.html");
         }
         catch (WebView2RuntimeNotFoundException)
@@ -93,12 +94,26 @@ public partial class WorkspaceWindow : Window
         }
     }
 
+    private void CoreWebView2_OnNavigationCompleted(
+        object? sender,
+        CoreWebView2NavigationCompletedEventArgs e)
+    {
+        if (e.IsSuccess)
+        {
+            LoadingPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        ShowError($"Workspace failed to load: {e.WebErrorStatus}");
+    }
+
     private void WorkspaceWindow_OnClosed(object? sender, EventArgs e)
     {
         if (WorkspaceWebView.CoreWebView2 is { } core)
         {
             core.NewWindowRequested -= CoreWebView2_OnNewWindowRequested;
             core.NavigationStarting -= CoreWebView2_OnNavigationStarting;
+            core.NavigationCompleted -= CoreWebView2_OnNavigationCompleted;
         }
 
         WorkspaceWebView.Dispose();
@@ -107,6 +122,7 @@ public partial class WorkspaceWindow : Window
     private void ShowError(string message)
     {
         WorkspaceWebView.Visibility = Visibility.Collapsed;
+        LoadingPanel.Visibility = Visibility.Collapsed;
         ErrorMessageText.Text = message;
         ErrorPanel.Visibility = Visibility.Visible;
     }

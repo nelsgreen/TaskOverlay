@@ -222,28 +222,19 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete }: Pr
         </div>
 
         {/* ── Waiting for — directly under status ── */}
-        <div>
+        {draft.status === "WAIT" && <div>
           <label
-            className={cn(
-              "mb-1.5 block text-[11px] font-semibold uppercase tracking-wide transition-colors",
-              draft.status === "WAIT" ? "text-status-wait" : "text-muted-foreground/50",
-            )}
+            className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-status-wait"
           >
             Waiting for
           </label>
           <input
             value={draft.waitingFor ?? ""}
-            placeholder={draft.status === "WAIT" ? "e.g. reply from Madina" : "—"}
-            disabled={draft.status !== "WAIT"}
+            placeholder="e.g. reply from Madina"
             onChange={(e) => set("waitingFor", e.target.value || undefined)}
-            className={cn(
-              "w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50",
-              draft.status === "WAIT"
-                ? "border-status-wait/40 focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15"
-                : "cursor-default border-input/40 opacity-40",
-            )}
+            className="w-full rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15"
           />
-        </div>
+        </div>}
 
         {/* ── REMINDER — full-width collapsible ── */}
         <div className="rounded-lg border border-border bg-card/40">

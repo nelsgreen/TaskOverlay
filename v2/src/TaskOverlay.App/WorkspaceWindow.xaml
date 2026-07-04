@@ -15,6 +15,21 @@
     <Grid>
         <webview:WebView2 x:Name="WorkspaceWebView"
                           DefaultBackgroundColor="#0B0D0F" />
+        <Border x:Name="LoadingPanel"
+                Background="#FF0B0D0F">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Width="220">
+                <TextBlock HorizontalAlignment="Center"
+                           Foreground="#FFF2F2F3"
+                           FontSize="15"
+                           FontWeight="SemiBold"
+                           Text="Loading Workspace..." />
+                <ProgressBar Height="3"
+                             Margin="0,14,0,0"
+                             IsIndeterminate="True" />
+            </StackPanel>
+        </Border>
         <Border x:Name="ErrorPanel"
                 Padding="28"
                 Background="#FF101216"
