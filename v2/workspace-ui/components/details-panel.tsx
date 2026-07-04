@@ -13,7 +13,15 @@ interface Props {
   /** Called on every draft change — auto-apply, no Save button */
   onApply: (task: Task) => void
   onDelete: (id: string) => void
-  readOnly?: boolean
+  editMode?: "full" | "connected" | "readonly"
+  pendingFields?: Set<string>
+  bridgeError?: string | null
+  onBridgeEdit?: (
+    taskId: string,
+    field: "title" | "status" | "pinToPanel" | "notes",
+    value: string | boolean,
+  ) => boolean
+  onClearBridgeError?: () => void
 }
 
 const statuses: Status[] = ["TODO", "FOCUS", "WAIT", "DONE"]
@@ -102,7 +110,18 @@ function getDeadlinePresets() {
   ]
 }
 
-export function DetailsPanel({ task, projects, sections, onApply, onDelete, readOnly }: Props) {
+export function DetailsPanel({
+  task,
+  projects,
+  sections,
+  onApply,
+  onDelete,
+  editMode = "full",
+  pendingFields = new Set(),
+  bridgeError,
+  onBridgeEdit,
+  onClearBridgeError,
+}: Props) {
   const [draft, setDraft] = useState<Task | null>(task)
   const [reminderOpen, setReminderOpen] = useState(false)
   const [deadlineOpen, setDeadlineOpen] = useState(false)
@@ -118,13 +137,17 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
     setReminderOpen(false)
     setDeadlineOpen(false)
     setDeadlineWithTime(task?.deadlineTime ? true : false)
-  }, [task?.id])
+  }, [task])
 
   // Auto-apply: push every draft change up to parent immediately
   useEffect(() => {
-    if (!draft || readOnly) return
+    if (!draft || editMode !== "full") return
     onApply(draft)
-  }, [draft, readOnly])
+  }, [draft, editMode])
+
+  useEffect(() => {
+    if (bridgeError && task) setDraft(task)
+  }, [bridgeError, task])
 
   if (!draft) {
     return (
@@ -145,6 +168,21 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
   const set = <K extends keyof Task>(key: K, value: Task[K]) => setDraft((d) => d ? { ...d, [key]: value } : d)
   const hasReminder = deriveReminderState(draft) !== "none"
   const hasDeadline = !!(draft.deadlineDate || draft.deadline)
+  const bridged = editMode !== "full"
+  const connected = editMode === "connected"
+  const locked = editMode === "readonly"
+  const taskId = draft.id
+  const sourceTitle = task?.title ?? draft.title
+  const sourceNotes = task?.notes ?? draft.notes ?? ""
+
+  function sendBridgeEdit(
+    field: "title" | "status" | "pinToPanel" | "notes",
+    value: string | boolean,
+  ) {
+    if (!connected || pendingFields.has(field)) return
+    onClearBridgeError?.()
+    onBridgeEdit?.(taskId, field, value)
+  }
 
   function clearReminder() {
     setDraft((d) => d ? {
@@ -176,9 +214,9 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">Details</h2>
         <div className="flex items-center gap-1.5">
-          {readOnly && (
+          {bridged && (
             <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-              Read-only
+              {connected ? "Connected" : "Read-only"}
             </span>
           )}
           <span className="rounded-md bg-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -187,7 +225,12 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
         </div>
       </div>
 
-      <fieldset disabled={readOnly} className="contents">
+      <div className="contents">
+      {bridgeError && (
+        <div className="mx-4 mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {bridgeError}
+        </div>
+      )}
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
 
         {/* ── Title ── */}
@@ -198,6 +241,10 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
           <input
             value={draft.title}
             onChange={(e) => set("title", e.target.value)}
+            onBlur={() => {
+              if (connected && draft.title !== sourceTitle) sendBridgeEdit("title", draft.title)
+            }}
+            disabled={locked || pendingFields.has("title")}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
           />
         </div>
@@ -214,7 +261,8 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
               return (
                 <button
                   key={s}
-                  onClick={() => set("status", s)}
+                  onClick={() => connected ? sendBridgeEdit("status", s) : set("status", s)}
+                  disabled={locked || pendingFields.has("status")}
                   className={cn(
                     "flex items-center justify-center gap-1 rounded-md border px-1 py-2 text-[10px] font-semibold uppercase tracking-wide transition-colors",
                     active
@@ -241,12 +289,14 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
             value={draft.waitingFor ?? ""}
             placeholder="e.g. reply from Madina"
             onChange={(e) => set("waitingFor", e.target.value || undefined)}
+            disabled={bridged}
             className="w-full rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15"
           />
         </div>}
 
         {/* ── REMINDER — full-width collapsible ── */}
-        <div className="rounded-lg border border-border bg-card/40">
+        <fieldset disabled={bridged} className="contents">
+        <div className={cn("rounded-lg border border-border bg-card/40", bridged && "opacity-60")}>
           {/* Header — entire row is clickable */}
           <button
             type="button"
@@ -278,7 +328,7 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
               {hasReminder && (
                 <span
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); if (!readOnly) clearReminder() }}
+                  onClick={(e) => { e.stopPropagation(); if (!bridged) clearReminder() }}
                   aria-label="Clear reminder"
                   className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
                 >
@@ -407,9 +457,11 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
             </div>
           )}
         </div>
+        </fieldset>
 
         {/* ── DEADLINE — full-width collapsible ── */}
-        <div className="rounded-lg border border-border bg-card/40">
+        <fieldset disabled={bridged} className="contents">
+        <div className={cn("rounded-lg border border-border bg-card/40", bridged && "opacity-60")}>
           {/* Header — entire row is clickable */}
           <button
             type="button"
@@ -438,7 +490,7 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
               {hasDeadline && (
                 <span
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); if (!readOnly) clearDeadline() }}
+                  onClick={(e) => { e.stopPropagation(); if (!bridged) clearDeadline() }}
                   aria-label="Clear deadline"
                   className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
                 >
@@ -534,6 +586,7 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
             </div>
           )}
         </div>
+        </fieldset>
 
         {/* ── PIN TO PANEL — single compact row ── */}
         <div className="flex items-center gap-2.5 px-1 py-1">
@@ -547,12 +600,16 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
           <Switch
             checked={draft.pinned}
             activeColor="bg-status-panel"
-            onChange={() => set("pinned", !draft.pinned)}
+            disabled={locked || pendingFields.has("pinToPanel")}
+            onChange={() => connected
+              ? sendBridgeEdit("pinToPanel", !draft.pinned)
+              : set("pinned", !draft.pinned)}
           />
         </div>
 
         {/* ── LOCATION ── */}
-        <div className="rounded-lg border border-border bg-card/40 p-3">
+        <fieldset disabled={bridged} className="contents">
+        <div className={cn("rounded-lg border border-border bg-card/40 p-3", bridged && "opacity-60")}>
           <div className="mb-2 flex items-center gap-1.5">
             <MapPin className="size-3.5 text-muted-foreground" />
             <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -579,6 +636,7 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
             </LocationRow>
           </div>
         </div>
+        </fieldset>
 
         {/* ── NOTES ── */}
         <div>
@@ -588,6 +646,11 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
           <textarea
             value={draft.notes ?? ""}
             onChange={(e) => set("notes", e.target.value || undefined)}
+            onBlur={() => {
+              const notes = draft.notes ?? ""
+              if (connected && notes !== sourceNotes) sendBridgeEdit("notes", notes)
+            }}
+            disabled={locked || pendingFields.has("notes")}
             rows={3}
             placeholder="Add context…"
             className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
@@ -599,6 +662,7 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
       <div className="flex items-center gap-2 border-t border-border px-4 py-3">
         <button
           onClick={() => onDelete(draft.id)}
+          disabled={bridged}
           className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
         >
           <Trash2 className="size-3.5" />
@@ -615,7 +679,7 @@ export function DetailsPanel({ task, projects, sections, onApply, onDelete, read
           Revert
         </button>
       </div>
-      </fieldset>
+      </div>
     </aside>
   )
 }
@@ -626,10 +690,12 @@ function Switch({
   checked,
   onChange,
   activeColor = "bg-primary",
+  disabled,
 }: {
   checked: boolean
   onChange: () => void
   activeColor?: string
+  disabled?: boolean
 }) {
   return (
     <button
@@ -637,9 +703,11 @@ function Switch({
       role="switch"
       aria-checked={checked}
       onClick={onChange}
+      disabled={disabled}
       className={cn(
         "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
         checked ? activeColor : "bg-input",
+        disabled && "cursor-not-allowed opacity-50",
       )}
     >
       <span

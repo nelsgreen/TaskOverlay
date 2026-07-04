@@ -17,12 +17,14 @@ copies that directory into `WorkspaceWeb` in build and publish output.
 connection is required at runtime.
 
 At runtime, WPF remains the source of truth. `WorkspaceWindow` sends a
-versioned, read-only snapshot of the loaded `AppState` through WebView2
-messaging after the local page has loaded. React does not read `state.json`
-and sends no mutation commands back to C#.
+versioned snapshot of the loaded `AppState` through WebView2 messaging after
+the local page has loaded. React never reads or writes `state.json` directly.
+It can send versioned commands for task title, status, notes, and panel pin
+changes; C# validates and applies each command through the existing domain
+services, saves through the WPF state path, and returns a fresh snapshot.
 
 When the frontend runs in a normal browser without WebView2, it uses the mock
 dataset as a development fallback. The mock dataset is not used by the
-published Workspace window. Editing controls are disabled for bridged data;
-Workspace persistence and React-to-C# mutations are intentionally out of
-scope for this bridge version.
+published Workspace window. Unsupported bridged controls remain disabled:
+reminders, deadlines, location, creation, deletion, and reordering are not
+part of this write bridge slice.

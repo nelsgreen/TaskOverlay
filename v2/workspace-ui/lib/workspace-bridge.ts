@@ -1,13 +1,17 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import type {
   MeetItem,
   Project,
   Section,
   Task,
   TimelineItem,
+  PendingWorkspaceCommand,
+  WorkspaceCommandEnvelope,
+  WorkspaceCommandResult,
   WorkspaceSnapshotContract,
+  WorkspaceTaskCommand,
 } from "@/lib/types"
 
 interface WebViewMessageEvent {
@@ -17,6 +21,7 @@ interface WebViewMessageEvent {
 interface WebViewMessageSource {
   addEventListener(type: "message", listener: (event: WebViewMessageEvent) => void): void
   removeEventListener(type: "message", listener: (event: WebViewMessageEvent) => void): void
+  postMessage(message: unknown): void
 }
 
 declare global {
@@ -37,14 +42,21 @@ export interface WorkspaceData {
   meetItems: MeetItem[]
 }
 
-export type WorkspaceBridgeState =
-  | { status: "loading"; data: null }
-  | { status: "mock"; data: null }
-  | { status: "bridged"; data: WorkspaceData }
+export interface WorkspaceBridgeState {
+  status: "loading" | "mock" | "bridged"
+  data: WorkspaceData | null
+  canEdit: boolean
+  pendingCommands: PendingWorkspaceCommand[]
+  error: string | null
+  sendCommand(command: WorkspaceTaskCommand): boolean
+  clearError(): void
+}
 
 export function useWorkspaceBridge(): WorkspaceBridgeState {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshotContract | null>(null)
   const [bridgeAvailable, setBridgeAvailable] = useState<boolean | null>(null)
+  const [pendingCommands, setPendingCommands] = useState<PendingWorkspaceCommand[]>([])
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const webview = window.chrome?.webview
@@ -54,13 +66,25 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     }
 
     setBridgeAvailable(true)
-    const queuedSnapshot = window.__taskOverlayWorkspaceMessages?.find(isWorkspaceSnapshot)
-    if (queuedSnapshot) setSnapshot(queuedSnapshot)
-    window.__taskOverlayWorkspaceMessages = []
-    const onMessage = (event: WebViewMessageEvent) => {
-      if (isWorkspaceSnapshot(event.data)) setSnapshot(event.data)
+    const handleMessage = (data: unknown) => {
+      if (isWorkspaceSnapshot(data)) {
+        setSnapshot(data)
+        return
+      }
+
+      if (isWorkspaceCommandResult(data)) {
+        const result = data
+        setPendingCommands((pending) =>
+          pending.filter((command) => command.commandId !== result.commandId))
+        if (!result.success) {
+          setError(result.errorMessage ?? "Workspace command failed.")
+        }
+      }
     }
+    const onMessage = (event: WebViewMessageEvent) => handleMessage(event.data)
     webview.addEventListener("message", onMessage)
+    window.__taskOverlayWorkspaceMessages?.forEach(handleMessage)
+    window.__taskOverlayWorkspaceMessages = undefined
     return () => webview.removeEventListener("message", onMessage)
   }, [])
 
@@ -69,22 +93,82 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     [snapshot],
   )
 
-  if (data) return { status: "bridged", data }
-  if (bridgeAvailable === false) return { status: "mock", data: null }
-  return { status: "loading", data: null }
+  const sendCommand = useCallback((command: WorkspaceTaskCommand): boolean => {
+    const webview = window.chrome?.webview
+    if (!webview || snapshot?.mode !== "connected") return false
+
+    const commandId = createCommandId()
+    const { type, ...payload } = command
+    const envelope: WorkspaceCommandEnvelope = {
+      schemaVersion: 1,
+      commandId,
+      type,
+      payload,
+    }
+    setError(null)
+    setPendingCommands((pending) => [
+      ...pending,
+      { commandId, taskId: command.taskId, type: command.type },
+    ])
+    try {
+      webview.postMessage(envelope)
+      return true
+    } catch {
+      setPendingCommands((pending) =>
+        pending.filter((pendingCommand) => pendingCommand.commandId !== commandId))
+      setError("Workspace command could not be sent.")
+      return false
+    }
+  }, [snapshot?.mode])
+
+  const clearError = useCallback(() => setError(null), [])
+
+  const shared = {
+    pendingCommands,
+    error,
+    sendCommand,
+    clearError,
+  }
+
+  if (data) {
+    return {
+      status: "bridged",
+      data,
+      canEdit: snapshot?.mode === "connected",
+      ...shared,
+    }
+  }
+  if (bridgeAvailable === false) {
+    return { status: "mock", data: null, canEdit: true, ...shared }
+  }
+  return { status: "loading", data: null, canEdit: false, ...shared }
 }
 
 function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceSnapshotContract>
   return candidate.schemaVersion === 1 &&
-    candidate.mode === "readonly" &&
+    (candidate.mode === "readonly" || candidate.mode === "connected") &&
     typeof candidate.generatedAtUtc === "string" &&
     Array.isArray(candidate.projects) &&
     Array.isArray(candidate.sections) &&
     Array.isArray(candidate.tasks) &&
     Array.isArray(candidate.activeNow) &&
     Array.isArray(candidate.timelineItems)
+}
+
+function isWorkspaceCommandResult(value: unknown): value is WorkspaceCommandResult {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as Partial<WorkspaceCommandResult>
+  return candidate.schemaVersion === 1 &&
+    candidate.messageType === "commandResult" &&
+    typeof candidate.commandId === "string" &&
+    typeof candidate.success === "boolean"
+}
+
+function createCommandId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID()
+  return `workspace-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceData {

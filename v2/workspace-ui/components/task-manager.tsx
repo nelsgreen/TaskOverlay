@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { FolderTree } from "lucide-react"
-import type { MeetItem, TabKey, Task, TreeFilter } from "@/lib/types"
+import type { MeetItem, Status, TabKey, Task, TreeFilter, WorkspaceTaskCommand } from "@/lib/types"
 import {
   initialMeetItems,
   initialTasks,
@@ -39,7 +39,9 @@ export function TaskManager() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
 
-  const readOnly = bridge.status === "bridged"
+  const bridged = bridge.status === "bridged"
+  const connected = bridged && bridge.canEdit
+  const readOnly = bridged && !connected
   const projects = bridge.data?.projects ?? mockProjects
   const sections = bridge.data?.sections ?? mockSections
   const tasks = bridge.data?.tasks ?? mockTasks
@@ -48,12 +50,24 @@ export function TaskManager() {
   const activeNowTaskIds = bridge.data?.activeNowTaskIds
 
   useEffect(() => {
-    if (bridge.status !== "bridged") return
-    const firstProjectId = bridge.data.projects[0]?.id
-    const firstTaskId = bridge.data.tasks[0]?.id
-    setSelectedProjectIds(firstProjectId ? [firstProjectId] : [])
-    setSelection(firstTaskId ? { kind: "task", id: firstTaskId } : null)
-    setSelectedTimelineItemId(null)
+    const bridgedData = bridge.data
+    if (bridge.status !== "bridged" || !bridgedData) return
+    const firstProjectId = bridgedData.projects[0]?.id
+    const firstTaskId = bridgedData.tasks[0]?.id
+    setSelectedProjectIds((selected) => {
+      const valid = selected.filter((id) =>
+        bridgedData.projects.some((project) => project.id === id))
+      return valid.length > 0 ? valid : firstProjectId ? [firstProjectId] : []
+    })
+    setSelection((selected) => {
+      if (selected?.kind === "task" &&
+          bridgedData.tasks.some((task) => task.id === selected.id)) return selected
+      return firstTaskId ? { kind: "task", id: firstTaskId } : null
+    })
+    setSelectedTimelineItemId((selected) =>
+      selected && bridgedData.timelineItems.some((item) => item.id === selected)
+        ? selected
+        : null)
   }, [bridge.status, bridge.data])
 
   const allSelected = selectedProjectIds.length === projects.length
@@ -132,16 +146,16 @@ export function TaskManager() {
     })
 
   const handleTogglePin = (id: string) =>
-    !readOnly && setMockTasks((prev) => prev.map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t)))
+    !bridged && setMockTasks((prev) => prev.map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t)))
 
   const handleApply = (updated: Task) => {
-    if (readOnly) return
+    if (bridged) return
     setMockTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
     if (!selectedProjectIds.includes(updated.projectId)) setSelectedProjectIds([updated.projectId])
   }
 
   const handleDelete = (id: string) => {
-    if (readOnly) return
+    if (bridged) return
     setMockTasks((prev) => prev.filter((t) => t.id !== id && t.parentId !== id))
     if (selection?.kind === "task" && selection.id === id) {
       setSelection(null)
@@ -150,12 +164,12 @@ export function TaskManager() {
   }
 
   const handleApplyMeet = (updated: MeetItem) => {
-    if (readOnly) return
+    if (bridged) return
     setMockMeetItems((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
   }
 
   const handleDeleteMeet = (id: string) => {
-    if (readOnly) return
+    if (bridged) return
     setMockMeetItems((prev) => prev.filter((m) => m.id !== id))
     if (selection?.kind === "meet" && selection.id === id) {
       setSelection(null)
@@ -164,7 +178,7 @@ export function TaskManager() {
   }
 
   const handleNewMeet = () => {
-    if (readOnly) return
+    if (bridged) return
     const defaultProjectId = selectedProjectIds.length === 1 ? selectedProjectIds[0] : projects[0].id
     const today = new Date().toISOString().slice(0, 10)
     const newMeet: MeetItem = {
@@ -181,6 +195,40 @@ export function TaskManager() {
 
   // The currently selected MeetItem (may come from timeline items or newly created)
   const selectedMeet = meetItems.find((m) => m.id === selectedMeetId) ?? null
+  const sendTaskEdit = (
+    taskId: string,
+    field: "title" | "status" | "pinToPanel" | "notes",
+    value: string | boolean,
+  ) => {
+    if (!connected) return false
+    let command: WorkspaceTaskCommand
+    switch (field) {
+      case "title":
+        command = { type: "updateTaskTitle", taskId, title: String(value) }
+        break
+      case "status":
+        command = { type: "updateTaskStatus", taskId, status: value as Status }
+        break
+      case "pinToPanel":
+        command = { type: "updateTaskPinToPanel", taskId, pinToPanel: Boolean(value) }
+        break
+      case "notes":
+        command = { type: "updateTaskNotes", taskId, notes: String(value) }
+        break
+    }
+    return bridge.sendCommand(command)
+  }
+  const pendingFields = new Set(
+    bridge.pendingCommands
+      .filter((command) => command.taskId === selectedTaskId)
+      .map((command) => command.type === "updateTaskStatus"
+        ? "status"
+        : command.type === "updateTaskPinToPanel"
+          ? "pinToPanel"
+          : command.type === "updateTaskNotes"
+            ? "notes"
+            : "title"),
+  )
 
   if (bridge.status === "loading") {
     return (
@@ -199,7 +247,7 @@ export function TaskManager() {
           selectedProjectIds={selectedProjectIds}
           onSelectOnly={selectOnlyProject}
           onToggleProject={toggleProject}
-          readOnly={readOnly}
+          readOnly={bridged}
         />
 
         <main className="flex min-w-0 flex-1 flex-col">
@@ -218,11 +266,13 @@ export function TaskManager() {
             onFilterChange={setFilter}
             search={search}
             onSearchChange={setSearch}
-            readOnly={readOnly}
+            readOnly={bridged}
           />
-          {readOnly && (
+          {bridged && (
             <div className="border-b border-border bg-primary/5 px-5 py-1.5 text-[11px] text-muted-foreground">
-              Read-only · current TaskOverlay app state
+              {connected
+                ? "Connected to current TaskOverlay app state · supported Details fields save through C#"
+                : "Read-only · current TaskOverlay app state"}
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -267,7 +317,7 @@ export function TaskManager() {
                   onToggleSection={toggle(setCollapsedSections)}
                   onToggleTask={toggle(setCollapsedTasks)}
                   onTogglePin={handleTogglePin}
-                  readOnly={readOnly}
+                  readOnly={bridged}
                 />
               </div>
             )}
@@ -289,7 +339,7 @@ export function TaskManager() {
                 onSelectMeet={selectTimelineMeet}
                 onSelectTask={selectTimelineTask}
                 onNewMeet={handleNewMeet}
-                readOnly={readOnly}
+                readOnly={bridged}
               />
             )}
             {tab === "workstreams" && <WorkstreamsPlaceholder />}
@@ -311,7 +361,11 @@ export function TaskManager() {
             sections={sections}
             onApply={handleApply}
             onDelete={handleDelete}
-            readOnly={readOnly}
+            editMode={connected ? "connected" : readOnly ? "readonly" : "full"}
+            pendingFields={pendingFields}
+            bridgeError={bridge.error}
+            onBridgeEdit={sendTaskEdit}
+            onClearBridgeError={bridge.clearError}
           />
         )}
       </div>

@@ -113,7 +113,13 @@ internal static class Program
             ("empty clipboard text", EmptyClipboardText),
             ("workspace snapshot contract", WorkspaceSnapshotContract),
             ("workspace timeline consistency", WorkspaceTimelineConsistency),
-            ("workspace orphan fallback", WorkspaceOrphanFallback)
+            ("workspace orphan fallback", WorkspaceOrphanFallback),
+            ("workspace command status persistence", WorkspaceCommandStatusPersistence),
+            ("workspace command invalid task and status", WorkspaceCommandInvalidTaskAndStatus),
+            ("workspace command pin persistence", WorkspaceCommandPinPersistence),
+            ("workspace command notes persistence", WorkspaceCommandNotesPersistence),
+            ("workspace command title persistence", WorkspaceCommandTitlePersistence),
+            ("workspace command contract rejection", WorkspaceCommandContractRejection)
         };
 
         foreach (var test in tests)
@@ -3581,6 +3587,12 @@ internal static class Program
 
         Assert(snapshot.SchemaVersion == 1, "Workspace contract version should be 1.");
         Assert(snapshot.Mode == "readonly", "Workspace contract should be read-only.");
+        Assert(
+            WorkspaceSnapshotFactory.Create(
+                state,
+                now,
+                WorkspaceSnapshotFactory.ConnectedMode).Mode == "connected",
+            "Workspace write bridge should explicitly advertise connected mode.");
         Assert(snapshot.GeneratedAtUtc == now, "Workspace snapshot timestamp mismatch.");
         Assert(snapshot.Projects.Single().Color == "#22AA77", "Project color should be projected.");
         Assert(waitingSnapshot.Status == "WAIT", "Waiting status should be projected.");
@@ -3677,6 +3689,211 @@ internal static class Program
         Assert(state.Projects.Count == 0,
             "Workspace snapshot creation must not mutate source state.");
     }
+
+    private static void WorkspaceCommandStatusPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-04T12:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            task.WaitingFor = "existing reviewer";
+            var store = new AppStateStore(directory);
+            var saves = 0;
+            var refreshes = 0;
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () =>
+                {
+                    store.Save(state);
+                    saves++;
+                },
+                () => refreshes++);
+
+            var waitResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "status-wait",
+                "updateTaskStatus",
+                new { taskId = task.Id.ToString("N"), status = "WAIT" }), now);
+            Assert(waitResult.Success, "WAIT command should succeed.");
+            Assert(task.Status == TaskStatus.Waiting, "WAIT command should update status.");
+            Assert(task.WaitingFor == "existing reviewer", "WAIT should preserve waitingFor.");
+
+            var doneAt = now.AddMinutes(1);
+            var doneResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "status-done",
+                "updateTaskStatus",
+                new { taskId = task.Id.ToString("N"), status = "DONE" }), doneAt);
+            Assert(doneResult.Success, "DONE command should succeed.");
+            Assert(task.Completed && task.CompletedAtUtc == doneAt,
+                "DONE should use existing completion semantics.");
+
+            var focusResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "status-focus",
+                "updateTaskStatus",
+                new { taskId = task.Id.ToString("N"), status = "FOCUS" }), now.AddMinutes(2));
+            Assert(focusResult.Success, "FOCUS command should reopen the task.");
+            Assert(task.Status == TaskStatus.InWork && !task.Completed && task.CompletedAtUtc is null,
+                "FOCUS should use existing reopen/focus semantics.");
+
+            var todoResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "status-todo",
+                "updateTaskStatus",
+                new { taskId = task.Id.ToString("N"), status = "TODO" }), now.AddMinutes(3));
+            Assert(todoResult.Success && task.Status == TaskStatus.Todo,
+                "TODO command should leave active work.");
+            Assert(saves == 4 && refreshes == 4,
+                "Every successful status command should save and refresh.");
+
+            var reloaded = store.Load();
+            Assert(reloaded.Tasks.Single(item => item.Id == task.Id).Status == TaskStatus.Todo,
+                "Status command should persist through AppStateStore.");
+        });
+    }
+
+    private static void WorkspaceCommandInvalidTaskAndStatus()
+    {
+        var now = DateTimeOffset.Parse("2026-07-04T12:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var task = state.Tasks[0];
+        var initialStatus = task.Status;
+        var saves = 0;
+        var refreshes = 0;
+        var dispatcher = new WorkspaceCommandDispatcher(
+            state,
+            () => saves++,
+            () => refreshes++);
+
+        var missingTask = dispatcher.Dispatch(WorkspaceCommandJson(
+            "missing-task",
+            "updateTaskStatus",
+            new { taskId = Guid.NewGuid().ToString("N"), status = "FOCUS" }), now);
+        Assert(!missingTask.Success && missingTask.ErrorCode == "taskNotFound",
+            "Unknown task should be rejected.");
+
+        var invalidStatus = dispatcher.Dispatch(WorkspaceCommandJson(
+            "invalid-status",
+            "updateTaskStatus",
+            new { taskId = task.Id.ToString("N"), status = "BLOCKED" }), now);
+        Assert(!invalidStatus.Success && invalidStatus.ErrorCode == "invalidStatus",
+            "Unknown status should be rejected.");
+        Assert(task.Status == initialStatus, "Rejected commands must not mutate task status.");
+        Assert(saves == 0 && refreshes == 0, "Rejected commands must not save or refresh.");
+    }
+
+    private static void WorkspaceCommandPinPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault();
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "pin-on",
+                "updateTaskPinToPanel",
+                new { taskId = task.Id.ToString("N"), pinToPanel = true })).Success,
+                "Pin command should succeed.");
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "pin-off",
+                "updateTaskPinToPanel",
+                new { taskId = task.Id.ToString("N"), pinToPanel = false })).Success,
+                "Unpin command should succeed.");
+            Assert(!store.Load().Tasks.Single(item => item.Id == task.Id).PinToPanel,
+                "Final panel pin value should persist.");
+        });
+    }
+
+    private static void WorkspaceCommandNotesPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault();
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+            var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                "notes",
+                "updateTaskNotes",
+                new { taskId = task.Id.ToString("N"), notes = "  New context  " }));
+
+            Assert(result.Success, "Notes command should succeed.");
+            Assert(store.Load().Tasks.Single(item => item.Id == task.Id).Description == "New context",
+                "Notes command should persist through the domain service.");
+        });
+    }
+
+    private static void WorkspaceCommandTitlePersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault();
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+            var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                "title",
+                "updateTaskTitle",
+                new { taskId = task.Id.ToString("N"), title = "  Updated title  " }));
+
+            Assert(result.Success, "Title command should succeed.");
+            Assert(store.Load().Tasks.Single(item => item.Id == task.Id).Title == "Updated title",
+                "Title command should persist through the domain service.");
+        });
+    }
+
+    private static void WorkspaceCommandContractRejection()
+    {
+        var state = AppState.CreateDefault();
+        var task = state.Tasks[0];
+        var unknownType = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "unknown",
+            "deleteEverything",
+            new { taskId = task.Id.ToString("N") }));
+        Assert(!unknownType.Success && unknownType.ErrorCode == "unknownCommandType",
+            "Unknown command type should be rejected.");
+
+        var wrongVersion = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 2,
+            commandId = "wrong-version",
+            type = "updateTaskTitle",
+            payload = new { taskId = task.Id.ToString("N"), title = "No change" }
+        });
+        var wrongVersionResult = WorkspaceCommandProcessor.Execute(state, wrongVersion);
+        Assert(!wrongVersionResult.Success &&
+               wrongVersionResult.ErrorCode == "unsupportedSchemaVersion",
+            "Wrong command schemaVersion should be rejected.");
+
+        var invalidPayload = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "invalid-payload",
+            "updateTaskPinToPanel",
+            new { taskId = task.Id.ToString("N"), pinToPanel = "true" }));
+        Assert(!invalidPayload.Success && invalidPayload.ErrorCode == "invalidPayload",
+            "Invalid command payload shape should be rejected.");
+        Assert(task.Title != "No change", "Rejected contract must not mutate state.");
+    }
+
+    private static string WorkspaceCommandJson(
+        string commandId,
+        string type,
+        object payload) =>
+        JsonSerializer.Serialize(new
+        {
+            schemaVersion = WorkspaceCommandProcessor.CurrentSchemaVersion,
+            commandId,
+            type,
+            payload
+        });
 
     private static AppState CreateEmptyTreeState()
     {
