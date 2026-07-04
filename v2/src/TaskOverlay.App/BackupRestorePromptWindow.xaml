@@ -7,7 +7,7 @@
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource AppWindowBrush}"
-        Icon="Assets/app.ico"
+        Icon="Assets/taskoverlay.ico"
         ShowInTaskbar="False"
         FontFamily="Segoe UI">
     <Grid>

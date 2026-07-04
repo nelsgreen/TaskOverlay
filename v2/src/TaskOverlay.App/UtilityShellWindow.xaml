@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:TaskOverlay.App"
         Title="TaskOverlay"
-        Icon="Assets/app.ico"
+        Icon="Assets/taskoverlay.ico"
         Width="680"
         Height="820"
         MinWidth="600"

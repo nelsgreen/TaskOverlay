@@ -76,9 +76,17 @@ export function WorkspaceHeader({
     <div className="border-b border-border">
       {/* Title row */}
       <div className="flex items-center gap-4 px-5 pb-3 pt-4">
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold leading-tight text-foreground">Workspace</h1>
-          <p className="text-xs text-muted-foreground">Main task organization surface — overlay is only an attention layer</p>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <img
+            src="./taskoverlay-mark-32.png"
+            alt=""
+            aria-hidden="true"
+            className="size-7 shrink-0 object-contain"
+          />
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold leading-tight text-foreground">Workspace</h1>
+            <p className="text-xs text-muted-foreground">Main task organization surface — overlay is only an attention layer</p>
+          </div>
         </div>
 
         {/* Project scope selector */}

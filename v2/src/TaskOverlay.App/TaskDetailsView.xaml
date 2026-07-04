@@ -169,7 +169,7 @@
                        Width="28"
                        Height="28"
                        Margin="0,0,11,0"
-                       Source="Assets/app.ico" />
+                       Source="Assets/taskoverlay.ico" />
                 <StackPanel>
                     <TextBlock Foreground="#FFF4F4F5"
                                FontSize="17"

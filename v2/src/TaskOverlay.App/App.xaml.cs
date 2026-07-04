@@ -223,7 +223,7 @@ public partial class App : System.Windows.Application
     private static Drawing.Icon LoadApplicationIcon()
     {
         var resource = GetResourceStream(
-            new Uri("Assets/app.ico", UriKind.Relative));
+            new Uri("Assets/taskoverlay.ico", UriKind.Relative));
         if (resource is null)
         {
             throw new InvalidOperationException("Application icon resource was not found.");
