@@ -24,6 +24,7 @@ export function TaskManager() {
   const [meetItems, setMeetItems] = useState<MeetItem[]>(initialMeetItems)
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>(["kazchess"])
   const [selection, setSelection] = useState<WorkspaceSelection>({ kind: "task", id: "t-pr-1" })
+  const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKey>("tree")
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [search, setSearch] = useState("")
@@ -34,8 +35,22 @@ export function TaskManager() {
   const multi = selectedProjectIds.length > 1
   const selectedTaskId = selection?.kind === "task" ? selection.id : null
   const selectedMeetId = selection?.kind === "meet" ? selection.id : null
-  const selectTask = (id: string) => setSelection({ kind: "task", id })
-  const selectMeet = (id: string) => setSelection({ kind: "meet", id })
+  const selectTask = (id: string) => {
+    setSelection({ kind: "task", id })
+    setSelectedTimelineItemId(null)
+  }
+  const selectMeet = (id: string) => {
+    setSelection({ kind: "meet", id })
+    setSelectedTimelineItemId(null)
+  }
+  const selectTimelineTask = (timelineItemId: string, taskId: string) => {
+    setSelectedTimelineItemId(timelineItemId)
+    setSelection({ kind: "task", id: taskId })
+  }
+  const selectTimelineMeet = (timelineItemId: string, meetId: string) => {
+    setSelectedTimelineItemId(timelineItemId)
+    setSelection({ kind: "meet", id: meetId })
+  }
 
   // The single project used for the Tree tab (Tree is single-project by design)
   const treeProjectId = selectedProjectIds[0] ?? projects[0].id
@@ -101,7 +116,10 @@ export function TaskManager() {
 
   const handleDelete = (id: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== id && t.parentId !== id))
-    if (selection?.kind === "task" && selection.id === id) setSelection(null)
+    if (selection?.kind === "task" && selection.id === id) {
+      setSelection(null)
+      setSelectedTimelineItemId(null)
+    }
   }
 
   const handleApplyMeet = (updated: MeetItem) => {
@@ -110,7 +128,10 @@ export function TaskManager() {
 
   const handleDeleteMeet = (id: string) => {
     setMeetItems((prev) => prev.filter((m) => m.id !== id))
-    if (selection?.kind === "meet" && selection.id === id) setSelection(null)
+    if (selection?.kind === "meet" && selection.id === id) {
+      setSelection(null)
+      setSelectedTimelineItemId(null)
+    }
   }
 
   const handleNewMeet = () => {
@@ -216,10 +237,9 @@ export function TaskManager() {
             {tab === "timeline" && (
               <TimelineView
                 projectIds={selectedProjectIds}
-                selectedMeetId={selectedMeetId}
-                selectedTaskId={selectedTaskId}
-                onSelectMeet={selectMeet}
-                onSelectTask={selectTask}
+                selectedTimelineItemId={selectedTimelineItemId}
+                onSelectMeet={selectTimelineMeet}
+                onSelectTask={selectTimelineTask}
                 onNewMeet={handleNewMeet}
               />
             )}

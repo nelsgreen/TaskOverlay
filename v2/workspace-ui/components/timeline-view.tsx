@@ -100,20 +100,18 @@ const buckets: { key: TimelineItem["bucket"]; label: string }[] = [
 
 interface TimelineViewProps {
   projectIds?: string[]
-  selectedMeetId?: string | null
-  selectedTaskId?: string | null
-  /** called with the linked MeetItem id when user clicks a MEET row */
-  onSelectMeet?: (meetId: string) => void
-  /** called when user clicks a REMIND or DEADLINE row that has a linked task */
-  onSelectTask?: (taskId: string) => void
+  selectedTimelineItemId?: string | null
+  /** called with the timeline item and linked MeetItem ids when user clicks a MEET row */
+  onSelectMeet?: (timelineItemId: string, meetId: string) => void
+  /** called with the timeline item and linked task ids when user clicks a REMIND or DEADLINE row */
+  onSelectTask?: (timelineItemId: string, taskId: string) => void
   /** called when user clicks "New MEET" */
   onNewMeet?: () => void
 }
 
 export function TimelineView({
   projectIds,
-  selectedMeetId,
-  selectedTaskId,
+  selectedTimelineItemId,
   onSelectMeet,
   onSelectTask,
   onNewMeet,
@@ -271,9 +269,7 @@ export function TimelineView({
                     const isPast = nowPos === "in-range" && mins !== null && mins < nowMins
                     const isNear =
                       nowPos === "in-range" && mins !== null && mins >= nowMins && mins - nowMins <= 30
-                    const selected = item.kind === "MEET"
-                      ? selectedMeetId === item.linkedMeetId
-                      : selectedTaskId === item.linkedTaskId
+                    const selected = selectedTimelineItemId === item.id
                     return (
                       <TimelineRow
                         key={item.id}
@@ -282,8 +278,8 @@ export function TimelineView({
                         isNear={isNear}
                         selected={selected}
                         onSelect={() => {
-                          if (item.kind === "MEET" && item.linkedMeetId) onSelectMeet?.(item.linkedMeetId)
-                          else if (item.linkedTaskId) onSelectTask?.(item.linkedTaskId)
+                          if (item.kind === "MEET" && item.linkedMeetId) onSelectMeet?.(item.id, item.linkedMeetId)
+                          else if (item.linkedTaskId) onSelectTask?.(item.id, item.linkedTaskId)
                         }}
                       />
                     )

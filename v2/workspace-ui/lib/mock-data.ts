@@ -109,6 +109,8 @@ export const initialTasks: Task[] = [
     status: "TODO",
     pinned: false,
     reminder: "none",
+    deadline: "Friday 18:00",
+    notes: "Проверить и отправить сценарии ошибок.",
   },
   {
     id: "t-pr-4",
@@ -281,7 +283,7 @@ export const timelineItems: TimelineItem[] = [
   {
     id: "tl-2",
     kind: "REMIND",
-    title: "Check Freedom answer",
+    title: "Интеграция со SmartBridge",
     projectPath: "KazChess",
     time: "15:00",
     bucket: "today",
@@ -292,7 +294,7 @@ export const timelineItems: TimelineItem[] = [
   {
     id: "tl-3",
     kind: "DEADLINE",
-    title: "Draft parent-child spec",
+    title: "Дополнить ТЗ по родителям",
     projectPath: "KazChess",
     time: "17:00",
     bucket: "today",
@@ -314,18 +316,18 @@ export const timelineItems: TimelineItem[] = [
   {
     id: "tl-5",
     kind: "DEADLINE",
-    title: "Submit parent-child spec",
+    title: "Сценарии ошибок",
     projectPath: "KazChess",
     time: "Fri 18:00",
     bucket: "week",
     meta: "Friday · task deadline",
     projectId: "kazchess",
-    linkedTaskId: "t-pr-1",
+    linkedTaskId: "t-pr-3",
   },
   {
     id: "tl-6",
     kind: "REMIND",
-    title: "Follow up with Madina",
+    title: "Проверка свежего backup при запуске",
     projectPath: "TaskOverlay",
     time: "Thu 11:00",
     bucket: "week",
