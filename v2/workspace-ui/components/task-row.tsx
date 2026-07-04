@@ -84,13 +84,13 @@ export function TaskRow({
       </span>
 
       {/* inline metadata */}
-      {task.waitingFor && (
+      {task.status === "WAIT" && task.waitingFor && (
         <span className="hidden items-center gap-1 truncate text-xs text-status-wait/80 md:flex">
           <Clock className="size-3" />
           {task.waitingFor}
         </span>
       )}
-      {task.deadline && !task.waitingFor && (
+      {task.deadline && !(task.status === "WAIT" && task.waitingFor) && (
         <span className="hidden items-center gap-1 text-xs text-status-deadline/80 md:flex">
           <Clock className="size-3" />
           {task.deadline}

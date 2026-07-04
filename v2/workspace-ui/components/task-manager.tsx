@@ -14,13 +14,17 @@ import { DetailsPanel } from "./details-panel"
 import { MeetDetailsPanel } from "./meet-details-panel"
 import { ActiveNowStrip } from "./active-now-strip"
 
+type WorkspaceSelection =
+  | { kind: "task"; id: string }
+  | { kind: "meet"; id: string }
+  | null
+
 export function TaskManager() {
   const [tasks, setTasks] = useState<Task[]>(initialTasks)
   const [meetItems, setMeetItems] = useState<MeetItem[]>(initialMeetItems)
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>(["kazchess"])
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>("t-pr-1")
-  // selectedMeetId is the timeline item id (tl-1, tl-2…) for the right panel, null = no meet selected
-  const [selectedMeetId, setSelectedMeetId] = useState<string | null>(null)
+  const [selection, setSelection] = useState<WorkspaceSelection>({ kind: "task", id: "t-pr-1" })
+  const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKey>("tree")
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [search, setSearch] = useState("")
@@ -29,6 +33,24 @@ export function TaskManager() {
 
   const allSelected = selectedProjectIds.length === projects.length
   const multi = selectedProjectIds.length > 1
+  const selectedTaskId = selection?.kind === "task" ? selection.id : null
+  const selectedMeetId = selection?.kind === "meet" ? selection.id : null
+  const selectTask = (id: string) => {
+    setSelection({ kind: "task", id })
+    setSelectedTimelineItemId(null)
+  }
+  const selectMeet = (id: string) => {
+    setSelection({ kind: "meet", id })
+    setSelectedTimelineItemId(null)
+  }
+  const selectTimelineTask = (timelineItemId: string, taskId: string) => {
+    setSelectedTimelineItemId(timelineItemId)
+    setSelection({ kind: "task", id: taskId })
+  }
+  const selectTimelineMeet = (timelineItemId: string, meetId: string) => {
+    setSelectedTimelineItemId(timelineItemId)
+    setSelection({ kind: "meet", id: meetId })
+  }
 
   // The single project used for the Tree tab (Tree is single-project by design)
   const treeProjectId = selectedProjectIds[0] ?? projects[0].id
@@ -94,7 +116,10 @@ export function TaskManager() {
 
   const handleDelete = (id: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== id && t.parentId !== id))
-    if (selectedTaskId === id) setSelectedTaskId(null)
+    if (selection?.kind === "task" && selection.id === id) {
+      setSelection(null)
+      setSelectedTimelineItemId(null)
+    }
   }
 
   const handleApplyMeet = (updated: MeetItem) => {
@@ -103,16 +128,9 @@ export function TaskManager() {
 
   const handleDeleteMeet = (id: string) => {
     setMeetItems((prev) => prev.filter((m) => m.id !== id))
-    if (selectedMeetId === id) setSelectedMeetId(null)
-  }
-
-  const handleSelectMeet = (timelineItemId: string) => {
-    // Map timeline item id → meet item: tl-1 → m-1, tl-4 → m-2, tl-7 → m-3
-    const mapping: Record<string, string> = { "tl-1": "m-1", "tl-4": "m-2", "tl-7": "m-3" }
-    const meetId = mapping[timelineItemId]
-    if (meetId) {
-      setSelectedMeetId(meetId)
-      setSelectedTaskId(null) // deselect any task
+    if (selection?.kind === "meet" && selection.id === id) {
+      setSelection(null)
+      setSelectedTimelineItemId(null)
     }
   }
 
@@ -128,8 +146,7 @@ export function TaskManager() {
       duration: "30m",
     }
     setMeetItems((prev) => [...prev, newMeet])
-    setSelectedMeetId(newMeet.id)
-    setSelectedTaskId(null)
+    selectMeet(newMeet.id)
   }
 
   // The currently selected MeetItem (may come from timeline items or newly created)
@@ -201,7 +218,7 @@ export function TaskManager() {
                   selectedTaskId={selectedTaskId}
                   collapsedSections={collapsedSections}
                   collapsedTasks={collapsedTasks}
-                  onSelectTask={setSelectedTaskId}
+                  onSelectTask={selectTask}
                   onToggleSection={toggle(setCollapsedSections)}
                   onToggleTask={toggle(setCollapsedTasks)}
                   onTogglePin={handleTogglePin}
@@ -214,15 +231,15 @@ export function TaskManager() {
                 projects={projects}
                 sections={sections}
                 selectedTaskId={selectedTaskId}
-                onSelectTask={setSelectedTaskId}
+                onSelectTask={selectTask}
               />
             )}
             {tab === "timeline" && (
               <TimelineView
                 projectIds={selectedProjectIds}
-                selectedMeetId={selectedMeetId}
-                onSelectMeet={handleSelectMeet}
-                onSelectTask={(id) => { setSelectedTaskId(id); setSelectedMeetId(null) }}
+                selectedTimelineItemId={selectedTimelineItemId}
+                onSelectMeet={selectTimelineMeet}
+                onSelectTask={selectTimelineTask}
                 onNewMeet={handleNewMeet}
               />
             )}
@@ -230,7 +247,7 @@ export function TaskManager() {
           </div>
         </main>
 
-        {selectedMeet ? (
+        {selection?.kind === "meet" && selectedMeet ? (
           <MeetDetailsPanel
             meet={selectedMeet}
             projects={projects}
@@ -254,7 +271,7 @@ export function TaskManager() {
         projects={projects}
         sections={sections}
         selectedTaskId={selectedTaskId}
-        onSelectTask={setSelectedTaskId}
+        onSelectTask={selectTask}
       />
     </div>
   )

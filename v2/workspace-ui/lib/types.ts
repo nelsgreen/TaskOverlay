@@ -65,6 +65,10 @@ export interface TimelineItem {
   meta?: string
   /** projectId used to look up color dot */
   projectId?: string
+  /** linked mock task selected by REMIND and DEADLINE rows */
+  linkedTaskId?: string
+  /** linked mock meeting selected by MEET rows */
+  linkedMeetId?: string
   time: string
   bucket: "today" | "tomorrow" | "week" | "later"
 }
