@@ -15,6 +15,7 @@ public sealed class AppState
     public OverlaySettings OverlaySettings { get; set; } = new();
     public WindowPlacement WindowPlacement { get; set; } = new();
     public TreeManagerSettings TreeManagerSettings { get; set; } = new();
+    public WorkspaceSettings WorkspaceSettings { get; set; } = new();
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
@@ -35,6 +36,10 @@ public sealed class AppState
             {
                 SelectedProjectId = defaultProject.Id,
                 SelectedNodeId = defaultProject.Id
+            },
+            WorkspaceSettings = new WorkspaceSettings
+            {
+                SelectedProjectIds = { defaultProject.Id }
             },
             Projects = { defaultProject },
             Tasks =
@@ -342,4 +347,30 @@ public sealed class TreeManagerSettings
     public TreeManagerView ActiveView { get; set; } = TreeManagerView.Tree;
     public TreeManagerStatusFilter StatusFilter { get; set; } = TreeManagerStatusFilter.All;
     public bool ExpansionInitialized { get; set; }
+}
+
+public sealed class WorkspaceSettings
+{
+    public WorkspaceTab ActiveTab { get; set; } = WorkspaceTab.Tree;
+    public List<Guid> SelectedProjectIds { get; set; } = new();
+    public Guid? SelectedTaskId { get; set; }
+    public string? SelectedTimelineItemId { get; set; }
+    public string? SelectedWorkstreamId { get; set; }
+    public WorkspaceFilter Filter { get; set; } = WorkspaceFilter.All;
+}
+
+public enum WorkspaceTab
+{
+    Tree,
+    Status,
+    Timeline,
+    Calendar,
+    Workstreams
+}
+
+public enum WorkspaceFilter
+{
+    All,
+    Active,
+    ActivePath
 }

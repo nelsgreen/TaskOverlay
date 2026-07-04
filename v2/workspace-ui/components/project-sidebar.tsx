@@ -42,20 +42,28 @@ export function ProjectSidebar({ projects, tasks, selectedProjectIds, onSelectOn
           const selected = selectedProjectIds.includes(p.id)
           const count = activeCount(p.id)
           return (
-            <div
+            <button
+              type="button"
               key={p.id}
+              aria-label={`Open ${p.name}`}
+              aria-current={selected ? "true" : undefined}
+              onClick={(event) => {
+                const toggleRequested = event.metaKey ||
+                  event.ctrlKey ||
+                  (event.target as HTMLElement).closest("[data-project-toggle]") !== null
+                toggleRequested ? onToggleProject(p.id) : onSelectOnly(p.id)
+              }}
               className={cn(
-                "group mb-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors",
+                "group mb-0.5 flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/50",
                 selected
                   ? "bg-sidebar-accent text-foreground"
                   : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
               )}
             >
               {/* Multi-select checkbox / active dot */}
-              <button
-                onClick={() => onToggleProject(p.id)}
-                aria-label={`Toggle ${p.name} in selection`}
-                aria-pressed={selected}
+              <span
+                data-project-toggle
+                aria-hidden
                 className={cn(
                   "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
                   selected ? "border-primary bg-primary/20 text-primary" : "border-transparent",
@@ -66,16 +74,12 @@ export function ProjectSidebar({ projects, tasks, selectedProjectIds, onSelectOn
                 ) : (
                   <span className="size-2 rounded-full" style={{ backgroundColor: p.color }} aria-hidden />
                 )}
-              </button>
+              </span>
 
-              {/* Focus this project (plain click) or extend with modifier key */}
-              <button
-                onClick={(e) => (e.metaKey || e.ctrlKey ? onToggleProject(p.id) : onSelectOnly(p.id))}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              >
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
                 <Folder className={cn("size-4 shrink-0", selected ? "text-foreground" : "text-muted-foreground")} />
                 <span className="flex-1 truncate font-medium">{p.name}</span>
-              </button>
+              </div>
 
               {count > 0 && (
                 <span
@@ -87,7 +91,7 @@ export function ProjectSidebar({ projects, tasks, selectedProjectIds, onSelectOn
                   {count}
                 </span>
               )}
-            </div>
+            </button>
           )
         })}
       </nav>

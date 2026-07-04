@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 
@@ -89,6 +90,11 @@ public static class WorkspaceCommandProcessor
                 payload.ValueKind != JsonValueKind.Object)
             {
                 return Fail(commandId, "invalidPayload", "Command payload must be an object.");
+            }
+
+            if (type == "updateWorkspaceContext")
+            {
+                return UpdateWorkspaceContext(state, payload, commandId);
             }
 
             var taskIdText = ReadString(payload, "taskId");
@@ -224,6 +230,127 @@ public static class WorkspaceCommandProcessor
             : Fail(commandId, "mutationRejected", "Task title could not be updated.");
     }
 
+    private static WorkspaceCommandResult UpdateWorkspaceContext(
+        AppState state,
+        JsonElement payload,
+        string commandId)
+    {
+        var activeTab = ReadString(payload, "activeTab") switch
+        {
+            "tree" => WorkspaceTab.Tree,
+            "status" => WorkspaceTab.Status,
+            "timeline" => WorkspaceTab.Timeline,
+            "calendar" => WorkspaceTab.Calendar,
+            "workstreams" => WorkspaceTab.Workstreams,
+            _ => (WorkspaceTab?)null
+        };
+        var filter = ReadString(payload, "filter") switch
+        {
+            "all" => WorkspaceFilter.All,
+            "active" => WorkspaceFilter.Active,
+            "active-path" => WorkspaceFilter.ActivePath,
+            _ => (WorkspaceFilter?)null
+        };
+        if (activeTab is null || filter is null ||
+            !TryReadGuidArray(payload, "selectedProjectIds", out var selectedProjectIds) ||
+            !TryReadOptionalGuid(payload, "selectedTaskId", out var selectedTaskId) ||
+            !TryReadOptionalString(payload, "selectedTimelineItemId", out var selectedTimelineItemId) ||
+            !TryReadOptionalString(payload, "selectedWorkstreamId", out var selectedWorkstreamId))
+        {
+            return Fail(commandId, "invalidPayload", "Workspace context payload is invalid.");
+        }
+
+        state.WorkspaceSettings = new WorkspaceSettings
+        {
+            ActiveTab = activeTab.Value,
+            SelectedProjectIds = selectedProjectIds,
+            SelectedTaskId = selectedTaskId,
+            SelectedTimelineItemId = selectedTimelineItemId,
+            SelectedWorkstreamId = selectedWorkstreamId,
+            Filter = filter.Value
+        };
+        WorkspaceStatePolicy.Normalize(state);
+        return WorkspaceCommandResult.Succeeded(commandId);
+    }
+
+    private static bool TryReadGuidArray(
+        JsonElement parent,
+        string propertyName,
+        out List<Guid> values)
+    {
+        values = new List<Guid>();
+        if (!parent.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.Array ||
+            property.GetArrayLength() > 100)
+        {
+            return false;
+        }
+
+        foreach (var item in property.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String ||
+                !Guid.TryParse(item.GetString(), out var value))
+            {
+                return false;
+            }
+
+            values.Add(value);
+        }
+
+        return true;
+    }
+
+    private static bool TryReadOptionalGuid(
+        JsonElement parent,
+        string propertyName,
+        out Guid? value)
+    {
+        value = null;
+        if (!parent.TryGetProperty(propertyName, out var property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        if (property.ValueKind != JsonValueKind.String ||
+            !Guid.TryParse(property.GetString(), out var parsed))
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
+    }
+
+    private static bool TryReadOptionalString(
+        JsonElement parent,
+        string propertyName,
+        out string? value)
+    {
+        value = null;
+        if (!parent.TryGetProperty(propertyName, out var property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        if (property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = property.GetString();
+        return value is null || value.Length <= 256;
+    }
+
     private static string? ReadString(JsonElement parent, string propertyName) =>
         parent.TryGetProperty(propertyName, out var property) &&
         property.ValueKind == JsonValueKind.String
@@ -264,7 +391,23 @@ public sealed class WorkspaceCommandDispatcher
         }
 
         _saveState();
-        _stateChanged();
+        if (AffectsTaskPresentation(json))
+        {
+            _stateChanged();
+        }
+
         return result;
     }
+
+    private static bool AffectsTaskPresentation(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return ReadCommandType(document.RootElement) != "updateWorkspaceContext";
+    }
+
+    private static string? ReadCommandType(JsonElement root) =>
+        root.TryGetProperty("type", out var type) &&
+        type.ValueKind == JsonValueKind.String
+            ? type.GetString()
+            : null;
 }

@@ -8,8 +8,11 @@ import type {
   Task,
   TimelineItem,
   PendingWorkspaceCommand,
+  WorkspaceCommand,
   WorkspaceCommandEnvelope,
   WorkspaceCommandResult,
+  WorkspaceContextCommand,
+  WorkspaceContextSnapshot,
   WorkspaceSnapshotContract,
   WorkspaceTaskCommand,
 } from "@/lib/types"
@@ -40,6 +43,7 @@ export interface WorkspaceData {
   activeNowTaskIds: string[]
   timelineItems: TimelineItem[]
   meetItems: MeetItem[]
+  context: WorkspaceContextSnapshot
 }
 
 export interface WorkspaceBridgeState {
@@ -49,6 +53,7 @@ export interface WorkspaceBridgeState {
   pendingCommands: PendingWorkspaceCommand[]
   error: string | null
   sendCommand(command: WorkspaceTaskCommand): boolean
+  sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
   clearError(): void
 }
 
@@ -93,11 +98,13 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     [snapshot],
   )
 
-  const sendCommand = useCallback((command: WorkspaceTaskCommand): boolean => {
+  const postCommand = useCallback((
+    command: WorkspaceCommand,
+    commandId = createCommandId(),
+  ): boolean => {
     const webview = window.chrome?.webview
     if (!webview || snapshot?.mode !== "connected") return false
 
-    const commandId = createCommandId()
     const { type, ...payload } = command
     const envelope: WorkspaceCommandEnvelope = {
       schemaVersion: 1,
@@ -106,20 +113,31 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
       payload,
     }
     setError(null)
-    setPendingCommands((pending) => [
-      ...pending,
-      { commandId, taskId: command.taskId, type: command.type },
-    ])
     try {
       webview.postMessage(envelope)
       return true
     } catch {
-      setPendingCommands((pending) =>
-        pending.filter((pendingCommand) => pendingCommand.commandId !== commandId))
       setError("Workspace command could not be sent.")
       return false
     }
   }, [snapshot?.mode])
+
+  const sendCommand = useCallback((command: WorkspaceTaskCommand): boolean => {
+    const commandId = createCommandId()
+    setPendingCommands((pending) => [
+      ...pending,
+      { commandId, taskId: command.taskId, type: command.type },
+    ])
+    if (postCommand(command, commandId)) return true
+
+    setPendingCommands((pending) =>
+      pending.filter((pendingCommand) => pendingCommand.commandId !== commandId))
+    return false
+  }, [postCommand])
+
+  const sendWorkspaceContext = useCallback((
+    context: Omit<WorkspaceContextCommand, "type">,
+  ): boolean => postCommand({ type: "updateWorkspaceContext", ...context }), [postCommand])
 
   const clearError = useCallback(() => setError(null), [])
 
@@ -127,6 +145,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     pendingCommands,
     error,
     sendCommand,
+    sendWorkspaceContext,
     clearError,
   }
 
@@ -154,7 +173,20 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
     Array.isArray(candidate.sections) &&
     Array.isArray(candidate.tasks) &&
     Array.isArray(candidate.activeNow) &&
-    Array.isArray(candidate.timelineItems)
+    Array.isArray(candidate.timelineItems) &&
+    isWorkspaceContext(candidate.context)
+}
+
+function isWorkspaceContext(value: unknown): value is WorkspaceContextSnapshot {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as Partial<WorkspaceContextSnapshot>
+  return ["tree", "status", "timeline", "calendar", "workstreams"].includes(candidate.activeTab ?? "") &&
+    Array.isArray(candidate.selectedProjectIds) &&
+    candidate.selectedProjectIds.every((id) => typeof id === "string") &&
+    (candidate.selectedTaskId === null || typeof candidate.selectedTaskId === "string") &&
+    (candidate.selectedTimelineItemId === null || typeof candidate.selectedTimelineItemId === "string") &&
+    (candidate.selectedWorkstreamId === null || typeof candidate.selectedWorkstreamId === "string") &&
+    ["all", "active", "active-path"].includes(candidate.filter ?? "")
 }
 
 function isWorkspaceCommandResult(value: unknown): value is WorkspaceCommandResult {
@@ -192,6 +224,7 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     activeNowTaskIds: snapshot.activeNow.map((item) => item.taskId),
     timelineItems,
     meetItems: [],
+    context: snapshot.context,
   }
 }
 
