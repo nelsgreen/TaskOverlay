@@ -298,8 +298,8 @@ public partial class App : System.Windows.Application
             case GlobalHotkeyCommand.QuickAddTask:
                 RunCommand(
                     "Hotkey",
-                    "Ctrl+Alt+Q - Quick Add task",
-                    ShowQuickAdd);
+                    "Ctrl+Alt+Q - Toggle Quick Add task",
+                    () => ToggleUtilityShell(AppWindowKind.QuickAdd));
                 break;
             case GlobalHotkeyCommand.CycleOverlayMode:
                 RunCommand(
@@ -310,14 +310,20 @@ public partial class App : System.Windows.Application
             case GlobalHotkeyCommand.OpenSettings:
                 RunCommand(
                     "Hotkey",
-                    "Ctrl+Alt+S - Open Settings",
-                    ShowSettings);
+                    "Ctrl+Alt+S - Toggle Settings",
+                    () => ToggleUtilityShell(AppWindowKind.Settings));
                 break;
             case GlobalHotkeyCommand.OpenTreeManager:
                 RunCommand(
                     "Hotkey",
-                    "Ctrl+Alt+D - Open Tree Manager",
-                    ShowTreeManager);
+                    "Ctrl+Alt+D - Toggle Tree Manager",
+                    ToggleTreeManager);
+                break;
+            case GlobalHotkeyCommand.ToggleWorkspace:
+                RunCommand(
+                    "Hotkey",
+                    "Ctrl+Alt+W - Toggle Workspace",
+                    ToggleWorkspace);
                 break;
         }
     }
@@ -870,8 +876,7 @@ public partial class App : System.Windows.Application
         }
 
         _treeManagerWindow.Refresh();
-        _treeManagerWindow.Show();
-        _treeManagerWindow.Activate();
+        ShowAndActivateWindow(_treeManagerWindow);
     }
 
     private void ShowWorkspace()
@@ -895,8 +900,35 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        _workspaceWindow.Show();
-        _workspaceWindow.Activate();
+        ShowAndActivateWindow(_workspaceWindow);
+    }
+
+    private void ToggleTreeManager()
+    {
+        if (_treeManagerWindow is not null &&
+            UtilityWindowTogglePolicy.Resolve(
+                _treeManagerWindow.IsVisible,
+                _treeManagerWindow.IsActive) == UtilityWindowToggleAction.Hide)
+        {
+            _treeManagerWindow.Hide();
+            return;
+        }
+
+        ShowTreeManager();
+    }
+
+    private void ToggleWorkspace()
+    {
+        if (_workspaceWindow is not null &&
+            UtilityWindowTogglePolicy.Resolve(
+                _workspaceWindow.IsVisible,
+                _workspaceWindow.IsActive) == UtilityWindowToggleAction.Hide)
+        {
+            _workspaceWindow.Hide();
+            return;
+        }
+
+        ShowWorkspace();
     }
 
     private void WorkspaceWindow_OnClosed(object? sender, EventArgs e)
@@ -993,14 +1025,46 @@ public partial class App : System.Windows.Application
             return false;
         }
 
-        if (!shell.IsVisible)
-        {
-            shell.Show();
-        }
-
-        shell.Activate();
+        ShowAndActivateWindow(shell);
         shell.FocusActiveView();
         return true;
+    }
+
+    private void ToggleUtilityShell(AppWindowKind target)
+    {
+        if (_isShuttingDown || _state is null)
+        {
+            return;
+        }
+
+        var shell = GetOrCreateUtilityShell();
+        if (UtilityWindowTogglePolicy.Resolve(
+                shell.IsVisible,
+                shell.IsActive,
+                shell.ActiveTab == target) == UtilityWindowToggleAction.Hide)
+        {
+            shell.PrepareToHide();
+            shell.Hide();
+            _overlayWindow?.SetSettingsInteractionActive(false);
+            return;
+        }
+
+        ShowUtilityShell(target);
+    }
+
+    private static void ShowAndActivateWindow(Window window)
+    {
+        if (!window.IsVisible)
+        {
+            window.Show();
+        }
+
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
+
+        window.Activate();
     }
 
     private void OpenTaskDetailsInShell(Guid taskId)

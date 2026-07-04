@@ -130,6 +130,14 @@ public partial class UtilityShellWindow : Window
         _settingsView?.UpdateFromSettings();
     }
 
+    public void PrepareToHide()
+    {
+        if (_activeTab == AppWindowKind.Settings)
+        {
+            _settingsView?.OnDeactivated();
+        }
+    }
+
     public bool CaptureGeometry()
     {
         return UtilityShellGeometryManager.Capture(this, _state.WindowPlacement);

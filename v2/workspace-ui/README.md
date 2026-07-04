@@ -22,6 +22,9 @@ the local page has loaded. React never reads or writes `state.json` directly.
 It can send versioned commands for task title, status, notes, and panel pin
 changes; C# validates and applies each command through the existing domain
 services, saves through the WPF state path, and returns a fresh snapshot.
+Workspace tab, project scope, task/timeline selection, and tree filter are UI
+context stored through the same C# bridge. React still has no direct storage
+access, and search text is intentionally session-only.
 
 When the frontend runs in a normal browser without WebView2, it uses the mock
 dataset as a development fallback. The mock dataset is not used by the

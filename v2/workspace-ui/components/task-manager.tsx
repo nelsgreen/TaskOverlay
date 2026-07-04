@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { FolderTree } from "lucide-react"
 import type { MeetItem, Status, TabKey, Task, TreeFilter, WorkspaceTaskCommand } from "@/lib/types"
 import {
@@ -33,11 +33,15 @@ export function TaskManager() {
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>(["kazchess"])
   const [selection, setSelection] = useState<WorkspaceSelection>({ kind: "task", id: "t-pr-1" })
   const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<string | null>(null)
+  const [selectedWorkstreamId, setSelectedWorkstreamId] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKey>("tree")
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [search, setSearch] = useState("")
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
+  const [contextReady, setContextReady] = useState(false)
+  const contextHydrated = useRef(false)
+  const lastPersistedContext = useRef<string | null>(null)
 
   const bridged = bridge.status === "bridged"
   const connected = bridged && bridge.canEdit
@@ -51,9 +55,49 @@ export function TaskManager() {
 
   useEffect(() => {
     const bridgedData = bridge.data
+    if (bridge.status === "mock") {
+      setContextReady(true)
+      return
+    }
     if (bridge.status !== "bridged" || !bridgedData) return
+
+    if (!contextHydrated.current) {
+      const context = bridgedData.context
+      const selectedProjects = context.selectedProjectIds.filter((id) =>
+        bridgedData.projects.some((project) => project.id === id))
+      const fallbackProjectId = bridgedData.projects[0]?.id
+      const restoredProjectIds = selectedProjects.length > 0
+        ? selectedProjects
+        : fallbackProjectId ? [fallbackProjectId] : []
+      const restoredTask = context.selectedTaskId &&
+        bridgedData.tasks.some((task) => task.id === context.selectedTaskId)
+        ? context.selectedTaskId
+        : bridgedData.tasks.find((task) => restoredProjectIds.includes(task.projectId))?.id ?? null
+      const restoredTimelineItem = context.selectedTimelineItemId &&
+        bridgedData.timelineItems.some((item) => item.id === context.selectedTimelineItemId)
+        ? context.selectedTimelineItemId
+        : null
+
+      setSelectedProjectIds(restoredProjectIds)
+      setSelection(restoredTask ? { kind: "task", id: restoredTask } : null)
+      setSelectedTimelineItemId(restoredTimelineItem)
+      setSelectedWorkstreamId(context.selectedWorkstreamId)
+      setTab(context.activeTab)
+      setFilter(context.filter)
+      lastPersistedContext.current = JSON.stringify({
+        activeTab: context.activeTab,
+        selectedProjectIds: restoredProjectIds,
+        selectedTaskId: restoredTask,
+        selectedTimelineItemId: restoredTimelineItem,
+        selectedWorkstreamId: context.selectedWorkstreamId,
+        filter: context.filter,
+      })
+      contextHydrated.current = true
+      setContextReady(true)
+      return
+    }
+
     const firstProjectId = bridgedData.projects[0]?.id
-    const firstTaskId = bridgedData.tasks[0]?.id
     setSelectedProjectIds((selected) => {
       const valid = selected.filter((id) =>
         bridgedData.projects.some((project) => project.id === id))
@@ -62,13 +106,43 @@ export function TaskManager() {
     setSelection((selected) => {
       if (selected?.kind === "task" &&
           bridgedData.tasks.some((task) => task.id === selected.id)) return selected
-      return firstTaskId ? { kind: "task", id: firstTaskId } : null
+      const fallbackTaskId = bridgedData.tasks.find((task) =>
+        selectedProjectIds.includes(task.projectId))?.id
+      return fallbackTaskId ? { kind: "task", id: fallbackTaskId } : null
     })
     setSelectedTimelineItemId((selected) =>
       selected && bridgedData.timelineItems.some((item) => item.id === selected)
         ? selected
         : null)
   }, [bridge.status, bridge.data])
+
+  useEffect(() => {
+    if (!connected || !contextReady) return
+
+    const context = {
+      activeTab: tab,
+      selectedProjectIds,
+      selectedTaskId: selection?.kind === "task" ? selection.id : null,
+      selectedTimelineItemId,
+      selectedWorkstreamId,
+      filter,
+    }
+    const serialized = JSON.stringify(context)
+    if (serialized === lastPersistedContext.current) return
+    if (bridge.sendWorkspaceContext(context)) {
+      lastPersistedContext.current = serialized
+    }
+  }, [
+    connected,
+    contextReady,
+    tab,
+    selectedProjectIds,
+    selection,
+    selectedTimelineItemId,
+    selectedWorkstreamId,
+    filter,
+    bridge.sendWorkspaceContext,
+  ])
 
   const allSelected = selectedProjectIds.length === projects.length
   const multi = selectedProjectIds.length > 1
@@ -101,11 +175,29 @@ export function TaskManager() {
   )
 
   // --- Project selection handlers ---
-  const selectOnlyProject = (id: string) => setSelectedProjectIds([id])
-  const toggleProject = (id: string) =>
-    setSelectedProjectIds((prev) =>
-      prev.includes(id) ? (prev.length > 1 ? prev.filter((x) => x !== id) : prev) : [...prev, id],
-    )
+  const selectOnlyProject = (id: string) => {
+    setSelectedProjectIds([id])
+    if (selection?.kind !== "task" ||
+        tasks.find((task) => task.id === selection.id)?.projectId !== id) {
+      const taskId = tasks.find((task) => task.projectId === id)?.id
+      setSelection(taskId ? { kind: "task", id: taskId } : null)
+      setSelectedTimelineItemId(null)
+    }
+  }
+  const toggleProject = (id: string) => {
+    const next = selectedProjectIds.includes(id)
+      ? selectedProjectIds.length > 1
+        ? selectedProjectIds.filter((projectId) => projectId !== id)
+        : selectedProjectIds
+      : [...selectedProjectIds, id]
+    setSelectedProjectIds(next)
+    if (selection?.kind === "task" &&
+        !next.includes(tasks.find((task) => task.id === selection.id)?.projectId ?? "")) {
+      const taskId = tasks.find((task) => next.includes(task.projectId))?.id
+      setSelection(taskId ? { kind: "task", id: taskId } : null)
+      setSelectedTimelineItemId(null)
+    }
+  }
   const selectAllProjects = () => setSelectedProjectIds(projects.map((p) => p.id))
 
   const applySearch = (list: Task[], keepAncestors: boolean) => {
@@ -230,7 +322,7 @@ export function TaskManager() {
             : "title"),
   )
 
-  if (bridge.status === "loading") {
+  if (bridge.status === "loading" || (bridged && !contextReady)) {
     return (
       <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
         Loading current app state…

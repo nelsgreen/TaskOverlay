@@ -12,7 +12,16 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceSectionSnapshot> Sections,
     IReadOnlyList<WorkspaceTaskSnapshot> Tasks,
     IReadOnlyList<WorkspaceActiveNowSnapshot> ActiveNow,
-    IReadOnlyList<WorkspaceTimelineItemSnapshot> TimelineItems);
+    IReadOnlyList<WorkspaceTimelineItemSnapshot> TimelineItems,
+    WorkspaceContextSnapshot Context);
+
+public sealed record WorkspaceContextSnapshot(
+    string ActiveTab,
+    IReadOnlyList<string> SelectedProjectIds,
+    string? SelectedTaskId,
+    string? SelectedTimelineItemId,
+    string? SelectedWorkstreamId,
+    string Filter);
 
 public sealed record WorkspaceProjectSnapshot(
     string Id,
@@ -165,6 +174,18 @@ public static class WorkspaceSnapshotFactory
             .OrderBy(item => item.OccursAtUtc)
             .ThenBy(item => item.Id, StringComparer.Ordinal)
             .ToList();
+        var settings = state.WorkspaceSettings ?? new WorkspaceSettings();
+        var context = new WorkspaceContextSnapshot(
+            ToWorkspaceTab(settings.ActiveTab),
+            settings.SelectedProjectIds?
+                .Select(FormatId)
+                .ToList() ?? new List<string>(),
+            settings.SelectedTaskId is Guid selectedTaskId
+                ? FormatId(selectedTaskId)
+                : null,
+            settings.SelectedTimelineItemId,
+            settings.SelectedWorkstreamId,
+            ToWorkspaceFilter(settings.Filter));
 
         return new WorkspaceSnapshot(
             CurrentSchemaVersion,
@@ -174,7 +195,8 @@ public static class WorkspaceSnapshotFactory
             sections,
             tasks,
             activeNow,
-            timelineItems);
+            timelineItems,
+            context);
     }
 
     private static WorkspaceProjectSnapshot ToProjectSnapshot(ProjectItem project) =>
@@ -281,6 +303,22 @@ public static class WorkspaceSnapshotFactory
         TaskStatus.Waiting => "WAIT",
         TaskStatus.Done => "DONE",
         _ => "TODO"
+    };
+
+    private static string ToWorkspaceTab(WorkspaceTab tab) => tab switch
+    {
+        WorkspaceTab.Status => "status",
+        WorkspaceTab.Timeline => "timeline",
+        WorkspaceTab.Calendar => "calendar",
+        WorkspaceTab.Workstreams => "workstreams",
+        _ => "tree"
+    };
+
+    private static string ToWorkspaceFilter(WorkspaceFilter filter) => filter switch
+    {
+        WorkspaceFilter.Active => "active",
+        WorkspaceFilter.ActivePath => "active-path",
+        _ => "all"
     };
 
     private static string RootSectionId(string projectId) =>

@@ -13,6 +13,7 @@ public static class StateMigrator
 
         state.Projects ??= new List<ProjectItem>();
         state.Groups ??= new List<GroupItem>();
+        state.WorkspaceSettings ??= new WorkspaceSettings();
 
         if (state.SchemaVersion == AppState.CurrentSchemaVersion)
         {
@@ -197,6 +198,11 @@ public static class StateMigrator
         }
 
         if (TreeManagerStatePolicy.Normalize(state))
+        {
+            changed = true;
+        }
+
+        if (WorkspaceStatePolicy.Normalize(state))
         {
             changed = true;
         }

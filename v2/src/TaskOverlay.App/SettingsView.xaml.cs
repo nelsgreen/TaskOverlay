@@ -20,7 +20,8 @@ public partial class SettingsView : UserControl
             GlobalHotkeyCommand.QuickAddTask,
             GlobalHotkeyCommand.CollapseOrToggleOverlay,
             GlobalHotkeyCommand.OpenSettings,
-            GlobalHotkeyCommand.OpenTreeManager
+            GlobalHotkeyCommand.OpenTreeManager,
+            GlobalHotkeyCommand.ToggleWorkspace
         };
 
     private readonly AppState _state;
@@ -426,9 +427,10 @@ public partial class SettingsView : UserControl
             GlobalHotkeyCommand.CycleOverlayMode => "Cycle overlay mode",
             GlobalHotkeyCommand.CreateTaskWithDescription =>
                 "Create one task from clipboard with description",
-            GlobalHotkeyCommand.QuickAddTask => "Quick Add task",
-            GlobalHotkeyCommand.OpenSettings => "Open Settings",
-            GlobalHotkeyCommand.OpenTreeManager => "Open Tree Manager",
+            GlobalHotkeyCommand.QuickAddTask => "Toggle Quick Add",
+            GlobalHotkeyCommand.OpenSettings => "Toggle Settings",
+            GlobalHotkeyCommand.OpenTreeManager => "Toggle Tree Manager",
+            GlobalHotkeyCommand.ToggleWorkspace => "Toggle Workspace",
             _ => "Collapse / show overlay"
         };
     }

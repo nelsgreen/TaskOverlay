@@ -9,7 +9,8 @@ public enum GlobalHotkeyCommand
     CollapseOrToggleOverlay,
     CycleOverlayMode,
     OpenSettings,
-    OpenTreeManager
+    OpenTreeManager,
+    ToggleWorkspace
 }
 
 public sealed record GlobalHotkeyBinding(
@@ -52,6 +53,11 @@ public static class GlobalHotkeyBindings
                 6,
                 "Ctrl+Alt+D",
                 0x44,
-                GlobalHotkeyCommand.OpenTreeManager)
+                GlobalHotkeyCommand.OpenTreeManager),
+            new GlobalHotkeyBinding(
+                7,
+                "Ctrl+Alt+W",
+                0x57,
+                GlobalHotkeyCommand.ToggleWorkspace)
         };
 }

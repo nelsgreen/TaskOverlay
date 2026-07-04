@@ -78,6 +78,7 @@ internal static class Program
             ("overlay mode click cycle", OverlayModeClickCycle),
             ("overlay mode shortcut policy", OverlayModeShortcutPolicyBehavior),
             ("global hotkey bindings", GlobalHotkeyBindingBehavior),
+            ("utility window toggle policy", UtilityWindowTogglePolicyBehavior),
             ("user-facing overlay mode labels", UserFacingOverlayModeLabels),
             ("working mode task filtering", WorkingModeTaskFiltering),
             ("overlay panel task filtering", OverlayPanelTaskFiltering),
@@ -114,6 +115,8 @@ internal static class Program
             ("workspace snapshot contract", WorkspaceSnapshotContract),
             ("workspace timeline consistency", WorkspaceTimelineConsistency),
             ("workspace orphan fallback", WorkspaceOrphanFallback),
+            ("workspace state persistence and repair", WorkspaceStatePersistenceAndRepair),
+            ("workspace context command persistence", WorkspaceContextCommandPersistence),
             ("workspace command status persistence", WorkspaceCommandStatusPersistence),
             ("workspace command invalid task and status", WorkspaceCommandInvalidTaskAndStatus),
             ("workspace command pin persistence", WorkspaceCommandPinPersistence),
@@ -2377,7 +2380,8 @@ internal static class Program
                     "Ctrl+Alt+T",
                     "Ctrl+Alt+1",
                     "Ctrl+Alt+S",
-                    "Ctrl+Alt+D"
+                    "Ctrl+Alt+D",
+                    "Ctrl+Alt+W"
                 }),
             "Only the final fixed hotkey set should be registered.");
         Assert(
@@ -2405,11 +2409,35 @@ internal static class Program
             GlobalHotkeyCommand.OpenTreeManager,
             "Ctrl+Alt+D should open Tree Manager instead of clipboard capture.");
         Assert(
+            bindings.Single(binding => binding.DisplayName == "Ctrl+Alt+W").Command ==
+            GlobalHotkeyCommand.ToggleWorkspace,
+            "Ctrl+Alt+W should toggle Workspace.");
+        Assert(
             displayNames.All(name =>
                 name is not "Ctrl+Alt+M" and
                 not "Ctrl+Alt+2" and
                 not "Ctrl+Alt+3"),
             "Removed mode hotkeys must not be registered.");
+    }
+
+    private static void UtilityWindowTogglePolicyBehavior()
+    {
+        Assert(
+            UtilityWindowTogglePolicy.Resolve(false, false) ==
+            UtilityWindowToggleAction.ShowAndActivate,
+            "A closed utility window should open.");
+        Assert(
+            UtilityWindowTogglePolicy.Resolve(true, false) ==
+            UtilityWindowToggleAction.ShowAndActivate,
+            "A background utility window should activate.");
+        Assert(
+            UtilityWindowTogglePolicy.Resolve(true, true) ==
+            UtilityWindowToggleAction.Hide,
+            "The focused target utility window should hide.");
+        Assert(
+            UtilityWindowTogglePolicy.Resolve(true, true, targetIsActive: false) ==
+            UtilityWindowToggleAction.ShowAndActivate,
+            "A utility shell hotkey should switch tabs before it can hide that target.");
     }
 
     private static void UtilityShellGeometryPersistence()
@@ -3580,6 +3608,11 @@ internal static class Program
         focus.Status = TaskStatus.InWork;
         state.Tasks.Add(waiting);
         state.Tasks.Add(focus);
+        state.WorkspaceSettings.ActiveTab = WorkspaceTab.Status;
+        state.WorkspaceSettings.SelectedProjectIds = new() { project.Id };
+        state.WorkspaceSettings.SelectedTaskId = waiting.Id;
+        state.WorkspaceSettings.SelectedTimelineItemId = $"remind:{waiting.Id:N}";
+        state.WorkspaceSettings.Filter = WorkspaceFilter.Active;
 
         var snapshot = WorkspaceSnapshotFactory.Create(state, now);
         var waitingSnapshot = snapshot.Tasks.Single(task =>
@@ -3599,6 +3632,16 @@ internal static class Program
         Assert(waitingSnapshot.WaitingFor == "reviewer", "Waiting metadata should be projected.");
         Assert(waitingSnapshot.PinToPanel, "Panel pin should be projected.");
         Assert(waitingSnapshot.ReminderActive, "Active reminder should be projected.");
+        Assert(
+            snapshot.Context is
+            {
+                ActiveTab: "status",
+                Filter: "active"
+            } &&
+            snapshot.Context.SelectedProjectIds.SequenceEqual(new[] { project.Id.ToString("N") }) &&
+            snapshot.Context.SelectedTaskId == waiting.Id.ToString("N") &&
+            snapshot.Context.SelectedTimelineItemId == $"remind:{waiting.Id:N}",
+            "Workspace snapshot should carry persisted UI context.");
         Assert(
             snapshot.ActiveNow.Select(item => item.TaskId).OrderBy(id => id).SequenceEqual(
                 new[] { waiting.Id.ToString("N"), focus.Id.ToString("N") }.OrderBy(id => id)),
@@ -3688,6 +3731,133 @@ internal static class Program
             "Orphan task should resolve to a visible project-root section.");
         Assert(state.Projects.Count == 0,
             "Workspace snapshot creation must not mutate source state.");
+    }
+
+    private static void WorkspaceStatePersistenceAndRepair()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = AppState.CreateDefault();
+            var project = state.Projects[0];
+            var task = state.Tasks[0];
+            task.RemindAtUtc = DateTimeOffset.UtcNow.AddHours(1);
+            state.WorkspaceSettings = new WorkspaceSettings
+            {
+                ActiveTab = WorkspaceTab.Timeline,
+                SelectedProjectIds = new() { project.Id },
+                SelectedTaskId = task.Id,
+                SelectedTimelineItemId = $"remind:{task.Id:N}",
+                SelectedWorkstreamId = "workstream-1",
+                Filter = WorkspaceFilter.ActivePath
+            };
+
+            store.Save(state);
+            var loaded = store.Load();
+            Assert(
+                loaded.WorkspaceSettings.ActiveTab == WorkspaceTab.Timeline &&
+                loaded.WorkspaceSettings.SelectedProjectIds.SequenceEqual(new[] { project.Id }) &&
+                loaded.WorkspaceSettings.SelectedTaskId == task.Id &&
+                loaded.WorkspaceSettings.SelectedTimelineItemId == $"remind:{task.Id:N}" &&
+                loaded.WorkspaceSettings.SelectedWorkstreamId == "workstream-1" &&
+                loaded.WorkspaceSettings.Filter == WorkspaceFilter.ActivePath,
+                "Workspace context should survive save/load.");
+
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            root.Remove("workspaceSettings");
+            File.WriteAllText(
+                store.StatePath,
+                root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            var oldState = store.Load();
+            Assert(
+                oldState.WorkspaceSettings.SelectedProjectIds.Count == 1 &&
+                oldState.WorkspaceSettings.ActiveTab == WorkspaceTab.Tree,
+                "Old schema v2 state should receive safe Workspace defaults.");
+        });
+
+        var repairState = AppState.CreateDefault();
+        repairState.WorkspaceSettings = new WorkspaceSettings
+        {
+            ActiveTab = (WorkspaceTab)999,
+            SelectedProjectIds = new() { Guid.NewGuid(), Guid.NewGuid() },
+            SelectedTaskId = Guid.NewGuid(),
+            SelectedTimelineItemId = "missing-item",
+            Filter = (WorkspaceFilter)999
+        };
+        Assert(WorkspaceStatePolicy.Normalize(repairState),
+            "Invalid Workspace context should be repaired.");
+        Assert(
+            repairState.WorkspaceSettings.ActiveTab == WorkspaceTab.Tree &&
+            repairState.WorkspaceSettings.Filter == WorkspaceFilter.All &&
+            repairState.WorkspaceSettings.SelectedProjectIds.SequenceEqual(
+                new[] { repairState.Projects[0].Id }) &&
+            repairState.Tasks.Any(task =>
+                task.Id == repairState.WorkspaceSettings.SelectedTaskId &&
+                task.ProjectId == repairState.Projects[0].Id) &&
+            repairState.WorkspaceSettings.SelectedTimelineItemId is null,
+            "Workspace repair should fall back to valid project/task context.");
+        Assert(!WorkspaceStatePolicy.Normalize(repairState),
+            "Normalized Workspace context should be idempotent.");
+    }
+
+    private static void WorkspaceContextCommandPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault();
+            var project = state.Projects[0];
+            var task = state.Tasks[0];
+            task.RemindAtUtc = DateTimeOffset.UtcNow.AddHours(1);
+            var store = new AppStateStore(directory);
+            var saves = 0;
+            var refreshes = 0;
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () =>
+                {
+                    store.Save(state);
+                    saves++;
+                },
+                () => refreshes++);
+
+            var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                "workspace-context",
+                "updateWorkspaceContext",
+                new
+                {
+                    activeTab = "status",
+                    selectedProjectIds = new[] { project.Id.ToString("N") },
+                    selectedTaskId = task.Id.ToString("N"),
+                    selectedTimelineItemId = $"remind:{task.Id:N}",
+                    selectedWorkstreamId = (string?)null,
+                    filter = "active"
+                }));
+            Assert(result.Success && saves == 1 && refreshes == 0,
+                "Valid Workspace context should save without refreshing task presentations.");
+            var loaded = store.Load().WorkspaceSettings;
+            Assert(
+                loaded.ActiveTab == WorkspaceTab.Status &&
+                loaded.SelectedProjectIds.SequenceEqual(new[] { project.Id }) &&
+                loaded.SelectedTaskId == task.Id &&
+                loaded.SelectedTimelineItemId == $"remind:{task.Id:N}" &&
+                loaded.Filter == WorkspaceFilter.Active,
+                "Workspace context command should persist through AppStateStore.");
+
+            var invalid = dispatcher.Dispatch(WorkspaceCommandJson(
+                "workspace-context-invalid",
+                "updateWorkspaceContext",
+                new
+                {
+                    activeTab = "dashboard",
+                    selectedProjectIds = new[] { project.Id.ToString("N") },
+                    selectedTaskId = task.Id.ToString("N"),
+                    selectedTimelineItemId = (string?)null,
+                    selectedWorkstreamId = (string?)null,
+                    filter = "all"
+                }));
+            Assert(!invalid.Success && invalid.ErrorCode == "invalidPayload" && saves == 1,
+                "Invalid Workspace context should not save or mutate state.");
+        });
     }
 
     private static void WorkspaceCommandStatusPersistence()

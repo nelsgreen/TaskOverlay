@@ -128,6 +128,16 @@ export interface WorkspaceSnapshotContract {
   tasks: WorkspaceTaskSnapshot[]
   activeNow: WorkspaceActiveNowSnapshot[]
   timelineItems: WorkspaceTimelineSnapshot[]
+  context: WorkspaceContextSnapshot
+}
+
+export interface WorkspaceContextSnapshot {
+  activeTab: TabKey
+  selectedProjectIds: string[]
+  selectedTaskId: string | null
+  selectedTimelineItemId: string | null
+  selectedWorkstreamId: string | null
+  filter: TreeFilter
 }
 
 export interface WorkspaceProjectSnapshot {
@@ -186,7 +196,19 @@ export type WorkspaceTaskCommand =
   | { type: "updateTaskNotes"; taskId: string; notes: string }
   | { type: "updateTaskTitle"; taskId: string; title: string }
 
-export type WorkspaceCommandPayload = WorkspaceTaskCommand extends infer Command
+export type WorkspaceContextCommand = {
+  type: "updateWorkspaceContext"
+  activeTab: TabKey
+  selectedProjectIds: string[]
+  selectedTaskId: string | null
+  selectedTimelineItemId: string | null
+  selectedWorkstreamId: string | null
+  filter: TreeFilter
+}
+
+export type WorkspaceCommand = WorkspaceTaskCommand | WorkspaceContextCommand
+
+export type WorkspaceCommandPayload = WorkspaceCommand extends infer Command
   ? Command extends { type: string }
     ? Omit<Command, "type">
     : never
@@ -195,7 +217,7 @@ export type WorkspaceCommandPayload = WorkspaceTaskCommand extends infer Command
 export interface WorkspaceCommandEnvelope {
   schemaVersion: 1
   commandId: string
-  type: WorkspaceTaskCommand["type"]
+  type: WorkspaceCommand["type"]
   payload: WorkspaceCommandPayload
 }
 
