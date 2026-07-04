@@ -883,7 +883,10 @@ public partial class App : System.Windows.Application
 
         if (_workspaceWindow is null && _state is not null)
         {
-            _workspaceWindow = new WorkspaceWindow(_state);
+            _workspaceWindow = new WorkspaceWindow(
+                _state,
+                PersistState,
+                RefreshTaskPresentations);
             _workspaceWindow.Closed += WorkspaceWindow_OnClosed;
         }
 

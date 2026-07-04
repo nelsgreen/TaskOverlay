@@ -63,10 +63,12 @@ public static class WorkspaceSnapshotFactory
 {
     public const int CurrentSchemaVersion = 1;
     public const string ReadOnlyMode = "readonly";
+    public const string ConnectedMode = "connected";
 
     public static WorkspaceSnapshot Create(
         AppState state,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null,
+        string mode = ReadOnlyMode)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -167,7 +169,7 @@ public static class WorkspaceSnapshotFactory
         return new WorkspaceSnapshot(
             CurrentSchemaVersion,
             timestamp,
-            ReadOnlyMode,
+            mode == ConnectedMode ? ConnectedMode : ReadOnlyMode,
             projects,
             sections,
             tasks,

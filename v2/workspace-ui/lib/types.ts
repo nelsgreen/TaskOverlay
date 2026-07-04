@@ -122,7 +122,7 @@ export interface ProjectScope {
 export interface WorkspaceSnapshotContract {
   schemaVersion: 1
   generatedAtUtc: string
-  mode: "readonly"
+  mode: "readonly" | "connected"
   projects: WorkspaceProjectSnapshot[]
   sections: WorkspaceSectionSnapshot[]
   tasks: WorkspaceTaskSnapshot[]
@@ -178,4 +178,38 @@ export interface WorkspaceTimelineSnapshot {
   linkedTaskId: string
   occursAtUtc: string
   meta: string | null
+}
+
+export type WorkspaceTaskCommand =
+  | { type: "updateTaskStatus"; taskId: string; status: Status }
+  | { type: "updateTaskPinToPanel"; taskId: string; pinToPanel: boolean }
+  | { type: "updateTaskNotes"; taskId: string; notes: string }
+  | { type: "updateTaskTitle"; taskId: string; title: string }
+
+export type WorkspaceCommandPayload = WorkspaceTaskCommand extends infer Command
+  ? Command extends { type: string }
+    ? Omit<Command, "type">
+    : never
+  : never
+
+export interface WorkspaceCommandEnvelope {
+  schemaVersion: 1
+  commandId: string
+  type: WorkspaceTaskCommand["type"]
+  payload: WorkspaceCommandPayload
+}
+
+export interface WorkspaceCommandResult {
+  schemaVersion: 1
+  messageType: "commandResult"
+  commandId: string
+  success: boolean
+  errorCode: string | null
+  errorMessage: string | null
+}
+
+export interface PendingWorkspaceCommand {
+  commandId: string
+  taskId: string
+  type: WorkspaceTaskCommand["type"]
 }

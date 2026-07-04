@@ -353,6 +353,15 @@ public sealed class TreeStateService
             TreeNodeStatus.Done => TaskStatus.Done,
             _ => TaskStatus.Todo
         };
+        if (taskStatus == TaskStatus.InWork && task.Status == TaskStatus.Done)
+        {
+            TaskInteractionService.SetStatus(
+                _state,
+                task,
+                TaskStatus.Todo,
+                timestamp);
+        }
+
         TaskInteractionService.SetStatus(_state, task, taskStatus, timestamp);
 
         task.UpdatedAtUtc = timestamp;
