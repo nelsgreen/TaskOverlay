@@ -165,11 +165,6 @@
                 BorderBrush="#FF30343D"
                 BorderThickness="0,0,0,1">
             <DockPanel>
-                <Image DockPanel.Dock="Left"
-                       Width="28"
-                       Height="28"
-                       Margin="0,0,11,0"
-                       Source="Assets/taskoverlay.ico" />
                 <StackPanel>
                     <TextBlock Foreground="#FFF4F4F5"
                                FontSize="17"
