@@ -1,4 +1,5 @@
 import type { MeetItem, Project, Section, Task, TimelineItem } from "./types"
+import { addDaysKey, todayKey } from "./calendar-date"
 
 export const projects: Project[] = [
   { id: "kazchess", name: "KazChess", color: "oklch(0.72 0.15 155)" },
@@ -290,6 +291,7 @@ export const timelineItems: TimelineItem[] = [
     meta: "task reminder",
     projectId: "kazchess",
     linkedTaskId: "t-sb-1",
+    dateKey: todayKey(),
   },
   {
     id: "tl-3",
@@ -301,6 +303,7 @@ export const timelineItems: TimelineItem[] = [
     meta: "task deadline",
     projectId: "kazchess",
     linkedTaskId: "t-pr-1",
+    dateKey: todayKey(),
   },
   {
     id: "tl-4",
@@ -323,6 +326,7 @@ export const timelineItems: TimelineItem[] = [
     meta: "Friday · task deadline",
     projectId: "kazchess",
     linkedTaskId: "t-pr-3",
+    dateKey: addDaysKey(todayKey(), 4),
   },
   {
     id: "tl-6",
@@ -334,6 +338,7 @@ export const timelineItems: TimelineItem[] = [
     meta: "task reminder",
     projectId: "taskoverlay",
     linkedTaskId: "t-bk-1",
+    dateKey: addDaysKey(todayKey(), 3),
   },
   {
     id: "tl-7",

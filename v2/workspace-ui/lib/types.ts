@@ -77,6 +77,8 @@ export interface TimelineItem {
   linkedMeetId?: string
   time: string
   bucket: "today" | "tomorrow" | "week" | "later"
+  /** local calendar day (YYYY-MM-DD) this item occurs on, when known */
+  dateKey?: string
 }
 
 /** Duration options for a MEET */
