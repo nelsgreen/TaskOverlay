@@ -1,10 +1,10 @@
 "use client"
 
 import { useMemo } from "react"
-import { Bell, Flag } from "lucide-react"
+import { Bell, CalendarDays, Flag, Video } from "lucide-react"
 import type { Project, TimelineItem, TimelineKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { formatDayNumber, formatWeekdayShort, mondayOfWeekKey, todayKey, weekDayKeys } from "@/lib/calendar-date"
+import { formatDayLabel, formatDayNumber, formatWeekdayShort, mondayOfWeekKey, todayKey, weekDayKeys } from "@/lib/calendar-date"
 
 type CalendarKind = Exclude<TimelineKind, "MEET">
 
@@ -67,7 +67,7 @@ export function CalendarView({
   }, [scopedItems])
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
+    <div className="flex h-full flex-col overflow-y-auto bg-background">
       {viewMode === "week" ? (
         <WeekGrid
           selectedDate={selectedDate}
@@ -86,9 +86,106 @@ export function CalendarView({
         />
       )}
 
-      <div className="shrink-0 border-t border-border px-5 py-2.5 text-center text-[11px] text-muted-foreground">
-        REMIND &amp; Deadline placed by date. MEET is not available in this Workspace build yet.
+      <CalendarLegend />
+    </div>
+  )
+}
+
+function CalendarLegend() {
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-5 py-2.5 text-[11px]">
+      <span className="flex items-center gap-1.5 text-status-remind">
+        <Bell className="size-3" />
+        REMIND
+      </span>
+      <span className="flex items-center gap-1.5 text-status-deadline">
+        <Flag className="size-3" />
+        DEADLINE
+      </span>
+      <span className="flex items-center gap-1.5 text-muted-foreground/70">
+        <Video className="size-3 text-status-meet/70" />
+        MEET — not available in this Workspace build yet
+      </span>
+    </div>
+  )
+}
+
+function DayHeader({ selectedDate, count }: { selectedDate: string; count: number }) {
+  const isToday = selectedDate === todayKey()
+  return (
+    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card/30 px-5 py-3">
+      <div className="flex items-center gap-2">
+        <span className="flex size-8 items-center justify-center rounded-lg bg-accent">
+          <CalendarDays className="size-4 text-muted-foreground" />
+        </span>
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-foreground">{formatDayLabel(selectedDate)}</span>
+            {isToday && (
+              <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-primary">
+                Today
+              </span>
+            )}
+          </div>
+          <span className="text-[11px] text-muted-foreground">
+            {count === 0 ? "No attention items" : count === 1 ? "1 item" : `${count} items`}
+          </span>
+        </div>
       </div>
+    </div>
+  )
+}
+
+function DayAgenda({
+  selectedDate,
+  items,
+  projects,
+  selectedTimelineItemId,
+  onSelectTask,
+}: {
+  selectedDate: string
+  items: TimelineItem[]
+  projects: Project[]
+  selectedTimelineItemId?: string | null
+  onSelectTask?: (timelineItemId: string, taskId: string) => void
+}) {
+  const isToday = selectedDate === todayKey()
+
+  return (
+    <div className="flex flex-1 flex-col">
+      <DayHeader selectedDate={selectedDate} count={items.length} />
+      <div className="flex-1 px-5 py-4">
+        {items.length === 0 ? (
+          <EmptyState
+            title={isToday ? "Nothing scheduled today" : "Nothing scheduled on this day"}
+            subtitle="REMIND and Deadline items with a date on this day will appear here."
+          />
+        ) : (
+          <div className="space-y-1.5">
+            {items.map((item) => (
+              <DayRow
+                key={item.id}
+                item={item}
+                projects={projects}
+                selected={selectedTimelineItemId === item.id}
+                onSelect={() => item.linkedTaskId && onSelectTask?.(item.id, item.linkedTaskId)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function EmptyState({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/20 px-6 text-center">
+      <span className="flex size-10 items-center justify-center rounded-full bg-accent">
+        <CalendarDays className="size-4 text-muted-foreground" />
+      </span>
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      <p className="max-w-xs text-pretty text-[11px] text-muted-foreground">{subtitle}</p>
     </div>
   )
 }
@@ -111,94 +208,57 @@ function WeekGrid({
   const today = todayKey()
 
   return (
-    <div className="grid flex-1 grid-cols-7 divide-x divide-border">
-      {days.map((day) => {
-        const dayItems = itemsByDate.get(day) ?? []
-        const isToday = day === today
-        const isSelected = day === selectedDate
-        return (
-          <div key={day} className="flex min-h-0 flex-col">
+    <div className="flex-1 overflow-y-auto p-3">
+      <div className="grid h-full grid-cols-7 gap-2">
+        {days.map((day) => {
+          const dayItems = itemsByDate.get(day) ?? []
+          const isToday = day === today
+          const isSelected = day === selectedDate
+          return (
             <div
+              key={day}
               className={cn(
-                "flex shrink-0 items-center justify-between border-b border-border px-2.5 py-2",
-                isSelected && "bg-primary/5",
+                "flex min-h-0 flex-col rounded-lg border bg-card/20",
+                isSelected ? "border-primary/40 ring-1 ring-primary/20" : "border-border",
               )}
             >
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {formatWeekdayShort(day)}
-              </span>
-              <span
+              <div
                 className={cn(
-                  "flex size-5 items-center justify-center rounded-full text-[11px] font-medium tabular-nums",
-                  isToday ? "bg-primary text-primary-foreground" : "text-foreground",
+                  "flex shrink-0 items-center justify-between rounded-t-lg border-b px-2.5 py-2",
+                  isToday ? "border-primary/25 bg-primary/10" : "border-border bg-card/40",
                 )}
               >
-                {formatDayNumber(day)}
-              </span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {formatWeekdayShort(day)}
+                </span>
+                <span
+                  className={cn(
+                    "flex size-5 items-center justify-center rounded-full text-[11px] font-medium tabular-nums",
+                    isToday ? "bg-primary text-primary-foreground" : "text-foreground",
+                  )}
+                >
+                  {formatDayNumber(day)}
+                </span>
+              </div>
+              <div className="flex-1 space-y-1 overflow-y-auto p-1.5">
+                {dayItems.length === 0 ? (
+                  <div className="flex h-full min-h-12 items-center justify-center text-[11px] text-muted-foreground/40">—</div>
+                ) : (
+                  dayItems.map((item) => (
+                    <CalendarChip
+                      key={item.id}
+                      item={item}
+                      projects={projects}
+                      selected={selectedTimelineItemId === item.id}
+                      onSelect={() => item.linkedTaskId && onSelectTask?.(item.id, item.linkedTaskId)}
+                    />
+                  ))
+                )}
+              </div>
             </div>
-            <div className="flex-1 space-y-1 overflow-y-auto px-1.5 py-1.5">
-              {dayItems.length === 0 ? (
-                <div className="px-1 py-2 text-center text-[10px] text-muted-foreground/60">Nothing</div>
-              ) : (
-                dayItems.map((item) => (
-                  <CalendarChip
-                    key={item.id}
-                    item={item}
-                    projects={projects}
-                    selected={selectedTimelineItemId === item.id}
-                    onSelect={() => item.linkedTaskId && onSelectTask?.(item.id, item.linkedTaskId)}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function DayAgenda({
-  selectedDate,
-  items,
-  projects,
-  selectedTimelineItemId,
-  onSelectTask,
-}: {
-  selectedDate: string
-  items: TimelineItem[]
-  projects: Project[]
-  selectedTimelineItemId?: string | null
-  onSelectTask?: (timelineItemId: string, taskId: string) => void
-}) {
-  const isToday = selectedDate === todayKey()
-
-  if (items.length === 0) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-5 py-8 text-center">
-        <div>
-          <p className="text-sm font-medium text-foreground">
-            {isToday ? "Nothing scheduled today" : "Nothing scheduled on this day"}
-          </p>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            REMIND and Deadline items with a date on this day will appear here.
-          </p>
-        </div>
+          )
+        })}
       </div>
-    )
-  }
-
-  return (
-    <div className="flex-1 space-y-1.5 overflow-y-auto px-5 py-4">
-      {items.map((item) => (
-        <DayRow
-          key={item.id}
-          item={item}
-          projects={projects}
-          selected={selectedTimelineItemId === item.id}
-          onSelect={() => item.linkedTaskId && onSelectTask?.(item.id, item.linkedTaskId)}
-        />
-      ))}
     </div>
   )
 }
@@ -215,6 +275,7 @@ function CalendarChip({
   onSelect?: () => void
 }) {
   const config = kindConfig[item.kind as CalendarKind]
+  const Icon = config.Icon
   const project = item.projectId ? projects.find((p) => p.id === item.projectId) : null
   const clickable = !!item.linkedTaskId
 
@@ -231,6 +292,7 @@ function CalendarChip({
         selected ? "border-row-selected-border bg-row-selected ring-0" : cn(config.bg, config.ring, "hover:brightness-95"),
       )}
     >
+      <Icon className={cn("size-2.5 shrink-0", config.text)} />
       {project && <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: project.color }} aria-hidden />}
       <span className={cn("min-w-0 flex-1 truncate text-[10px] font-medium", config.text)}>{item.title}</span>
     </div>

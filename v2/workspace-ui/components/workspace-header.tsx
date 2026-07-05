@@ -322,22 +322,16 @@ function CalendarToolbar({
 
   return (
     <>
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onToday}
-          className={cn(toolbar.segmentItem(isToday), "border border-border")}
-        >
+      <div className={toolbar.segment} role="group" aria-label="Jump to date">
+        <button type="button" onClick={onToday} className={toolbar.segmentItem(isToday)}>
           Today
         </button>
-        <button
-          type="button"
-          onClick={onTomorrow}
-          className={cn(toolbar.segmentItem(false), "border border-border")}
-        >
+        <button type="button" onClick={onTomorrow} className={toolbar.segmentItem(false)}>
           Tomorrow
         </button>
       </div>
+
+      <span className="h-4 w-px bg-border" aria-hidden />
 
       <div className={toolbar.segment} role="group" aria-label="Shift by week">
         <button type="button" onClick={() => onShiftWeek(-1)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Previous week">
@@ -354,7 +348,12 @@ function CalendarToolbar({
         </button>
       </div>
 
-      <span className="text-[11px] font-medium text-foreground">{label}</span>
+      <span className="h-4 w-px bg-border" aria-hidden />
+
+      <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+        <CalendarDays className="size-3.5 text-muted-foreground" />
+        {label}
+      </span>
 
       <div className={cn(toolbar.segment, "ml-auto")} role="group" aria-label="Calendar view mode">
         <button type="button" onClick={() => onViewModeChange("day")} className={toolbar.segmentItem(viewMode === "day")}>
