@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
 import { Bell, Clock, Pin } from "lucide-react"
-import type { Project, Section, Status, Task } from "@/lib/types"
+import type { Project, Section, StatusFilterKey, Task } from "@/lib/types"
+import { matchesStatusFilter } from "@/lib/status-filter"
 import { cn } from "@/lib/utils"
 import { statusConfig } from "./status-badge"
 
@@ -12,40 +12,11 @@ interface Props {
   sections: Section[]
   selectedTaskId: string | null
   onSelectTask: (id: string) => void
+  filter: StatusFilterKey
 }
 
-type FilterKey = "all" | "panel" | Status | "remind"
-
-interface FilterCfg {
-  key: FilterKey
-  label: string
-  dot?: string
-  text?: string
-}
-
-const filters: FilterCfg[] = [
-  { key: "all", label: "All" },
-  { key: "panel", label: "Panel", dot: "bg-status-panel", text: "text-status-panel" },
-  { key: "FOCUS", label: "Focus", dot: "bg-status-focus", text: "text-status-focus" },
-  { key: "WAIT", label: "Wait", dot: "bg-status-wait", text: "text-status-wait" },
-  { key: "remind", label: "Remind", dot: "bg-status-remind", text: "text-status-remind" },
-  { key: "TODO", label: "Todo", dot: "bg-status-todo", text: "text-status-todo" },
-  { key: "DONE", label: "Done", dot: "bg-status-done", text: "text-status-done" },
-]
-
-function matchesFilter(task: Task, filter: FilterKey): boolean {
-  if (filter === "all") return true
-  if (filter === "panel") return task.pinned
-  if (filter === "remind") return task.reminder !== "none"
-  return task.status === filter
-}
-
-export function StatusBoard({ tasks, projects, sections, selectedTaskId, onSelectTask }: Props) {
-  const [filter, setFilter] = useState<FilterKey>("all")
-
-  const visible = tasks.filter((t) => matchesFilter(t, filter))
-
-  const countFor = (f: FilterKey) => tasks.filter((t) => matchesFilter(t, f)).length
+export function StatusBoard({ tasks, projects, sections, selectedTaskId, onSelectTask, filter }: Props) {
+  const visible = tasks.filter((task) => matchesStatusFilter(task, filter))
 
   const pathFor = (t: Task) => {
     const p = projects.find((x) => x.id === t.projectId)
@@ -55,42 +26,6 @@ export function StatusBoard({ tasks, projects, sections, selectedTaskId, onSelec
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Filter chips */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-4 py-2.5">
-        {filters.map((f) => {
-          const active = filter === f.key
-          const count = countFor(f.key)
-          return (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-                active
-                  ? f.dot
-                    ? `border-current/40 bg-current/10 ${f.text}`
-                    : "border-border bg-accent text-foreground"
-                  : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
-              )}
-              style={active && f.dot ? {} : {}}
-            >
-              {f.dot && (
-                <span className={cn("size-1.5 rounded-full", active ? f.dot : "bg-muted-foreground/50")} aria-hidden />
-              )}
-              {f.label}
-              <span
-                className={cn(
-                  "rounded px-1 font-mono text-[10px] tabular-nums",
-                  active ? "bg-foreground/10" : "bg-muted text-muted-foreground",
-                )}
-              >
-                {count}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-
       {/* Task list */}
       <div className="flex-1 overflow-y-auto">
         {visible.length === 0 ? (

@@ -111,6 +111,7 @@ export interface MeetItem {
 export type SelectionMode = "task" | "meet" | "none"
 
 export type TreeFilter = "all" | "active" | "active-path"
+export type StatusFilterKey = "all" | "panel" | Status | "remind"
 export type TabKey = "tree" | "status" | "timeline" | "calendar" | "workstreams"
 
 /** How the workspace project scope is selected */

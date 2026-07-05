@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { FolderTree } from "lucide-react"
-import type { MeetItem, Status, TabKey, Task, TreeFilter, WorkspaceTaskCommand } from "@/lib/types"
+import { CalendarDays, FolderTree } from "lucide-react"
+import type { MeetItem, Status, StatusFilterKey, TabKey, Task, TreeFilter, WorkspaceTaskCommand } from "@/lib/types"
 import {
   initialMeetItems,
   initialTasks,
@@ -12,8 +12,8 @@ import {
 } from "@/lib/mock-data"
 import { cn } from "@/lib/utils"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
-import { ProjectSidebar } from "./project-sidebar"
 import { WorkspaceHeader } from "./workspace-header"
+import { ProjectScopeBar } from "./project-scope-bar"
 import { TreeView } from "./tree-view"
 import { StatusBoard } from "./status-board"
 import { TimelineView } from "./timeline-view"
@@ -36,6 +36,7 @@ export function TaskManager() {
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKey>("tree")
   const [filter, setFilter] = useState<TreeFilter>("all")
+  const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
   const [search, setSearch] = useState("")
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
@@ -144,7 +145,6 @@ export function TaskManager() {
     bridge.sendWorkspaceContext,
   ])
 
-  const allSelected = selectedProjectIds.length === projects.length
   const multi = selectedProjectIds.length > 1
   const selectedTaskId = selection?.kind === "task" ? selection.id : null
   const selectedMeetId = selection?.kind === "meet" ? selection.id : null
@@ -163,6 +163,10 @@ export function TaskManager() {
   const selectTimelineMeet = (timelineItemId: string, meetId: string) => {
     setSelectedTimelineItemId(timelineItemId)
     setSelection({ kind: "meet", id: meetId })
+  }
+  const changeTab = (nextTab: TabKey) => {
+    if (nextTab === "status" && tab !== "status") setStatusFilter("all")
+    setTab(nextTab)
   }
 
   // The single project used for the Tree tab (Tree is single-project by design)
@@ -333,32 +337,28 @@ export function TaskManager() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <div className="flex min-h-0 flex-1">
-        <ProjectSidebar
-          projects={projects}
-          tasks={tasks}
-          selectedProjectIds={selectedProjectIds}
-          onSelectOnly={selectOnlyProject}
-          onToggleProject={toggleProject}
-          readOnly={bridged}
-        />
-
         <main className="flex min-w-0 flex-1 flex-col">
           <WorkspaceHeader
-            projects={projects}
-            selectedProjectIds={selectedProjectIds}
             treeProject={treeProject}
-            allSelected={allSelected}
-            multi={multi}
+            tab={tab}
+            onTabChange={changeTab}
+            filter={filter}
+            onFilterChange={setFilter}
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
+            statusTasks={scopedTasks}
+            search={search}
+            onSearchChange={setSearch}
+            onNewMeet={handleNewMeet}
+            readOnly={bridged}
+          />
+          <ProjectScopeBar
+            projects={projects}
+            tasks={tasks}
+            selectedProjectIds={selectedProjectIds}
             onSelectOnly={selectOnlyProject}
             onToggleProject={toggleProject}
             onSelectAll={selectAllProjects}
-            tab={tab}
-            onTabChange={setTab}
-            filter={filter}
-            onFilterChange={setFilter}
-            search={search}
-            onSearchChange={setSearch}
-            readOnly={bridged}
           />
           {bridged && (
             <div className="border-b border-border bg-primary/5 px-5 py-1.5 text-[11px] text-muted-foreground">
@@ -420,6 +420,7 @@ export function TaskManager() {
                 sections={sections}
                 selectedTaskId={selectedTaskId}
                 onSelectTask={selectTask}
+                filter={statusFilter}
               />
             )}
             {tab === "timeline" && (
@@ -430,10 +431,9 @@ export function TaskManager() {
                 selectedTimelineItemId={selectedTimelineItemId}
                 onSelectMeet={selectTimelineMeet}
                 onSelectTask={selectTimelineTask}
-                onNewMeet={handleNewMeet}
-                readOnly={bridged}
               />
             )}
+            {tab === "calendar" && <CalendarPlaceholder />}
             {tab === "workstreams" && <WorkstreamsPlaceholder />}
           </div>
         </main>
@@ -470,6 +470,25 @@ export function TaskManager() {
         onSelectTask={selectTask}
         taskIds={activeNowTaskIds}
       />
+    </div>
+  )
+}
+
+function CalendarPlaceholder() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <div className="flex size-12 items-center justify-center rounded-full bg-accent">
+        <CalendarDays className="size-5 text-muted-foreground" />
+      </div>
+      <div>
+        <p className="text-sm font-medium text-foreground">Calendar</p>
+        <p className="mt-1 max-w-sm text-pretty text-xs text-muted-foreground">
+          Calendar planning is not enabled in the current Workspace. Timeline remains the time-based attention view.
+        </p>
+      </div>
+      <span className="rounded bg-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Later
+      </span>
     </div>
   )
 }

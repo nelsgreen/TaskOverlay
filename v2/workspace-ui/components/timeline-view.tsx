@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Bell, Flag, Plus, Video } from "lucide-react"
+import { Bell, Flag, Video } from "lucide-react"
 import type { Project, TimelineItem, TimelineKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -106,9 +106,6 @@ interface TimelineViewProps {
   onSelectMeet?: (timelineItemId: string, meetId: string) => void
   /** called with the timeline item and linked task ids when user clicks a REMIND or DEADLINE row */
   onSelectTask?: (timelineItemId: string, taskId: string) => void
-  /** called when user clicks "New MEET" */
-  onNewMeet?: () => void
-  readOnly?: boolean
 }
 
 export function TimelineView({
@@ -118,8 +115,6 @@ export function TimelineView({
   selectedTimelineItemId,
   onSelectMeet,
   onSelectTask,
-  onNewMeet,
-  readOnly,
 }: TimelineViewProps) {
   const [nowMins, setNowMins] = useState<number>(getNowMinutes)
 
@@ -148,29 +143,6 @@ export function TimelineView({
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      {/* Header strip */}
-      <div className="shrink-0 border-b border-border px-5 py-3">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-            <KindPill kind="MEET" />
-            <KindPill kind="REMIND" />
-            <KindPill kind="DEADLINE" />
-          </div>
-          <span className="text-[11px] text-muted-foreground">Time view over attention items</span>
-          <div className="ml-auto">
-            <button
-              onClick={onNewMeet}
-              disabled={readOnly}
-              title={readOnly ? "MEET is not persisted in the current app state" : "New MEET"}
-              className="flex items-center gap-1.5 rounded-md border border-status-meet/40 bg-status-meet/10 px-2.5 py-1.5 text-[11px] font-semibold text-status-meet transition-colors hover:bg-status-meet/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Plus className="size-3.5" />
-              New MEET
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Day scrubber */}
       <div className="shrink-0 border-b border-border bg-card/30 px-5 py-3">
         <div className="mb-2 flex items-center justify-between">
@@ -308,17 +280,6 @@ export function TimelineView({
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────
-
-function KindPill({ kind }: { kind: TimelineKind }) {
-  const c = kindConfig[kind]
-  const Icon = c.Icon
-  return (
-    <span className="flex items-center gap-1">
-      <Icon className={cn("size-3", c.text)} />
-      <span className={c.text}>{c.label}</span>
-    </span>
-  )
-}
 
 function TimelineRow({
   item,
