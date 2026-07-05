@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Bell, ChevronUp, Pin, Zap } from "lucide-react"
+import { Bell, ChevronDown, Pin, Zap } from "lucide-react"
 import type { Project, Section, Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { statusConfig } from "./status-badge"
@@ -35,14 +35,25 @@ export function ActiveNowStrip({ tasks, projects, sections, selectedTaskId, onSe
     return `${p?.name ?? ""}${s ? ` / ${s.name}` : ""}`
   }
 
+  // Clicking the "Active now" label toggles collapse/expand.
+  const Label = (
+    <button
+      type="button"
+      onClick={() => setCollapsed((c) => !c)}
+      aria-expanded={!collapsed}
+      className="flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors hover:bg-accent/50"
+    >
+      <Zap className="size-4 text-status-focus" />
+      <span className="text-sm font-semibold text-foreground">Active now</span>
+      <ChevronDown className={cn("size-3.5 text-muted-foreground transition-transform", collapsed ? "" : "rotate-180")} />
+    </button>
+  )
+
   if (collapsed) {
     return (
       <footer className="shrink-0 border-t border-border bg-sidebar">
-        <div className="flex items-center gap-3 px-4 py-2">
-          <div className="flex items-center gap-1.5">
-            <Zap className="size-3.5 text-status-focus" />
-            <span className="text-xs font-semibold text-foreground">Active now</span>
-          </div>
+        <div className="flex items-center gap-3 px-3 py-2">
+          {Label}
           {active.length === 0 ? (
             <span className="text-[11px] text-muted-foreground">No active items</span>
           ) : (
@@ -59,11 +70,7 @@ export function ActiveNowStrip({ tasks, projects, sections, selectedTaskId, onSe
               )}
               <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
                 {previewItems.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => onSelectTask(t.id)}
-                    className="max-w-[160px] truncate rounded border border-border bg-card/60 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-accent/50"
-                  >
+                  <button key={t.id} onClick={() => onSelectTask(t.id)} className="max-w-[160px] truncate rounded border border-border bg-card/60 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-accent/50">
                     {t.title}
                   </button>
                 ))}
@@ -71,13 +78,6 @@ export function ActiveNowStrip({ tasks, projects, sections, selectedTaskId, onSe
               </div>
             </div>
           )}
-          <button
-            onClick={() => setCollapsed(false)}
-            className="ml-auto flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-            aria-label="Expand Active now"
-          >
-            <ChevronUp className="size-3" />Expand
-          </button>
         </div>
       </footer>
     )
@@ -85,24 +85,8 @@ export function ActiveNowStrip({ tasks, projects, sections, selectedTaskId, onSe
 
   return (
     <footer className="shrink-0 border-t border-border bg-sidebar">
-      <div className="flex items-start gap-4 px-4 py-3">
-        <div className="flex w-32 shrink-0 flex-col">
-          <div className="flex items-center gap-1.5">
-            <Zap className="size-4 text-status-focus" />
-            <span className="text-sm font-semibold text-foreground">Active now</span>
-          </div>
-          <span className="font-mono text-[11px] text-muted-foreground">
-            FOCUS + active REMIND · feeds Working overlay · {active.length} items
-          </span>
-          <button
-            onClick={() => setCollapsed(true)}
-            className="mt-1.5 flex items-center gap-1 self-start rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-            aria-label="Collapse Active now"
-          >
-            <ChevronUp className="size-2.5 rotate-180" />Collapse
-          </button>
-        </div>
-
+      <div className="flex items-center gap-4 px-3 py-2.5">
+        {Label}
         <div className="flex flex-1 gap-2 overflow-x-auto pb-1">
           {active.map((task, i) => {
             const c = statusConfig[task.status]

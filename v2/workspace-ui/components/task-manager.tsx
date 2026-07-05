@@ -576,13 +576,6 @@ export function TaskManager() {
             onToggleProject={toggleProject}
             onSelectAll={selectAllProjects}
           />
-          {bridged && (
-            <div className="border-b border-border bg-primary/5 px-5 py-1.5 text-[11px] text-muted-foreground">
-              {connected
-                ? "Connected to current TaskOverlay app state · supported Details fields save through C#"
-                : "Read-only · current TaskOverlay app state"}
-            </div>
-          )}
           <div className="min-h-0 flex-1 overflow-y-auto">
             {tab === "tree" && (
               <div className="flex flex-col">
