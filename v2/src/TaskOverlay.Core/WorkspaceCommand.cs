@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 
@@ -44,6 +45,8 @@ public static class WorkspaceCommandProcessor
     public const int MaximumCommandIdLength = 128;
     public const int MaximumTitleLength = 500;
     public const int MaximumNotesLength = 100_000;
+    public const int MinimumPlannedDurationMinutes = 5;
+    public const int MaximumPlannedDurationMinutes = 24 * 60;
 
     public static WorkspaceCommandResult Execute(
         AppState state,
@@ -132,6 +135,12 @@ public static class WorkspaceCommandProcessor
                     commandId,
                     timestamp),
                 "updateTaskTitle" => UpdateTitle(
+                    treeService,
+                    taskId,
+                    payload,
+                    commandId,
+                    timestamp),
+                "updateTaskPlannedWork" => UpdatePlannedWork(
                     treeService,
                     taskId,
                     payload,
@@ -228,6 +237,53 @@ public static class WorkspaceCommandProcessor
         return treeService.RenameNode(taskId, title, timestamp)
             ? WorkspaceCommandResult.Succeeded(commandId)
             : Fail(commandId, "mutationRejected", "Task title could not be updated.");
+    }
+
+    private static WorkspaceCommandResult UpdatePlannedWork(
+        TreeStateService treeService,
+        Guid taskId,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!payload.TryGetProperty("plannedStartAtUtc", out var startElement))
+        {
+            return Fail(commandId, "invalidPayload", "plannedStartAtUtc is required (use null to clear).");
+        }
+
+        // Clearing planned work: null start (and duration is ignored).
+        if (startElement.ValueKind == JsonValueKind.Null)
+        {
+            return treeService.SetPlannedWork(taskId, null, null, timestamp)
+                ? WorkspaceCommandResult.Succeeded(commandId)
+                : Fail(commandId, "mutationRejected", "Planned work could not be cleared.");
+        }
+
+        if (startElement.ValueKind != JsonValueKind.String ||
+            !DateTimeOffset.TryParse(
+                startElement.GetString(),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var plannedStart))
+        {
+            return Fail(commandId, "invalidPayload", "plannedStartAtUtc must be an ISO-8601 timestamp or null.");
+        }
+
+        if (!payload.TryGetProperty("plannedDurationMinutes", out var durationElement) ||
+            durationElement.ValueKind != JsonValueKind.Number ||
+            !durationElement.TryGetInt32(out var durationMinutes) ||
+            durationMinutes < MinimumPlannedDurationMinutes ||
+            durationMinutes > MaximumPlannedDurationMinutes)
+        {
+            return Fail(
+                commandId,
+                "invalidPayload",
+                $"plannedDurationMinutes must be an integer between {MinimumPlannedDurationMinutes} and {MaximumPlannedDurationMinutes}.");
+        }
+
+        return treeService.SetPlannedWork(taskId, plannedStart, durationMinutes, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "mutationRejected", "Planned work could not be updated.");
     }
 
     private static WorkspaceCommandResult UpdateWorkspaceContext(

@@ -52,7 +52,9 @@ public sealed record WorkspaceTaskSnapshot(
     DateTimeOffset? ReminderAtUtc,
     int? ReminderEveryMinutes,
     bool ReminderActive,
-    DateTimeOffset? DeadlineAtUtc);
+    DateTimeOffset? DeadlineAtUtc,
+    DateTimeOffset? PlannedStartAtUtc,
+    int? PlannedDurationMinutes);
 
 public sealed record WorkspaceActiveNowSnapshot(
     string TaskId,
@@ -250,7 +252,9 @@ public static class WorkspaceSnapshotFactory
             reminderAt,
             task.RemindEveryMinutes,
             reminderActive,
-            task.DueAtUtc);
+            task.DueAtUtc,
+            task.PlannedStartAtUtc,
+            task.PlannedDurationMinutes);
         var projectPath = group is null
             ? project.Name
             : $"{project.Name} / {group.Name}";

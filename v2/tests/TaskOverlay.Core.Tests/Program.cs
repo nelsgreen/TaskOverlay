@@ -122,7 +122,10 @@ internal static class Program
             ("workspace command pin persistence", WorkspaceCommandPinPersistence),
             ("workspace command notes persistence", WorkspaceCommandNotesPersistence),
             ("workspace command title persistence", WorkspaceCommandTitlePersistence),
-            ("workspace command contract rejection", WorkspaceCommandContractRejection)
+            ("workspace command contract rejection", WorkspaceCommandContractRejection),
+            ("workspace command planned work persistence", WorkspaceCommandPlannedWorkPersistence),
+            ("workspace command planned work validation", WorkspaceCommandPlannedWorkValidation),
+            ("workspace planned work snapshot and migration", WorkspacePlannedWorkSnapshotAndMigration)
         };
 
         foreach (var test in tests)
@@ -4051,6 +4054,120 @@ internal static class Program
         Assert(!invalidPayload.Success && invalidPayload.ErrorCode == "invalidPayload",
             "Invalid command payload shape should be rejected.");
         Assert(task.Title != "No change", "Rejected contract must not mutate state.");
+    }
+
+    private static void WorkspaceCommandPlannedWorkPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-06T08:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+
+            var plannedStart = "2026-07-06T09:00:00Z";
+            var setResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "plan-set",
+                "updateTaskPlannedWork",
+                new { taskId = task.Id.ToString("N"), plannedStartAtUtc = plannedStart, plannedDurationMinutes = 60 }),
+                now);
+            Assert(setResult.Success, "Setting a planned block should succeed.");
+
+            var afterSet = store.Load().Tasks.Single(item => item.Id == task.Id);
+            Assert(afterSet.PlannedStartAtUtc == DateTimeOffset.Parse(plannedStart),
+                "Planned start should persist through state.json.");
+            Assert(afterSet.PlannedDurationMinutes == 60,
+                "Planned duration should persist through state.json.");
+
+            var clearResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "plan-clear",
+                "updateTaskPlannedWork",
+                new { taskId = task.Id.ToString("N"), plannedStartAtUtc = (string?)null, plannedDurationMinutes = (int?)null }),
+                now);
+            Assert(clearResult.Success, "Clearing a planned block should succeed.");
+
+            var afterClear = store.Load().Tasks.Single(item => item.Id == task.Id);
+            Assert(afterClear.PlannedStartAtUtc is null && afterClear.PlannedDurationMinutes is null,
+                "Clearing planned work should null both fields in state.json.");
+        });
+    }
+
+    private static void WorkspaceCommandPlannedWorkValidation()
+    {
+        var now = DateTimeOffset.Parse("2026-07-06T08:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var task = state.Tasks[0];
+
+        var missingTask = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "plan-missing",
+            "updateTaskPlannedWork",
+            new { taskId = Guid.NewGuid().ToString("N"), plannedStartAtUtc = "2026-07-06T09:00:00Z", plannedDurationMinutes = 60 }),
+            now);
+        Assert(!missingTask.Success && missingTask.ErrorCode == "taskNotFound",
+            "Planned work on an unknown task should be rejected.");
+
+        var tooShort = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "plan-short",
+            "updateTaskPlannedWork",
+            new { taskId = task.Id.ToString("N"), plannedStartAtUtc = "2026-07-06T09:00:00Z", plannedDurationMinutes = 0 }),
+            now);
+        Assert(!tooShort.Success && tooShort.ErrorCode == "invalidPayload",
+            "Zero duration should be rejected as unreasonable.");
+
+        var tooLong = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "plan-long",
+            "updateTaskPlannedWork",
+            new { taskId = task.Id.ToString("N"), plannedStartAtUtc = "2026-07-06T09:00:00Z", plannedDurationMinutes = 5000 }),
+            now);
+        Assert(!tooLong.Success && tooLong.ErrorCode == "invalidPayload",
+            "Excessive duration should be rejected as unreasonable.");
+
+        var badStart = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "plan-bad-start",
+            "updateTaskPlannedWork",
+            new { taskId = task.Id.ToString("N"), plannedStartAtUtc = "not-a-date", plannedDurationMinutes = 60 }),
+            now);
+        Assert(!badStart.Success && badStart.ErrorCode == "invalidPayload",
+            "Non-ISO planned start should be rejected.");
+
+        Assert(task.PlannedStartAtUtc is null && task.PlannedDurationMinutes is null,
+            "Rejected planned-work commands must not mutate the task.");
+    }
+
+    private static void WorkspacePlannedWorkSnapshotAndMigration()
+    {
+        var now = DateTimeOffset.Parse("2026-07-06T08:00:00Z");
+
+        // Snapshot includes planned fields.
+        var state = AppState.CreateDefault(now);
+        var planned = state.Tasks[0];
+        planned.PlannedStartAtUtc = now.AddHours(2);
+        planned.PlannedDurationMinutes = 45;
+        var snapshot = WorkspaceSnapshotFactory.Create(state, now);
+        var plannedSnapshot = snapshot.Tasks.Single(item => item.Id == planned.Id.ToString("N"));
+        Assert(plannedSnapshot.PlannedStartAtUtc == now.AddHours(2),
+            "Snapshot should project planned start.");
+        Assert(plannedSnapshot.PlannedDurationMinutes == 45,
+            "Snapshot should project planned duration.");
+
+        var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        });
+        Assert(json.Contains("plannedStartAtUtc") && json.Contains("plannedDurationMinutes"),
+            "Serialized snapshot should carry camelCase planned fields.");
+
+        // Old state.json without planned fields deserializes safely.
+        var legacyTask = state.Tasks[1];
+        var legacyJson = "{\"id\":\"" + legacyTask.Id + "\",\"title\":\"Legacy\"}";
+        var deserialized = JsonSerializer.Deserialize<TaskItem>(legacyJson);
+        Assert(deserialized is not null, "Legacy task JSON should deserialize.");
+        Assert(deserialized!.PlannedStartAtUtc is null && deserialized.PlannedDurationMinutes is null,
+            "Missing planned fields in old state must default to null without corruption.");
     }
 
     private static string WorkspaceCommandJson(

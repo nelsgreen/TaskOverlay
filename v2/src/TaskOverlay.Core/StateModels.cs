@@ -122,6 +122,12 @@ public sealed class TaskItem
     public string WaitingFor { get; set; } = string.Empty;
     public bool ReminderActive { get; set; }
     public bool PinToPanel { get; set; }
+
+    // Calendar planning: "I plan to work on this task at this time".
+    // Independent of REMIND/DEADLINE/MEET; does not trigger reminder popups.
+    public DateTimeOffset? PlannedStartAtUtc { get; set; }
+    public int? PlannedDurationMinutes { get; set; }
+
     public Guid? ProjectId { get; set; }
     public Guid? GroupId { get; set; }
     public Guid? ParentTaskId { get; set; }

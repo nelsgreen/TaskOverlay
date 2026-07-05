@@ -418,6 +418,22 @@ export function TaskManager() {
     setCalendarSelectedDate(dateKey)
     setCalendarViewMode("day")
   }
+  // Planned work: persists through the C# bridge when connected; local-only in dev mock mode.
+  const handlePlannedWork = (
+    taskId: string,
+    plannedStartAtUtc: string | null,
+    plannedDurationMinutes: number | null,
+  ) => {
+    if (connected) {
+      bridge.sendCommand({ type: "updateTaskPlannedWork", taskId, plannedStartAtUtc, plannedDurationMinutes })
+      return
+    }
+    if (!bridged) {
+      setMockTasks((prev) => prev.map((t) => (t.id === taskId
+        ? { ...t, plannedStartAtUtc: plannedStartAtUtc ?? undefined, plannedDurationMinutes: plannedDurationMinutes ?? undefined }
+        : t)))
+    }
+  }
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null
 
@@ -623,8 +639,11 @@ export function TaskManager() {
                 selectedProjectIds={selectedProjectIds}
                 selectedTaskId={selectedTaskId}
                 showDone={calendarShowDone}
+                canSchedule={connected || !bridged}
                 onSelectTask={selectTask}
                 onPickDay={handleCalendarPickDay}
+                onSchedule={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
+                onClearPlanned={(taskId) => handlePlannedWork(taskId, null, null)}
               />
             )}
             {tab === "workstreams" && <WorkstreamsPlaceholder />}

@@ -259,6 +259,8 @@ function adaptTask(source: WorkspaceSnapshotContract["tasks"][number]): Task {
     remindAtUtc: source.reminderAtUtc ?? undefined,
     reminderActive: source.reminderActive,
     deadlineAtUtc: source.deadlineAtUtc ?? undefined,
+    plannedStartAtUtc: source.plannedStartAtUtc ?? undefined,
+    plannedDurationMinutes: source.plannedDurationMinutes ?? undefined,
   }
 }
 
