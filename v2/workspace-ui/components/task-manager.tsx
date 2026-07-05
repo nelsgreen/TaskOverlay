@@ -42,6 +42,8 @@ export function TaskManager() {
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string>(() => todayKey())
   const [calendarViewMode, setCalendarViewMode] = useState<"day" | "week">("week")
   const [calendarShowDone, setCalendarShowDone] = useState(false)
+  // Session-only Details panel width (no persistence yet — follow-up).
+  const [detailsWidth, setDetailsWidth] = useState(288)
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
   const [hideDone, setHideDone] = useState(false)
@@ -131,7 +133,13 @@ export function TaskManager() {
       : firstProjectId ? [firstProjectId] : []
     setSelectedProjectIds(repairedProjectIds)
     setSelection((selected) => {
-      if (tab === "calendar" || tab === "workstreams") return null
+      if (tab === "workstreams") return null
+      if (tab === "calendar") {
+        // Keep the clicked task/meet selected across snapshot refreshes.
+        if (selected?.kind === "task" && bridgedData.tasks.some((task) => task.id === selected.id)) return selected
+        if (selected?.kind === "meet" && bridgedData.meetItems.some((meet) => meet.id === selected.id)) return selected
+        return null
+      }
       if (tab === "timeline") {
         const timelineItem = selectedTimelineItemId
           ? bridgedData.timelineItems.find((item) =>
@@ -418,6 +426,20 @@ export function TaskManager() {
     setCalendarSelectedDate(dateKey)
     setCalendarViewMode("day")
   }
+  const startDetailsResize = (event: React.MouseEvent) => {
+    event.preventDefault()
+    const onMove = (e: MouseEvent) => setDetailsWidth(Math.max(260, Math.min(560, window.innerWidth - e.clientX)))
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+    }
+    document.body.style.cursor = "col-resize"
+    document.body.style.userSelect = "none"
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+  }
   // Planned work: persists through the C# bridge when connected; local-only in dev mock mode.
   const handlePlannedWork = (
     taskId: string,
@@ -636,13 +658,16 @@ export function TaskManager() {
                 projects={projects}
                 sections={sections}
                 tasks={tasks}
+                meetItems={meetItems}
                 selectedProjectIds={selectedProjectIds}
                 selectedTaskId={selectedTaskId}
+                selectedMeetId={selectedMeetId}
                 showDone={calendarShowDone}
                 canSchedule={connected || !bridged}
                 onSelectTask={selectTask}
+                onSelectMeet={(meetId) => setSelection({ kind: "meet", id: meetId })}
                 onPickDay={handleCalendarPickDay}
-                onSchedule={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
+                onPlanTask={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
                 onClearPlanned={(taskId) => handlePlannedWork(taskId, null, null)}
               />
             )}
@@ -650,28 +675,37 @@ export function TaskManager() {
           </div>
         </main>
 
-        {selection?.kind === "meet" && selectedMeet ? (
-          <MeetDetailsPanel
-            meet={selectedMeet}
-            projects={projects}
-            tasks={tasks}
-            onApply={handleApplyMeet}
-            onDelete={handleDeleteMeet}
+        <div className="relative hidden shrink-0 xl:flex" style={{ width: detailsWidth }}>
+          <div
+            onMouseDown={startDetailsResize}
+            role="separator"
+            aria-orientation="vertical"
+            title="Drag to resize"
+            className="absolute left-0 top-0 z-20 h-full w-1.5 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40"
           />
-        ) : (
-          <DetailsPanel
-            task={selectedTask}
-            projects={projects}
-            sections={sections}
-            onApply={handleApply}
-            onDelete={handleDelete}
-            editMode={connected ? "connected" : readOnly ? "readonly" : "full"}
-            pendingFields={pendingFields}
-            bridgeError={bridge.error}
-            onBridgeEdit={sendTaskEdit}
-            onClearBridgeError={bridge.clearError}
-          />
-        )}
+          {selection?.kind === "meet" && selectedMeet ? (
+            <MeetDetailsPanel
+              meet={selectedMeet}
+              projects={projects}
+              tasks={tasks}
+              onApply={handleApplyMeet}
+              onDelete={handleDeleteMeet}
+            />
+          ) : (
+            <DetailsPanel
+              task={selectedTask}
+              projects={projects}
+              sections={sections}
+              onApply={handleApply}
+              onDelete={handleDelete}
+              editMode={connected ? "connected" : readOnly ? "readonly" : "full"}
+              pendingFields={pendingFields}
+              bridgeError={bridge.error}
+              onBridgeEdit={sendTaskEdit}
+              onClearBridgeError={bridge.clearError}
+            />
+          )}
+        </div>
       </div>
 
       <ActiveNowStrip
