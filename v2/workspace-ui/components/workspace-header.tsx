@@ -4,6 +4,10 @@ import {
   Bell,
   CalendarClock,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Flag,
   FolderTree,
   Layers,
@@ -14,6 +18,7 @@ import {
 import type { StatusFilterKey, TabKey, Task, TreeFilter } from "@/lib/types"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { cn } from "@/lib/utils"
+import { formatDayLabel, formatWeekLabel, mondayOfWeekKey, todayKey } from "@/lib/calendar-date"
 
 interface Props {
   tab: TabKey
@@ -27,13 +32,20 @@ interface Props {
   statusTasks: Task[]
   search: string
   onSearchChange: (value: string) => void
+  calendarSelectedDate: string
+  calendarViewMode: "day" | "week"
+  onCalendarToday: () => void
+  onCalendarTomorrow: () => void
+  onCalendarShiftDay: (delta: number) => void
+  onCalendarShiftWeek: (delta: number) => void
+  onCalendarViewModeChange: (mode: "day" | "week") => void
 }
 
 const tabs: { key: TabKey; label: string; icon: typeof FolderTree; later?: boolean }[] = [
   { key: "tree", label: "Tree", icon: FolderTree },
   { key: "status", label: "Status", icon: ListChecks },
   { key: "timeline", label: "Timeline", icon: CalendarClock },
-  { key: "calendar", label: "Calendar", icon: CalendarDays, later: true },
+  { key: "calendar", label: "Calendar", icon: CalendarDays },
   { key: "workstreams", label: "Workstreams", icon: Layers, later: true },
 ]
 
@@ -79,6 +91,13 @@ export function WorkspaceHeader({
   statusTasks,
   search,
   onSearchChange,
+  calendarSelectedDate,
+  calendarViewMode,
+  onCalendarToday,
+  onCalendarTomorrow,
+  onCalendarShiftDay,
+  onCalendarShiftWeek,
+  onCalendarViewModeChange,
 }: Props) {
   const searchDisabled = tab === "calendar" || tab === "workstreams"
 
@@ -157,7 +176,17 @@ export function WorkspaceHeader({
           />
         )}
         {tab === "timeline" && <TimelineToolbar />}
-        {tab === "calendar" && <LaterToolbar label="Calendar planning is not enabled in this release" />}
+        {tab === "calendar" && (
+          <CalendarToolbar
+            selectedDate={calendarSelectedDate}
+            viewMode={calendarViewMode}
+            onToday={onCalendarToday}
+            onTomorrow={onCalendarTomorrow}
+            onShiftDay={onCalendarShiftDay}
+            onShiftWeek={onCalendarShiftWeek}
+            onViewModeChange={onCalendarViewModeChange}
+          />
+        )}
         {tab === "workstreams" && <LaterToolbar label="Workstreams are planned for a later release" />}
       </div>
     </header>
@@ -266,6 +295,76 @@ function TimelineToolbar() {
       <span className="flex items-center gap-1 text-status-deadline"><Flag className="size-3" />DEADLINE</span>
       <span className="hidden text-muted-foreground lg:inline">Time view over current attention items</span>
     </div>
+  )
+}
+
+function CalendarToolbar({
+  selectedDate,
+  viewMode,
+  onToday,
+  onTomorrow,
+  onShiftDay,
+  onShiftWeek,
+  onViewModeChange,
+}: {
+  selectedDate: string
+  viewMode: "day" | "week"
+  onToday: () => void
+  onTomorrow: () => void
+  onShiftDay: (delta: number) => void
+  onShiftWeek: (delta: number) => void
+  onViewModeChange: (mode: "day" | "week") => void
+}) {
+  const isToday = selectedDate === todayKey()
+  const label = viewMode === "week"
+    ? formatWeekLabel(mondayOfWeekKey(selectedDate))
+    : formatDayLabel(selectedDate)
+
+  return (
+    <>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onToday}
+          className={cn(toolbar.segmentItem(isToday), "border border-border")}
+        >
+          Today
+        </button>
+        <button
+          type="button"
+          onClick={onTomorrow}
+          className={cn(toolbar.segmentItem(false), "border border-border")}
+        >
+          Tomorrow
+        </button>
+      </div>
+
+      <div className={toolbar.segment} role="group" aria-label="Shift by week">
+        <button type="button" onClick={() => onShiftWeek(-1)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Previous week">
+          <ChevronsLeft className="size-3.5" />
+        </button>
+        <button type="button" onClick={() => onShiftDay(-1)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Previous day">
+          <ChevronLeft className="size-3.5" />
+        </button>
+        <button type="button" onClick={() => onShiftDay(1)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Next day">
+          <ChevronRight className="size-3.5" />
+        </button>
+        <button type="button" onClick={() => onShiftWeek(1)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Next week">
+          <ChevronsRight className="size-3.5" />
+        </button>
+      </div>
+
+      <span className="text-[11px] font-medium text-foreground">{label}</span>
+
+      <div className={cn(toolbar.segment, "ml-auto")} role="group" aria-label="Calendar view mode">
+        <button type="button" onClick={() => onViewModeChange("day")} className={toolbar.segmentItem(viewMode === "day")}>
+          Day
+        </button>
+        <button type="button" onClick={() => onViewModeChange("week")} className={toolbar.segmentItem(viewMode === "week")}>
+          Week
+        </button>
+      </div>
+    </>
   )
 }
 

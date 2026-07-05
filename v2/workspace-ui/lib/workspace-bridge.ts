@@ -16,6 +16,7 @@ import type {
   WorkspaceSnapshotContract,
   WorkspaceTaskCommand,
 } from "@/lib/types"
+import { dateKeyFromIso } from "@/lib/calendar-date"
 
 interface WebViewMessageEvent {
   data: unknown
@@ -273,6 +274,7 @@ function adaptTimelineItem(source: WorkspaceSnapshotContract["timelineItems"][nu
     linkedTaskId: source.linkedTaskId,
     time: formatTimelineTime(occurrence),
     bucket: timelineBucket(occurrence),
+    dateKey: dateKeyFromIso(source.occursAtUtc) ?? undefined,
   }
 }
 

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { CalendarDays, FolderTree } from "lucide-react"
+import { FolderTree } from "lucide-react"
 import type { MeetItem, Status, StatusFilterKey, TabKey, Task, TimelineItem, TreeFilter, WorkspaceTaskCommand } from "@/lib/types"
 import {
   initialMeetItems,
@@ -13,11 +13,13 @@ import {
 import { cn } from "@/lib/utils"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
 import { matchesStatusFilter } from "@/lib/status-filter"
+import { addDaysKey, todayKey } from "@/lib/calendar-date"
 import { WorkspaceHeader } from "./workspace-header"
 import { ProjectScopeBar } from "./project-scope-bar"
 import { TreeView } from "./tree-view"
 import { StatusBoard } from "./status-board"
 import { TimelineView } from "./timeline-view"
+import { CalendarView } from "./calendar-view"
 import { DetailsPanel } from "./details-panel"
 import { MeetDetailsPanel } from "./meet-details-panel"
 import { ActiveNowStrip } from "./active-now-strip"
@@ -36,6 +38,9 @@ export function TaskManager() {
   const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<string | null>(null)
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKey>("tree")
+  // Initialized once on mount; only the Today button resets it back.
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState<string>(() => todayKey())
+  const [calendarViewMode, setCalendarViewMode] = useState<"day" | "week">("week")
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
   const [hideDone, setHideDone] = useState(false)
@@ -403,6 +408,13 @@ export function TaskManager() {
     }
   }
 
+  const handleCalendarToday = () => setCalendarSelectedDate(todayKey())
+  const handleCalendarTomorrow = () => setCalendarSelectedDate(addDaysKey(todayKey(), 1))
+  const handleCalendarShiftDay = (delta: number) =>
+    setCalendarSelectedDate((current) => addDaysKey(current, delta))
+  const handleCalendarShiftWeek = (delta: number) =>
+    setCalendarSelectedDate((current) => addDaysKey(current, delta * 7))
+
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null
 
   const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (id: string) =>
@@ -505,6 +517,13 @@ export function TaskManager() {
             statusTasks={scopedTasks}
             search={search}
             onSearchChange={changeSearch}
+            calendarSelectedDate={calendarSelectedDate}
+            calendarViewMode={calendarViewMode}
+            onCalendarToday={handleCalendarToday}
+            onCalendarTomorrow={handleCalendarTomorrow}
+            onCalendarShiftDay={handleCalendarShiftDay}
+            onCalendarShiftWeek={handleCalendarShiftWeek}
+            onCalendarViewModeChange={setCalendarViewMode}
           />
           <ProjectScopeBar
             projects={projects}
@@ -589,7 +608,17 @@ export function TaskManager() {
                 search={search}
               />
             )}
-            {tab === "calendar" && <CalendarPlaceholder />}
+            {tab === "calendar" && (
+              <CalendarView
+                viewMode={calendarViewMode}
+                selectedDate={calendarSelectedDate}
+                projectIds={selectedProjectIds}
+                projects={projects}
+                items={timelineItems}
+                selectedTimelineItemId={selectedTimelineItemId}
+                onSelectTask={selectTimelineTask}
+              />
+            )}
             {tab === "workstreams" && <WorkstreamsPlaceholder />}
           </div>
         </main>
@@ -626,25 +655,6 @@ export function TaskManager() {
         onSelectTask={selectTask}
         taskIds={activeNowTaskIds}
       />
-    </div>
-  )
-}
-
-function CalendarPlaceholder() {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-accent">
-        <CalendarDays className="size-5 text-muted-foreground" />
-      </div>
-      <div>
-        <p className="text-sm font-medium text-foreground">Calendar</p>
-        <p className="mt-1 max-w-sm text-pretty text-xs text-muted-foreground">
-          Calendar planning is not enabled in the current Workspace. Timeline remains the time-based attention view.
-        </p>
-      </div>
-      <span className="rounded bg-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        Later
-      </span>
     </div>
   )
 }
