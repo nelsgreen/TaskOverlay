@@ -6,19 +6,18 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   Flag,
   FolderTree,
   Layers,
   ListChecks,
+  Plus,
   Search,
   Video,
 } from "lucide-react"
 import type { StatusFilterKey, TabKey, Task, TreeFilter } from "@/lib/types"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { cn } from "@/lib/utils"
-import { formatDayLabel, formatWeekLabel, mondayOfWeekKey, todayKey } from "@/lib/calendar-date"
+import { addDaysKey, formatWeekLabel, mondayOfWeekKey, parseDateKey, todayKey } from "@/lib/calendar-date"
 
 interface Props {
   tab: TabKey
@@ -34,10 +33,11 @@ interface Props {
   onSearchChange: (value: string) => void
   calendarSelectedDate: string
   calendarViewMode: "day" | "week"
+  calendarShowDone: boolean
   onCalendarToday: () => void
   onCalendarTomorrow: () => void
-  onCalendarShiftDay: (delta: number) => void
-  onCalendarShiftWeek: (delta: number) => void
+  onCalendarStep: (dir: number) => void
+  onCalendarShowDoneChange: (showDone: boolean) => void
   onCalendarViewModeChange: (mode: "day" | "week") => void
 }
 
@@ -93,10 +93,11 @@ export function WorkspaceHeader({
   onSearchChange,
   calendarSelectedDate,
   calendarViewMode,
+  calendarShowDone,
   onCalendarToday,
   onCalendarTomorrow,
-  onCalendarShiftDay,
-  onCalendarShiftWeek,
+  onCalendarStep,
+  onCalendarShowDoneChange,
   onCalendarViewModeChange,
 }: Props) {
   const searchDisabled = tab === "calendar" || tab === "workstreams"
@@ -180,10 +181,11 @@ export function WorkspaceHeader({
           <CalendarToolbar
             selectedDate={calendarSelectedDate}
             viewMode={calendarViewMode}
+            showDone={calendarShowDone}
             onToday={onCalendarToday}
             onTomorrow={onCalendarTomorrow}
-            onShiftDay={onCalendarShiftDay}
-            onShiftWeek={onCalendarShiftWeek}
+            onStep={onCalendarStep}
+            onShowDoneChange={onCalendarShowDoneChange}
             onViewModeChange={onCalendarViewModeChange}
           />
         )}
@@ -298,71 +300,121 @@ function TimelineToolbar() {
   )
 }
 
+function formatDayAnchor(selectedDate: string): string {
+  const today = todayKey()
+  if (selectedDate === today) return "Today"
+  if (selectedDate === addDaysKey(today, 1)) return "Tomorrow"
+  return parseDateKey(selectedDate).toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  })
+}
+
 function CalendarToolbar({
   selectedDate,
   viewMode,
+  showDone,
   onToday,
   onTomorrow,
-  onShiftDay,
-  onShiftWeek,
+  onStep,
+  onShowDoneChange,
   onViewModeChange,
 }: {
   selectedDate: string
   viewMode: "day" | "week"
+  showDone: boolean
   onToday: () => void
   onTomorrow: () => void
-  onShiftDay: (delta: number) => void
-  onShiftWeek: (delta: number) => void
+  onStep: (dir: number) => void
+  onShowDoneChange: (showDone: boolean) => void
   onViewModeChange: (mode: "day" | "week") => void
 }) {
-  const isToday = selectedDate === todayKey()
+  const today = todayKey()
+  const isToday = selectedDate === today && viewMode === "day"
+  const isTomorrow = selectedDate === addDaysKey(today, 1) && viewMode === "day"
   const label = viewMode === "week"
     ? formatWeekLabel(mondayOfWeekKey(selectedDate))
-    : formatDayLabel(selectedDate)
+    : formatDayAnchor(selectedDate)
+
+  const ghost = (active: boolean) =>
+    cn(
+      "h-6 rounded-md border px-2.5 text-[11px] font-medium transition-colors",
+      active
+        ? "border-primary/40 bg-primary/10 text-primary"
+        : "border-border bg-card text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+    )
 
   return (
     <>
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onToday}
-          className={cn(toolbar.segmentItem(isToday), "border border-border")}
-        >
-          Today
-        </button>
-        <button
-          type="button"
-          onClick={onTomorrow}
-          className={cn(toolbar.segmentItem(false), "border border-border")}
-        >
-          Tomorrow
-        </button>
-      </div>
-
-      <div className={toolbar.segment} role="group" aria-label="Shift by week">
-        <button type="button" onClick={() => onShiftWeek(-1)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Previous week">
-          <ChevronsLeft className="size-3.5" />
-        </button>
-        <button type="button" onClick={() => onShiftDay(-1)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Previous day">
-          <ChevronLeft className="size-3.5" />
-        </button>
-        <button type="button" onClick={() => onShiftDay(1)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Next day">
-          <ChevronRight className="size-3.5" />
-        </button>
-        <button type="button" onClick={() => onShiftWeek(1)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" aria-label="Next week">
-          <ChevronsRight className="size-3.5" />
-        </button>
-      </div>
-
-      <span className="text-[11px] font-medium text-foreground">{label}</span>
-
-      <div className={cn(toolbar.segment, "ml-auto")} role="group" aria-label="Calendar view mode">
+      {/* View mode */}
+      <div className={toolbar.segment} role="group" aria-label="Calendar view mode">
         <button type="button" onClick={() => onViewModeChange("day")} className={toolbar.segmentItem(viewMode === "day")}>
           Day
         </button>
         <button type="button" onClick={() => onViewModeChange("week")} className={toolbar.segmentItem(viewMode === "week")}>
           Week
         </button>
+      </div>
+
+      {/* Quick jumps */}
+      <button type="button" onClick={onToday} className={ghost(isToday)}>Today</button>
+      <button type="button" onClick={onTomorrow} className={ghost(isTomorrow)}>Tomorrow</button>
+
+      {/* Prev / label / next — steps by day in Day view, by week in Week view */}
+      <div className="flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => onStep(-1)}
+          aria-label={viewMode === "week" ? "Previous week" : "Previous day"}
+          className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronLeft className="size-3.5" />
+        </button>
+        <span className="flex h-6 min-w-32 items-center justify-center gap-1.5 rounded-md border border-border bg-card px-2 text-[11px] font-medium text-foreground tabular-nums">
+          <CalendarDays className="size-3.5 text-muted-foreground" />
+          {label}
+        </span>
+        <button
+          type="button"
+          onClick={() => onStep(1)}
+          aria-label={viewMode === "week" ? "Next week" : "Next day"}
+          className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="size-3.5" />
+        </button>
+      </div>
+
+      {/* Right: Show done toggle + reserved MEET token */}
+      <div className="ml-auto flex items-center gap-3">
+        <label className="flex cursor-pointer items-center gap-1.5 select-none">
+          <span className="text-[11px] text-muted-foreground">Show done</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showDone}
+            onClick={() => onShowDoneChange(!showDone)}
+            className={cn(
+              "relative inline-flex h-4 w-7 rounded-full border-2 border-transparent transition-colors",
+              showDone ? "bg-primary" : "bg-muted",
+            )}
+          >
+            <span
+              className={cn(
+                "pointer-events-none block h-3 w-3 rounded-full bg-white shadow-sm transition-transform",
+                showDone ? "translate-x-3" : "translate-x-0",
+              )}
+            />
+          </button>
+        </label>
+        <span
+          title="MEET scheduling is not available in this build yet"
+          className="flex h-6 cursor-not-allowed items-center gap-1.5 rounded-md border border-border bg-card/50 px-2.5 text-[11px] font-medium text-muted-foreground/60"
+        >
+          <Plus className="size-3.5" />
+          Meeting
+          <span className="rounded bg-accent px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide">Later</span>
+        </span>
       </div>
     </>
   )

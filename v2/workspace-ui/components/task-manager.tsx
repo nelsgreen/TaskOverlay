@@ -41,6 +41,7 @@ export function TaskManager() {
   // Initialized once on mount; only the Today button resets it back.
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string>(() => todayKey())
   const [calendarViewMode, setCalendarViewMode] = useState<"day" | "week">("week")
+  const [calendarShowDone, setCalendarShowDone] = useState(false)
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
   const [hideDone, setHideDone] = useState(false)
@@ -410,10 +411,13 @@ export function TaskManager() {
 
   const handleCalendarToday = () => setCalendarSelectedDate(todayKey())
   const handleCalendarTomorrow = () => setCalendarSelectedDate(addDaysKey(todayKey(), 1))
-  const handleCalendarShiftDay = (delta: number) =>
-    setCalendarSelectedDate((current) => addDaysKey(current, delta))
-  const handleCalendarShiftWeek = (delta: number) =>
-    setCalendarSelectedDate((current) => addDaysKey(current, delta * 7))
+  // Single prev/next: steps by one day in Day view, by seven days in Week view.
+  const handleCalendarStep = (dir: number) =>
+    setCalendarSelectedDate((current) => addDaysKey(current, calendarViewMode === "week" ? dir * 7 : dir))
+  const handleCalendarPickDay = (dateKey: string) => {
+    setCalendarSelectedDate(dateKey)
+    setCalendarViewMode("day")
+  }
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null
 
@@ -519,10 +523,11 @@ export function TaskManager() {
             onSearchChange={changeSearch}
             calendarSelectedDate={calendarSelectedDate}
             calendarViewMode={calendarViewMode}
+            calendarShowDone={calendarShowDone}
             onCalendarToday={handleCalendarToday}
             onCalendarTomorrow={handleCalendarTomorrow}
-            onCalendarShiftDay={handleCalendarShiftDay}
-            onCalendarShiftWeek={handleCalendarShiftWeek}
+            onCalendarStep={handleCalendarStep}
+            onCalendarShowDoneChange={setCalendarShowDone}
             onCalendarViewModeChange={setCalendarViewMode}
           />
           <ProjectScopeBar
@@ -612,11 +617,14 @@ export function TaskManager() {
               <CalendarView
                 viewMode={calendarViewMode}
                 selectedDate={calendarSelectedDate}
-                projectIds={selectedProjectIds}
                 projects={projects}
-                items={timelineItems}
-                selectedTimelineItemId={selectedTimelineItemId}
-                onSelectTask={selectTimelineTask}
+                sections={sections}
+                tasks={tasks}
+                selectedProjectIds={selectedProjectIds}
+                selectedTaskId={selectedTaskId}
+                showDone={calendarShowDone}
+                onSelectTask={selectTask}
+                onPickDay={handleCalendarPickDay}
               />
             )}
             {tab === "workstreams" && <WorkstreamsPlaceholder />}
