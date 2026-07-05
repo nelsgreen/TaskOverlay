@@ -106,6 +106,7 @@ interface TimelineViewProps {
   onSelectMeet?: (timelineItemId: string, meetId: string) => void
   /** called with the timeline item and linked task ids when user clicks a REMIND or DEADLINE row */
   onSelectTask?: (timelineItemId: string, taskId: string) => void
+  search?: string
 }
 
 export function TimelineView({
@@ -115,6 +116,7 @@ export function TimelineView({
   selectedTimelineItemId,
   onSelectMeet,
   onSelectTask,
+  search = "",
 }: TimelineViewProps) {
   const [nowMins, setNowMins] = useState<number>(getNowMinutes)
 
@@ -129,10 +131,17 @@ export function TimelineView({
   const nowPct = nowPos === "before" ? 0 : nowPos === "after" ? 100 : toPct(nowMins)
 
   // Combined time view across the selected projects
-  const scopedItems =
+  const projectItems =
     projectIds && projectIds.length > 0
       ? items.filter((i) => !i.projectId || projectIds.includes(i.projectId))
       : items
+  const query = search.trim().toLowerCase()
+  const scopedItems = query
+    ? projectItems.filter((item) =>
+        item.title.toLowerCase().includes(query) ||
+        item.projectPath.toLowerCase().includes(query) ||
+        (item.meta?.toLowerCase().includes(query) ?? false))
+    : projectItems
 
   // Collect today scrubber dots from items that have parseable times
   const todayItems = scopedItems.filter((i) => i.bucket === "today")
@@ -223,11 +232,25 @@ export function TimelineView({
       </div>
 
       {/* Grouped list */}
-      <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
-        {buckets.map((bucket) => {
-          const items = scopedItems.filter((i) => i.bucket === bucket.key)
-          return (
-            <section key={bucket.key}>
+      {scopedItems.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center px-5 py-8 text-center">
+          <div>
+            <p className="text-sm font-medium text-foreground">
+              {query ? "No timeline items match this search" : "No timeline items in this project scope"}
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {query
+                ? "Clear or change the search to see other attention items."
+                : "REMIND, DEADLINE, and available MEET items will appear here."}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          {buckets.map((bucket) => {
+            const items = scopedItems.filter((i) => i.bucket === bucket.key)
+            return (
+              <section key={bucket.key}>
               <div className="mb-2 flex items-center gap-2">
                 <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                   {bucket.label}
@@ -266,10 +289,11 @@ export function TimelineView({
                   })}
                 </div>
               )}
-            </section>
-          )
-        })}
-      </div>
+              </section>
+            )
+          })}
+        </div>
+      )}
 
       {/* Footer */}
       <div className="shrink-0 border-t border-border px-5 py-2.5 text-center text-[11px] text-muted-foreground">

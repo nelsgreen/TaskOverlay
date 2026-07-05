@@ -13,10 +13,13 @@ interface Props {
   selectedTaskId: string | null
   onSelectTask: (id: string) => void
   filter: StatusFilterKey
+  hideDone: boolean
 }
 
-export function StatusBoard({ tasks, projects, sections, selectedTaskId, onSelectTask, filter }: Props) {
-  const visible = tasks.filter((task) => matchesStatusFilter(task, filter))
+export function StatusBoard({ tasks, projects, sections, selectedTaskId, onSelectTask, filter, hideDone }: Props) {
+  const visible = tasks.filter(
+    (task) => matchesStatusFilter(task, filter) && (!hideDone || task.status !== "DONE"),
+  )
 
   const pathFor = (t: Task) => {
     const p = projects.find((x) => x.id === t.projectId)

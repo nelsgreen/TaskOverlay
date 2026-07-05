@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { CalendarDays, FolderTree } from "lucide-react"
-import type { MeetItem, Status, StatusFilterKey, TabKey, Task, TreeFilter, WorkspaceTaskCommand } from "@/lib/types"
+import type { MeetItem, Status, StatusFilterKey, TabKey, Task, TimelineItem, TreeFilter, WorkspaceTaskCommand } from "@/lib/types"
 import {
   initialMeetItems,
   initialTasks,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/mock-data"
 import { cn } from "@/lib/utils"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
+import { matchesStatusFilter } from "@/lib/status-filter"
 import { WorkspaceHeader } from "./workspace-header"
 import { ProjectScopeBar } from "./project-scope-bar"
 import { TreeView } from "./tree-view"
@@ -37,6 +38,7 @@ export function TaskManager() {
   const [tab, setTab] = useState<TabKey>("tree")
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
+  const [hideDone, setHideDone] = useState(false)
   const [search, setSearch] = useState("")
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
@@ -70,13 +72,30 @@ export function TaskManager() {
       const restoredProjectIds = selectedProjects.length > 0
         ? selectedProjects
         : fallbackProjectId ? [fallbackProjectId] : []
-      const restoredTask = context.selectedTaskId &&
-        bridgedData.tasks.some((task) => task.id === context.selectedTaskId)
-        ? context.selectedTaskId
-        : bridgedData.tasks.find((task) => restoredProjectIds.includes(task.projectId))?.id ?? null
-      const restoredTimelineItem = context.selectedTimelineItemId &&
-        bridgedData.timelineItems.some((item) => item.id === context.selectedTimelineItemId)
-        ? context.selectedTimelineItemId
+      const contextTask = context.selectedTaskId
+        ? bridgedData.tasks.find((task) => task.id === context.selectedTaskId)
+        : null
+      const restoredTimeline = context.selectedTimelineItemId
+        ? bridgedData.timelineItems.find((item) =>
+            item.id === context.selectedTimelineItemId &&
+            (!item.projectId || restoredProjectIds.includes(item.projectId)))
+        : null
+      const restoredTask = context.activeTab === "calendar" || context.activeTab === "workstreams"
+        ? null
+        : context.activeTab === "timeline"
+          ? restoredTimeline?.linkedTaskId &&
+            bridgedData.tasks.some((task) => task.id === restoredTimeline.linkedTaskId)
+              ? restoredTimeline.linkedTaskId
+              : null
+          : context.activeTab === "tree"
+            ? contextTask?.projectId === restoredProjectIds[0]
+              ? contextTask.id
+              : bridgedData.tasks.find((task) => task.projectId === restoredProjectIds[0])?.id ?? null
+            : contextTask && restoredProjectIds.includes(contextTask.projectId)
+              ? contextTask.id
+              : bridgedData.tasks.find((task) => restoredProjectIds.includes(task.projectId))?.id ?? null
+      const restoredTimelineItem = context.activeTab === "timeline" && restoredTask
+        ? restoredTimeline?.id ?? null
         : null
 
       setSelectedProjectIds(restoredProjectIds)
@@ -99,20 +118,42 @@ export function TaskManager() {
     }
 
     const firstProjectId = bridgedData.projects[0]?.id
-    setSelectedProjectIds((selected) => {
-      const valid = selected.filter((id) =>
-        bridgedData.projects.some((project) => project.id === id))
-      return valid.length > 0 ? valid : firstProjectId ? [firstProjectId] : []
-    })
+    const validProjectIds = selectedProjectIds.filter((id) =>
+      bridgedData.projects.some((project) => project.id === id))
+    const repairedProjectIds = validProjectIds.length > 0
+      ? validProjectIds
+      : firstProjectId ? [firstProjectId] : []
+    setSelectedProjectIds(repairedProjectIds)
     setSelection((selected) => {
-      if (selected?.kind === "task" &&
-          bridgedData.tasks.some((task) => task.id === selected.id)) return selected
-      const fallbackTaskId = bridgedData.tasks.find((task) =>
-        selectedProjectIds.includes(task.projectId))?.id
+      if (tab === "calendar" || tab === "workstreams") return null
+      if (tab === "timeline") {
+        const timelineItem = selectedTimelineItemId
+          ? bridgedData.timelineItems.find((item) =>
+              item.id === selectedTimelineItemId &&
+              (!item.projectId || repairedProjectIds.includes(item.projectId)))
+          : null
+        if (selected?.kind === "task" && timelineItem?.linkedTaskId === selected.id &&
+            bridgedData.tasks.some((task) => task.id === selected.id)) return selected
+        if (selected?.kind === "meet" && timelineItem?.linkedMeetId === selected.id &&
+            bridgedData.meetItems.some((meet) => meet.id === selected.id)) return selected
+        return null
+      }
+      const targetProjectIds = tab === "tree" ? repairedProjectIds.slice(0, 1) : repairedProjectIds
+      const query = search.trim().toLowerCase()
+      const candidates = bridgedData.tasks.filter((task) =>
+        targetProjectIds.includes(task.projectId) &&
+        (tab !== "status" || (
+          matchesStatusFilter(task, statusFilter) &&
+          (!hideDone || task.status !== "DONE") &&
+          (!query || task.title.toLowerCase().includes(query))
+        )))
+      if (selected?.kind === "task" && candidates.some((task) => task.id === selected.id)) return selected
+      const fallbackTaskId = candidates[0]?.id
       return fallbackTaskId ? { kind: "task", id: fallbackTaskId } : null
     })
     setSelectedTimelineItemId((selected) =>
-      selected && bridgedData.timelineItems.some((item) => item.id === selected)
+      tab === "timeline" && selected && bridgedData.timelineItems.some((item) =>
+        item.id === selected && (!item.projectId || repairedProjectIds.includes(item.projectId)))
         ? selected
         : null)
   }, [bridge.status, bridge.data])
@@ -149,26 +190,32 @@ export function TaskManager() {
   const selectedTaskId = selection?.kind === "task" ? selection.id : null
   const selectedMeetId = selection?.kind === "meet" ? selection.id : null
   const selectTask = (id: string) => {
+    const task = tasks.find((candidate) => candidate.id === id)
+    if (task && (
+      !selectedProjectIds.includes(task.projectId) ||
+      (tab === "tree" && selectedProjectIds[0] !== task.projectId)
+    )) {
+      setSelectedProjectIds([task.projectId])
+    }
     setSelection({ kind: "task", id })
     setSelectedTimelineItemId(null)
   }
-  const selectMeet = (id: string) => {
-    setSelection({ kind: "meet", id })
-    setSelectedTimelineItemId(null)
-  }
   const selectTimelineTask = (timelineItemId: string, taskId: string) => {
+    const task = tasks.find((candidate) => candidate.id === taskId)
+    if (task && !selectedProjectIds.includes(task.projectId)) {
+      setSelectedProjectIds([task.projectId])
+    }
     setSelectedTimelineItemId(timelineItemId)
     setSelection({ kind: "task", id: taskId })
   }
   const selectTimelineMeet = (timelineItemId: string, meetId: string) => {
+    const meet = meetItems.find((candidate) => candidate.id === meetId)
+    if (meet && !selectedProjectIds.includes(meet.projectId)) {
+      setSelectedProjectIds([meet.projectId])
+    }
     setSelectedTimelineItemId(timelineItemId)
     setSelection({ kind: "meet", id: meetId })
   }
-  const changeTab = (nextTab: TabKey) => {
-    if (nextTab === "status" && tab !== "status") setStatusFilter("all")
-    setTab(nextTab)
-  }
-
   // The single project used for the Tree tab (Tree is single-project by design)
   const treeProjectId = selectedProjectIds[0] ?? projects[0].id
   const treeProject = projects.find((p) => p.id === treeProjectId) ?? projects[0]
@@ -178,35 +225,9 @@ export function TaskManager() {
     [sections, treeProjectId],
   )
 
-  // --- Project selection handlers ---
-  const selectOnlyProject = (id: string) => {
-    setSelectedProjectIds([id])
-    if (selection?.kind !== "task" ||
-        tasks.find((task) => task.id === selection.id)?.projectId !== id) {
-      const taskId = tasks.find((task) => task.projectId === id)?.id
-      setSelection(taskId ? { kind: "task", id: taskId } : null)
-      setSelectedTimelineItemId(null)
-    }
-  }
-  const toggleProject = (id: string) => {
-    const next = selectedProjectIds.includes(id)
-      ? selectedProjectIds.length > 1
-        ? selectedProjectIds.filter((projectId) => projectId !== id)
-        : selectedProjectIds
-      : [...selectedProjectIds, id]
-    setSelectedProjectIds(next)
-    if (selection?.kind === "task" &&
-        !next.includes(tasks.find((task) => task.id === selection.id)?.projectId ?? "")) {
-      const taskId = tasks.find((task) => next.includes(task.projectId))?.id
-      setSelection(taskId ? { kind: "task", id: taskId } : null)
-      setSelectedTimelineItemId(null)
-    }
-  }
-  const selectAllProjects = () => setSelectedProjectIds(projects.map((p) => p.id))
-
-  const applySearch = (list: Task[], keepAncestors: boolean) => {
-    if (!search.trim()) return list
-    const q = search.trim().toLowerCase()
+  const applySearch = (list: Task[], keepAncestors: boolean, query = search) => {
+    if (!query.trim()) return list
+    const q = query.trim().toLowerCase()
     if (!keepAncestors) return list.filter((t) => t.title.toLowerCase().includes(q))
     const matchIds = new Set(list.filter((t) => t.title.toLowerCase().includes(q)).map((t) => t.id))
     const byId = new Map(list.map((t) => [t.id, t]))
@@ -231,6 +252,156 @@ export function TaskManager() {
     () => applySearch(tasks.filter((t) => selectedProjectIds.includes(t.projectId)), false),
     [tasks, selectedProjectIds, search],
   )
+
+  const treeCandidatesFor = (
+    scopeIds: string[],
+    nextFilter = filter,
+    query = search,
+  ): Task[] => {
+    const candidates = applySearch(
+      tasks.filter((task) => task.projectId === scopeIds[0]),
+      true,
+      query,
+    )
+    if (nextFilter === "all") return candidates
+
+    const visibleIds = new Set<string>()
+    const byId = new Map(candidates.map((task) => [task.id, task]))
+    candidates.forEach((task) => {
+      if (task.status !== "FOCUS" && task.status !== "WAIT") return
+      visibleIds.add(task.id)
+      if (nextFilter !== "active-path") return
+      let parent = task.parentId ? byId.get(task.parentId) : undefined
+      while (parent) {
+        visibleIds.add(parent.id)
+        parent = parent.parentId ? byId.get(parent.parentId) : undefined
+      }
+    })
+    return candidates.filter((task) => visibleIds.has(task.id))
+  }
+
+  const statusCandidatesFor = (
+    scopeIds: string[],
+    nextFilter = statusFilter,
+    nextHideDone = hideDone,
+    query = search,
+  ): Task[] =>
+    applySearch(
+      tasks.filter((task) => scopeIds.includes(task.projectId)),
+      false,
+      query,
+    ).filter(
+      (task) => matchesStatusFilter(task, nextFilter) && (!nextHideDone || task.status !== "DONE"),
+    )
+
+  const reconcileTaskSelection = (candidates: Task[]) => {
+    const currentId = selection?.kind === "task" ? selection.id : null
+    const nextId = currentId && candidates.some((task) => task.id === currentId)
+      ? currentId
+      : candidates[0]?.id ?? null
+    setSelection(nextId ? { kind: "task", id: nextId } : null)
+    setSelectedTimelineItemId(null)
+  }
+
+  const clearDetailsSelection = () => {
+    setSelection(null)
+    setSelectedTimelineItemId(null)
+  }
+
+  const timelineItemMatchesQuery = (item: TimelineItem, query: string) => {
+    const normalized = query.trim().toLowerCase()
+    return !normalized ||
+      item.title.toLowerCase().includes(normalized) ||
+      item.projectPath.toLowerCase().includes(normalized) ||
+      (item.meta?.toLowerCase().includes(normalized) ?? false)
+  }
+
+  const reconcileScope = (scopeIds: string[]) => {
+    setSelectedProjectIds(scopeIds)
+    if (tab === "tree") {
+      reconcileTaskSelection(treeCandidatesFor(scopeIds))
+      return
+    }
+    if (tab === "status") {
+      reconcileTaskSelection(statusCandidatesFor(scopeIds))
+      return
+    }
+    if (tab === "timeline") {
+      const item = selectedTimelineItemId
+        ? timelineItems.find((timelineItem) => timelineItem.id === selectedTimelineItemId)
+        : null
+      const itemInScope = item &&
+        (!item.projectId || scopeIds.includes(item.projectId)) &&
+        timelineItemMatchesQuery(item, search)
+      const selectionMatches = item && (
+        selection?.kind === "task"
+          ? item.linkedTaskId === selection.id
+          : selection?.kind === "meet" && item.linkedMeetId === selection.id
+      )
+      if (!itemInScope || !selectionMatches) clearDetailsSelection()
+      return
+    }
+    clearDetailsSelection()
+  }
+
+  const selectOnlyProject = (id: string) => reconcileScope([id])
+  const toggleProject = (id: string) => {
+    const next = selectedProjectIds.includes(id)
+      ? selectedProjectIds.length > 1
+        ? selectedProjectIds.filter((projectId) => projectId !== id)
+        : selectedProjectIds
+      : [...selectedProjectIds, id]
+    reconcileScope(next)
+  }
+  const selectAllProjects = () => reconcileScope(projects.map((project) => project.id))
+
+  const changeTab = (nextTab: TabKey) => {
+    if (nextTab === tab) return
+    if (nextTab === "tree") {
+      reconcileTaskSelection(treeCandidatesFor(selectedProjectIds))
+    } else if (nextTab === "status") {
+      setStatusFilter("all")
+      reconcileTaskSelection(statusCandidatesFor(selectedProjectIds, "all"))
+    } else {
+      clearDetailsSelection()
+    }
+    setTab(nextTab)
+  }
+
+  const changeTreeFilter = (nextFilter: TreeFilter) => {
+    setFilter(nextFilter)
+    if (tab === "tree") reconcileTaskSelection(treeCandidatesFor(selectedProjectIds, nextFilter))
+  }
+
+  const changeStatusFilter = (nextFilter: StatusFilterKey) => {
+    const nextHideDone = nextFilter === "DONE" ? false : hideDone
+    setStatusFilter(nextFilter)
+    if (nextFilter === "DONE") setHideDone(false)
+    if (tab === "status") {
+      reconcileTaskSelection(statusCandidatesFor(selectedProjectIds, nextFilter, nextHideDone))
+    }
+  }
+
+  const changeHideDone = (nextHideDone: boolean) => {
+    const nextFilter = nextHideDone && statusFilter === "DONE" ? "all" : statusFilter
+    setHideDone(nextHideDone)
+    if (nextFilter !== statusFilter) setStatusFilter(nextFilter)
+    if (tab === "status") {
+      reconcileTaskSelection(statusCandidatesFor(selectedProjectIds, nextFilter, nextHideDone))
+    }
+  }
+
+  const changeSearch = (query: string) => {
+    setSearch(query)
+    if (tab === "tree") {
+      reconcileTaskSelection(treeCandidatesFor(selectedProjectIds, filter, query))
+    } else if (tab === "status") {
+      reconcileTaskSelection(statusCandidatesFor(selectedProjectIds, statusFilter, hideDone, query))
+    } else if (tab === "timeline" && selectedTimelineItemId) {
+      const item = timelineItems.find((timelineItem) => timelineItem.id === selectedTimelineItemId)
+      if (!item || !timelineItemMatchesQuery(item, query)) clearDetailsSelection()
+    }
+  }
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null
 
@@ -273,23 +444,7 @@ export function TaskManager() {
     }
   }
 
-  const handleNewMeet = () => {
-    if (bridged) return
-    const defaultProjectId = selectedProjectIds.length === 1 ? selectedProjectIds[0] : projects[0].id
-    const today = new Date().toISOString().slice(0, 10)
-    const newMeet: MeetItem = {
-      id: `m-${Date.now()}`,
-      projectId: defaultProjectId,
-      title: "New meeting",
-      date: today,
-      startTime: "09:00",
-      duration: "30m",
-    }
-    setMockMeetItems((prev) => [...prev, newMeet])
-    selectMeet(newMeet.id)
-  }
-
-  // The currently selected MeetItem (may come from timeline items or newly created)
+  // The currently selected MeetItem comes from the timeline data source.
   const selectedMeet = meetItems.find((m) => m.id === selectedMeetId) ?? null
   const sendTaskEdit = (
     taskId: string,
@@ -339,18 +494,17 @@ export function TaskManager() {
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
           <WorkspaceHeader
-            treeProject={treeProject}
             tab={tab}
             onTabChange={changeTab}
             filter={filter}
-            onFilterChange={setFilter}
+            onFilterChange={changeTreeFilter}
             statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
+            onStatusFilterChange={changeStatusFilter}
+            hideDone={hideDone}
+            onHideDoneChange={changeHideDone}
             statusTasks={scopedTasks}
             search={search}
-            onSearchChange={setSearch}
-            onNewMeet={handleNewMeet}
-            readOnly={bridged}
+            onSearchChange={changeSearch}
           />
           <ProjectScopeBar
             projects={projects}
@@ -421,6 +575,7 @@ export function TaskManager() {
                 selectedTaskId={selectedTaskId}
                 onSelectTask={selectTask}
                 filter={statusFilter}
+                hideDone={hideDone}
               />
             )}
             {tab === "timeline" && (
@@ -431,6 +586,7 @@ export function TaskManager() {
                 selectedTimelineItemId={selectedTimelineItemId}
                 onSelectMeet={selectTimelineMeet}
                 onSelectTask={selectTimelineTask}
+                search={search}
               />
             )}
             {tab === "calendar" && <CalendarPlaceholder />}
