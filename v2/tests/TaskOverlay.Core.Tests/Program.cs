@@ -125,7 +125,14 @@ internal static class Program
             ("workspace command contract rejection", WorkspaceCommandContractRejection),
             ("workspace command planned work persistence", WorkspaceCommandPlannedWorkPersistence),
             ("workspace command planned work validation", WorkspaceCommandPlannedWorkValidation),
-            ("workspace planned work snapshot and migration", WorkspacePlannedWorkSnapshotAndMigration)
+            ("workspace planned work snapshot and migration", WorkspacePlannedWorkSnapshotAndMigration),
+            ("workspace command create task persistence", WorkspaceCommandCreateTaskPersistence),
+            ("workspace command create task in section", WorkspaceCommandCreateTaskInSection),
+            ("workspace command create task validation", WorkspaceCommandCreateTaskValidation),
+            ("workspace command waiting for persistence", WorkspaceCommandWaitingForPersistence),
+            ("workspace command reminder persistence", WorkspaceCommandReminderPersistence),
+            ("workspace command reminder validation", WorkspaceCommandReminderValidation),
+            ("workspace command deadline persistence", WorkspaceCommandDeadlinePersistence)
         };
 
         foreach (var test in tests)
@@ -4168,6 +4175,212 @@ internal static class Program
         Assert(deserialized is not null, "Legacy task JSON should deserialize.");
         Assert(deserialized!.PlannedStartAtUtc is null && deserialized.PlannedDurationMinutes is null,
             "Missing planned fields in old state must default to null without corruption.");
+    }
+
+    private static void WorkspaceCommandCreateTaskPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-06T09:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+
+            var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                "create-1",
+                "createTask",
+                new { title = "  New task from Workspace  ", projectId = project.Id.ToString("N") }),
+                now);
+
+            Assert(result.Success, "createTask should succeed with a valid project.");
+            Assert(!string.IsNullOrEmpty(result.CreatedTaskId), "createTask should return the new task id.");
+
+            var createdId = Guid.Parse(result.CreatedTaskId!);
+            var loaded = store.Load();
+            var created = loaded.Tasks.SingleOrDefault(t => t.Id == createdId);
+            Assert(created is not null, "Created task should persist to state.json.");
+            Assert(created!.Title == "New task from Workspace", "Created task title should be trimmed and persisted.");
+            Assert(created.ProjectId == project.Id, "Created task should be assigned to the requested project.");
+            Assert(created.GroupId is null, "Created task without a section should have no group.");
+            Assert(created.Status == TaskStatus.Todo, "Created task should default to TODO.");
+        });
+    }
+
+    private static void WorkspaceCommandCreateTaskInSection()
+    {
+        var now = DateTimeOffset.Parse("2026-07-06T09:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var group = new GroupItem
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Id,
+            Name = "Backlog",
+            SortOrder = 0,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.Groups.Add(group);
+
+        var result = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "create-section",
+            "createTask",
+            new { title = "Task in section", sectionId = $"group:{group.Id:N}" }),
+            now);
+
+        Assert(result.Success, "createTask with a section id should succeed.");
+        var createdId = Guid.Parse(result.CreatedTaskId!);
+        var created = state.Tasks.Single(t => t.Id == createdId);
+        Assert(created.ProjectId == project.Id, "Task created via sectionId should join the section's project.");
+        Assert(created.GroupId == group.Id, "Task created via sectionId should join the given group.");
+
+        var rootResult = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "create-root",
+            "createTask",
+            new { title = "Task at project root", sectionId = $"project:{project.Id:N}:root" }),
+            now);
+        Assert(rootResult.Success, "createTask with a project-root sectionId should succeed.");
+        var rootCreated = state.Tasks.Single(t => t.Id == Guid.Parse(rootResult.CreatedTaskId!));
+        Assert(rootCreated.ProjectId == project.Id && rootCreated.GroupId is null,
+            "Task created via project-root sectionId should join the project with no group.");
+    }
+
+    private static void WorkspaceCommandCreateTaskValidation()
+    {
+        var now = DateTimeOffset.Parse("2026-07-06T09:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var initialCount = state.Tasks.Count;
+
+        var emptyTitle = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "create-empty", "createTask", new { title = "   ", projectId = project.Id.ToString("N") }), now);
+        Assert(!emptyTitle.Success && emptyTitle.ErrorCode == "invalidPayload", "Blank title should be rejected.");
+
+        var badProject = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "create-bad-project", "createTask", new { title = "Valid title", projectId = Guid.NewGuid().ToString("N") }), now);
+        Assert(!badProject.Success, "Unknown projectId should be rejected.");
+
+        var missingLocation = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "create-missing-location", "createTask", new { title = "Valid title" }), now);
+        Assert(!missingLocation.Success && missingLocation.ErrorCode == "invalidPayload",
+            "createTask without projectId or sectionId should be rejected.");
+
+        Assert(state.Tasks.Count == initialCount, "Rejected createTask commands must not add tasks.");
+    }
+
+    private static void WorkspaceCommandWaitingForPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault();
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+
+            var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                "wait-1", "updateTaskWaitingFor", new { taskId = task.Id.ToString("N"), waitingFor = "  reply from Madina  " }));
+            Assert(result.Success, "updateTaskWaitingFor should succeed.");
+            Assert(store.Load().Tasks.Single(t => t.Id == task.Id).WaitingFor == "reply from Madina",
+                "waitingFor should persist trimmed through state.json.");
+
+            var clearResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "wait-clear", "updateTaskWaitingFor", new { taskId = task.Id.ToString("N"), waitingFor = "" }));
+            Assert(clearResult.Success, "Clearing waitingFor should succeed.");
+            Assert(store.Load().Tasks.Single(t => t.Id == task.Id).WaitingFor == "",
+                "Cleared waitingFor should persist as empty string.");
+        });
+    }
+
+    private static void WorkspaceCommandReminderPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-06T08:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+
+            var remindAt = "2026-07-07T09:30:00Z";
+            var setResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "rem-set", "updateTaskReminder", new { taskId = task.Id.ToString("N"), remindAtUtc = remindAt, remindEveryMinutes = (int?)null }), now);
+            Assert(setResult.Success, "Setting an explicit reminder should succeed.");
+            var afterSet = store.Load().Tasks.Single(t => t.Id == task.Id);
+            Assert(afterSet.RemindAtUtc == DateTimeOffset.Parse(remindAt), "Reminder time should persist through state.json.");
+            Assert(!afterSet.ReminderActive, "A freshly scheduled reminder must not be active/noisy immediately.");
+
+            var clearResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "rem-clear", "updateTaskReminder", new { taskId = task.Id.ToString("N"), remindAtUtc = (string?)null }), now);
+            Assert(clearResult.Success, "Clearing a reminder should succeed.");
+            Assert(store.Load().Tasks.Single(t => t.Id == task.Id).RemindAtUtc is null,
+                "Cleared reminder should persist as null.");
+        });
+    }
+
+    private static void WorkspaceCommandReminderValidation()
+    {
+        var now = DateTimeOffset.Parse("2026-07-06T08:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var task = state.Tasks[0];
+
+        var badTimestamp = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "rem-bad", "updateTaskReminder", new { taskId = task.Id.ToString("N"), remindAtUtc = "not-a-date" }), now);
+        Assert(!badTimestamp.Success && badTimestamp.ErrorCode == "invalidPayload", "Non-ISO reminder timestamp should be rejected.");
+
+        var badRepeat = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "rem-bad-repeat", "updateTaskReminder", new { taskId = task.Id.ToString("N"), remindAtUtc = "2026-07-07T09:00:00Z", remindEveryMinutes = -5 }), now);
+        Assert(!badRepeat.Success && badRepeat.ErrorCode == "invalidPayload", "Non-positive repeat interval should be rejected.");
+
+        Assert(task.RemindAtUtc is null, "Rejected reminder commands must not mutate the task.");
+
+        // DONE tasks should not accumulate active REMIND noise even if a reminder is scheduled.
+        task.Status = TaskStatus.Done;
+        var scheduledWhileDone = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "rem-done", "updateTaskReminder", new { taskId = task.Id.ToString("N"), remindAtUtc = "2026-07-07T09:00:00Z" }), now);
+        Assert(scheduledWhileDone.Success, "Scheduling a reminder on a done task is not itself rejected.");
+        Assert(task.RemindAtUtc is null, "ReminderService must clear the schedule for a DONE task.");
+    }
+
+    private static void WorkspaceCommandDeadlinePersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-06T08:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+
+            var deadlineAt = "2026-07-10T23:59:00Z";
+            var setResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "dl-set", "updateTaskDeadline", new { taskId = task.Id.ToString("N"), deadlineAtUtc = deadlineAt }), now);
+            Assert(setResult.Success, "Setting a deadline should succeed.");
+            Assert(store.Load().Tasks.Single(t => t.Id == task.Id).DueAtUtc == DateTimeOffset.Parse(deadlineAt),
+                "Deadline should persist through state.json.");
+
+            var clearResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "dl-clear", "updateTaskDeadline", new { taskId = task.Id.ToString("N"), deadlineAtUtc = (string?)null }), now);
+            Assert(clearResult.Success, "Clearing a deadline should succeed.");
+            Assert(store.Load().Tasks.Single(t => t.Id == task.Id).DueAtUtc is null,
+                "Cleared deadline should persist as null.");
+
+            // Reminder must remain a separate field from Deadline.
+            Assert(store.Load().Tasks.Single(t => t.Id == task.Id).RemindAtUtc is null,
+                "Setting/clearing Deadline must not affect RemindAtUtc.");
+        });
     }
 
     private static string WorkspaceCommandJson(

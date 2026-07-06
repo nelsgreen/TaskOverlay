@@ -210,6 +210,14 @@ export type WorkspaceTaskCommand =
       plannedStartAtUtc: string | null
       plannedDurationMinutes: number | null
     }
+  | { type: "updateTaskWaitingFor"; taskId: string; waitingFor: string }
+  | {
+      type: "updateTaskReminder"
+      taskId: string
+      remindAtUtc: string | null
+      remindEveryMinutes?: number | null
+    }
+  | { type: "updateTaskDeadline"; taskId: string; deadlineAtUtc: string | null }
 
 export type WorkspaceContextCommand = {
   type: "updateWorkspaceContext"
@@ -221,7 +229,15 @@ export type WorkspaceContextCommand = {
   filter: TreeFilter
 }
 
-export type WorkspaceCommand = WorkspaceTaskCommand | WorkspaceContextCommand
+/** Creates a task directly from Workspace. No taskId yet — the bridge returns one. */
+export type WorkspaceCreateTaskCommand = {
+  type: "createTask"
+  title: string
+  projectId: string
+  sectionId?: string | null
+}
+
+export type WorkspaceCommand = WorkspaceTaskCommand | WorkspaceContextCommand | WorkspaceCreateTaskCommand
 
 export type WorkspaceCommandPayload = WorkspaceCommand extends infer Command
   ? Command extends { type: string }
@@ -243,6 +259,7 @@ export interface WorkspaceCommandResult {
   success: boolean
   errorCode: string | null
   errorMessage: string | null
+  createdTaskId?: string | null
 }
 
 export interface PendingWorkspaceCommand {

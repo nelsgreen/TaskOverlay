@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react"
 import { Bell, ChevronDown, ChevronRight, Flag, MapPin, Pin, Repeat, Trash2, UndoDot, X } from "lucide-react"
 import type { Project, ReminderPreset, ReminderState, RepeatInterval, Section, Status, Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { isoFromLocalDateTime } from "@/lib/calendar-date"
 import { statusConfig } from "./status-badge"
+
+type BridgeEditField = "title" | "status" | "pinToPanel" | "notes" | "waitingFor" | "reminder" | "deadline"
 
 interface Props {
   task: Task | null
@@ -18,10 +21,28 @@ interface Props {
   bridgeError?: string | null
   onBridgeEdit?: (
     taskId: string,
-    field: "title" | "status" | "pinToPanel" | "notes",
-    value: string | boolean,
+    field: BridgeEditField,
+    value: string | boolean | null,
   ) => boolean
   onClearBridgeError?: () => void
+}
+
+/** Combines local date+time fields into a UTC ISO instant, or null when incomplete/absent. */
+function computeReminderIso(t: Task): string | null {
+  if (!t.reminderDate || !t.reminderTime) return null
+  const [h, m] = t.reminderTime.split(":").map(Number)
+  return isoFromLocalDateTime(t.reminderDate, h, m)
+}
+
+/** Date-only deadlines are treated as due by end of that local day. */
+function computeDeadlineIso(t: Task, withTime: boolean): string | null {
+  if (!t.deadlineDate) return null
+  if (withTime) {
+    if (!t.deadlineTime) return null
+    const [h, m] = t.deadlineTime.split(":").map(Number)
+    return isoFromLocalDateTime(t.deadlineDate, h, m)
+  }
+  return isoFromLocalDateTime(t.deadlineDate, 23, 59)
 }
 
 const statuses: Status[] = ["TODO", "FOCUS", "WAIT", "DONE"]
@@ -174,10 +195,11 @@ export function DetailsPanel({
   const taskId = draft.id
   const sourceTitle = task?.title ?? draft.title
   const sourceNotes = task?.notes ?? draft.notes ?? ""
+  const sourceWaitingFor = task?.waitingFor ?? draft.waitingFor ?? ""
 
   function sendBridgeEdit(
-    field: "title" | "status" | "pinToPanel" | "notes",
-    value: string | boolean,
+    field: BridgeEditField,
+    value: string | boolean | null,
   ) {
     if (!connected || pendingFields.has(field)) return
     onClearBridgeError?.()
@@ -185,6 +207,7 @@ export function DetailsPanel({
   }
 
   function clearReminder() {
+    if (connected) sendBridgeEdit("reminder", null)
     setDraft((d) => d ? {
       ...d,
       reminder: "none",
@@ -197,8 +220,23 @@ export function DetailsPanel({
   }
 
   function clearDeadline() {
+    if (connected) sendBridgeEdit("deadline", null)
     setDraft((d) => d ? { ...d, deadlineDate: undefined, deadlineTime: undefined, deadline: undefined } : d)
     setDeadlineOpen(false)
+  }
+
+  function applyReminderPatch(patch: Partial<Pick<Task, "reminder" | "reminderDate" | "reminderTime">>) {
+    if (!draft) return
+    const next = { ...draft, ...patch }
+    setDraft(next)
+    if (connected) sendBridgeEdit("reminder", computeReminderIso(next))
+  }
+
+  function applyDeadlinePatch(patch: Partial<Pick<Task, "deadline" | "deadlineDate" | "deadlineTime">>) {
+    if (!draft) return
+    const next = { ...draft, ...patch }
+    setDraft(next)
+    if (connected) sendBridgeEdit("deadline", computeDeadlineIso(next, deadlineWithTime))
   }
 
   function revert() {
@@ -289,14 +327,18 @@ export function DetailsPanel({
             value={draft.waitingFor ?? ""}
             placeholder="e.g. reply from Madina"
             onChange={(e) => set("waitingFor", e.target.value || undefined)}
-            disabled={bridged}
+            onBlur={() => {
+              const waitingFor = draft.waitingFor ?? ""
+              if (connected && waitingFor !== sourceWaitingFor) sendBridgeEdit("waitingFor", waitingFor)
+            }}
+            disabled={locked || pendingFields.has("waitingFor")}
             className="w-full rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15"
           />
         </div>}
 
         {/* ── REMINDER — full-width collapsible ── */}
-        <fieldset disabled={bridged} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40", bridged && "opacity-60")}>
+        <fieldset disabled={locked} className="contents">
+        <div className={cn("rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
           {/* Header — entire row is clickable */}
           <button
             type="button"
@@ -328,7 +370,7 @@ export function DetailsPanel({
               {hasReminder && (
                 <span
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); if (!bridged) clearReminder() }}
+                  onClick={(e) => { e.stopPropagation(); if (!locked) clearReminder() }}
                   aria-label="Clear reminder"
                   className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
                 >
@@ -343,8 +385,8 @@ export function DetailsPanel({
             }
           </button>
 
-          {/* Collapsed + no reminder: show 3 quick preset chips */}
-          {!reminderOpen && !hasReminder && (
+          {/* Collapsed + no reminder: relative quick presets — dev/full mode only (no bridge command for these) */}
+          {!connected && !reminderOpen && !hasReminder && (
             <div className="flex gap-1.5 border-t border-border/50 px-3 pb-2.5 pt-2">
               {quickPresets.map((r) => (
                 <button
@@ -361,39 +403,40 @@ export function DetailsPanel({
           {/* Expanded editor */}
           {reminderOpen && (
             <div className="space-y-3 border-t border-border/50 px-3 pb-3 pt-3">
-              {/* Presets grid */}
-              <div className="grid grid-cols-2 gap-1.5">
-                {advancedPresets.map((r, i) => {
-                  const active = draft.reminder === r.value && !draft.reminderDate
-                  return (
-                    <button
-                      key={`${r.value}-${i}`}
-                      onClick={() =>
-                        setDraft((d) => d ? { ...d, reminder: r.value, reminderDate: undefined, reminderTime: undefined } : d)
-                      }
-                      className={cn(
-                        "rounded border px-2 py-1.5 text-left text-[11px] font-medium transition-colors",
-                        active
-                          ? "border-status-remind/40 bg-status-remind/10 text-status-remind"
-                          : "border-border text-muted-foreground hover:bg-accent",
-                      )}
-                    >
-                      {r.label}
-                    </button>
-                  )
-                })}
-              </div>
+              {/* Relative presets — dev/full mode only (no bridge command for these) */}
+              {!connected && (
+                <div className="grid grid-cols-2 gap-1.5">
+                  {advancedPresets.map((r, i) => {
+                    const active = draft.reminder === r.value && !draft.reminderDate
+                    return (
+                      <button
+                        key={`${r.value}-${i}`}
+                        onClick={() =>
+                          setDraft((d) => d ? { ...d, reminder: r.value, reminderDate: undefined, reminderTime: undefined } : d)
+                        }
+                        className={cn(
+                          "rounded border px-2 py-1.5 text-left text-[11px] font-medium transition-colors",
+                          active
+                            ? "border-status-remind/40 bg-status-remind/10 text-status-remind"
+                            : "border-border text-muted-foreground hover:bg-accent",
+                        )}
+                      >
+                        {r.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
 
-              {/* Custom date + time */}
+              {/* Custom date + time — persists through the bridge when connected */}
               <div className="grid grid-cols-2 gap-1.5">
                 <label className="flex flex-col gap-1">
                   <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Date</span>
                   <input
                     type="date"
                     value={draft.reminderDate ?? ""}
-                    onChange={(e) =>
-                      setDraft((d) => d ? { ...d, reminderDate: e.target.value || undefined, reminder: "custom" } : d)
-                    }
+                    onChange={(e) => applyReminderPatch({ reminderDate: e.target.value || undefined, reminder: "custom" })}
+                    disabled={pendingFields.has("reminder")}
                     className="w-full rounded border border-input bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-status-remind/60"
                   />
                 </label>
@@ -402,57 +445,63 @@ export function DetailsPanel({
                   <input
                     type="time"
                     value={draft.reminderTime ?? ""}
-                    onChange={(e) =>
-                      setDraft((d) => d ? { ...d, reminderTime: e.target.value || undefined, reminder: "custom" } : d)
-                    }
+                    onChange={(e) => applyReminderPatch({ reminderTime: e.target.value || undefined, reminder: "custom" })}
+                    disabled={pendingFields.has("reminder")}
                     className="w-full rounded border border-input bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-status-remind/60"
                   />
                 </label>
               </div>
+              {connected && draft.reminderDate && !draft.reminderTime && (
+                <p className="text-[10px] text-muted-foreground">Pick a time to save this reminder.</p>
+              )}
 
-              {/* Repeat toggle */}
-              <div className="flex items-center gap-2 border-t border-border/50 pt-2.5">
-                <Repeat
-                  className={cn(
-                    "size-3.5 shrink-0",
-                    draft.reminderRepeat ? "text-status-remind" : "text-muted-foreground",
+              {/* Repeat — dev/full mode only in this release */}
+              {!connected && (
+                <>
+                  <div className="flex items-center gap-2 border-t border-border/50 pt-2.5">
+                    <Repeat
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        draft.reminderRepeat ? "text-status-remind" : "text-muted-foreground",
+                      )}
+                    />
+                    <span className="flex-1 text-[11px] font-medium text-foreground">Repeat</span>
+                    <Switch
+                      checked={!!draft.reminderRepeat}
+                      activeColor="bg-status-remind"
+                      onChange={() =>
+                        setDraft((d) => d ? {
+                          ...d,
+                          reminderRepeat: !d.reminderRepeat,
+                          reminderInterval: !d.reminderRepeat ? (d.reminderInterval ?? "weekly") : d.reminderInterval,
+                        } : d)
+                      }
+                    />
+                  </div>
+
+                  {/* Repeat intervals — only when Repeat ON */}
+                  {draft.reminderRepeat && (
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {repeatIntervals.map((iv, i) => {
+                        const active = draft.reminderInterval === iv.value
+                        return (
+                          <button
+                            key={`${iv.value}-${i}`}
+                            onClick={() => set("reminderInterval", iv.value)}
+                            className={cn(
+                              "rounded border px-2 py-1.5 text-[11px] font-medium transition-colors",
+                              active
+                                ? "border-status-remind/40 bg-status-remind/10 text-status-remind"
+                                : "border-border text-muted-foreground hover:bg-accent",
+                            )}
+                          >
+                            {iv.label}
+                          </button>
+                        )
+                      })}
+                    </div>
                   )}
-                />
-                <span className="flex-1 text-[11px] font-medium text-foreground">Repeat</span>
-                <Switch
-                  checked={!!draft.reminderRepeat}
-                  activeColor="bg-status-remind"
-                  onChange={() =>
-                    setDraft((d) => d ? {
-                      ...d,
-                      reminderRepeat: !d.reminderRepeat,
-                      reminderInterval: !d.reminderRepeat ? (d.reminderInterval ?? "weekly") : d.reminderInterval,
-                    } : d)
-                  }
-                />
-              </div>
-
-              {/* Repeat intervals — only when Repeat ON */}
-              {draft.reminderRepeat && (
-                <div className="grid grid-cols-2 gap-1.5">
-                  {repeatIntervals.map((iv, i) => {
-                    const active = draft.reminderInterval === iv.value
-                    return (
-                      <button
-                        key={`${iv.value}-${i}`}
-                        onClick={() => set("reminderInterval", iv.value)}
-                        className={cn(
-                          "rounded border px-2 py-1.5 text-[11px] font-medium transition-colors",
-                          active
-                            ? "border-status-remind/40 bg-status-remind/10 text-status-remind"
-                            : "border-border text-muted-foreground hover:bg-accent",
-                        )}
-                      >
-                        {iv.label}
-                      </button>
-                    )
-                  })}
-                </div>
+                </>
               )}
             </div>
           )}
@@ -460,8 +509,8 @@ export function DetailsPanel({
         </fieldset>
 
         {/* ── DEADLINE — full-width collapsible ── */}
-        <fieldset disabled={bridged} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40", bridged && "opacity-60")}>
+        <fieldset disabled={locked} className="contents">
+        <div className={cn("rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
           {/* Header — entire row is clickable */}
           <button
             type="button"
@@ -490,7 +539,7 @@ export function DetailsPanel({
               {hasDeadline && (
                 <span
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); if (!bridged) clearDeadline() }}
+                  onClick={(e) => { e.stopPropagation(); if (!locked) clearDeadline() }}
                   aria-label="Clear deadline"
                   className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
                 >
@@ -515,14 +564,12 @@ export function DetailsPanel({
                   return (
                     <button
                       key={p.value}
-                      onClick={() =>
-                        setDraft((d) => d ? {
-                          ...d,
-                          deadlineDate: p.value,
-                          deadline: p.label,
-                          deadlineTime: deadlineWithTime ? d.deadlineTime : undefined,
-                        } : d)
-                      }
+                      onClick={() => applyDeadlinePatch({
+                        deadlineDate: p.value,
+                        deadline: p.label,
+                        deadlineTime: deadlineWithTime ? draft.deadlineTime : undefined,
+                      })}
+                      disabled={pendingFields.has("deadline")}
                       className={cn(
                         "rounded border px-2 py-1.5 text-left text-[11px] font-medium transition-colors",
                         active
@@ -539,7 +586,10 @@ export function DetailsPanel({
               {/* Date / Date+time mode toggle */}
               <div className="flex items-center gap-1 rounded border border-border p-0.5">
                 <button
-                  onClick={() => { setDeadlineWithTime(false); setDraft((d) => d ? { ...d, deadlineTime: undefined } : d) }}
+                  onClick={() => {
+                    setDeadlineWithTime(false)
+                    applyDeadlinePatch({ deadlineTime: undefined })
+                  }}
                   className={cn(
                     "flex-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
                     !deadlineWithTime ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
@@ -558,16 +608,15 @@ export function DetailsPanel({
                 </button>
               </div>
 
-              {/* Inputs */}
+              {/* Inputs — persist through the bridge when connected */}
               <div className={cn("grid gap-1.5", deadlineWithTime ? "grid-cols-2" : "grid-cols-1")}>
                 <label className="flex flex-col gap-1">
                   <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Date</span>
                   <input
                     type="date"
                     value={draft.deadlineDate ?? ""}
-                    onChange={(e) =>
-                      setDraft((d) => d ? { ...d, deadlineDate: e.target.value || undefined, deadline: e.target.value || undefined } : d)
-                    }
+                    onChange={(e) => applyDeadlinePatch({ deadlineDate: e.target.value || undefined, deadline: e.target.value || undefined })}
+                    disabled={pendingFields.has("deadline")}
                     className="w-full rounded border border-input bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-status-deadline/60"
                   />
                 </label>
@@ -577,12 +626,16 @@ export function DetailsPanel({
                     <input
                       type="time"
                       value={draft.deadlineTime ?? ""}
-                      onChange={(e) => set("deadlineTime", e.target.value || undefined)}
+                      onChange={(e) => applyDeadlinePatch({ deadlineTime: e.target.value || undefined })}
+                      disabled={pendingFields.has("deadline")}
                       className="w-full rounded border border-input bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-status-deadline/60"
                     />
                   </label>
                 )}
               </div>
+              {connected && !deadlineWithTime && draft.deadlineDate && (
+                <p className="text-[10px] text-muted-foreground">Date-only deadlines are due by end of that day.</p>
+              )}
             </div>
           )}
         </div>
