@@ -44,6 +44,9 @@ export function TaskManager() {
   const [calendarShowDone, setCalendarShowDone] = useState(false)
   // Session-only Details panel width (no persistence yet — follow-up).
   const [detailsWidth, setDetailsWidth] = useState(288)
+  // Optimistic planned-work overrides: reflect duration/time immediately in the
+  // grid, then reconciled by the authoritative C# snapshot (does not persist).
+  const [plannedOverrides, setPlannedOverrides] = useState<Record<string, { plannedStartAtUtc: string | null; plannedDurationMinutes: number | null }>>({})
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
   const [hideDone, setHideDone] = useState(false)
@@ -59,10 +62,41 @@ export function TaskManager() {
   const readOnly = bridged && !connected
   const projects = bridge.data?.projects ?? mockProjects
   const sections = bridge.data?.sections ?? mockSections
-  const tasks = bridge.data?.tasks ?? mockTasks
+  const rawTasks = bridge.data?.tasks ?? mockTasks
+  const tasks = useMemo(() => {
+    if (Object.keys(plannedOverrides).length === 0) return rawTasks
+    return rawTasks.map((t) => {
+      const o = plannedOverrides[t.id]
+      return o ? { ...t, plannedStartAtUtc: o.plannedStartAtUtc ?? undefined, plannedDurationMinutes: o.plannedDurationMinutes ?? undefined } : t
+    })
+  }, [rawTasks, plannedOverrides])
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
   const timelineItems = bridge.data?.timelineItems ?? mockTimelineItems
   const activeNowTaskIds = bridge.data?.activeNowTaskIds
+
+  // Drop an optimistic override once the authoritative snapshot reflects the same value.
+  useEffect(() => {
+    const data = bridge.data
+    if (!data) return
+    setPlannedOverrides((prev) => {
+      if (Object.keys(prev).length === 0) return prev
+      const sameStart = (a: string | null, b?: string) => {
+        if (a === null) return !b
+        return !!b && new Date(a).getTime() === new Date(b).getTime()
+      }
+      let changed = false
+      const next = { ...prev }
+      for (const t of data.tasks) {
+        const o = next[t.id]
+        if (o && sameStart(o.plannedStartAtUtc, t.plannedStartAtUtc) &&
+            (o.plannedDurationMinutes ?? null) === (t.plannedDurationMinutes ?? null)) {
+          delete next[t.id]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [bridge.data])
 
   useEffect(() => {
     const bridgedData = bridge.data
@@ -447,6 +481,8 @@ export function TaskManager() {
     plannedDurationMinutes: number | null,
   ) => {
     if (connected) {
+      // Optimistic: reflect immediately, then the snapshot reconciles this override.
+      setPlannedOverrides((prev) => ({ ...prev, [taskId]: { plannedStartAtUtc, plannedDurationMinutes } }))
       bridge.sendCommand({ type: "updateTaskPlannedWork", taskId, plannedStartAtUtc, plannedDurationMinutes })
       return
     }
