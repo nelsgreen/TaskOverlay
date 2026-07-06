@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { FolderTree, Plus } from "lucide-react"
+import { FolderTree } from "lucide-react"
 import type { MeetItem, Status, StatusFilterKey, TabKey, Task, TimelineItem, TreeFilter, WorkspaceTaskCommand } from "@/lib/types"
 import {
   initialMeetItems,
@@ -51,7 +51,6 @@ export function TaskManager() {
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
   const [hideDone, setHideDone] = useState(false)
   const [search, setSearch] = useState("")
-  const [newTaskTitle, setNewTaskTitle] = useState("")
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
   const [contextReady, setContextReady] = useState(false)
@@ -508,7 +507,10 @@ export function TaskManager() {
 
   // Add task from Workspace: defaults to the current Tree project, and to the
   // selected task's section when that task is in the same project.
-  const handleCreateTask = (title: string) => {
+  // Matches v0's "+ Task" toolbar button (workspace-header.tsx TreeToolbar):
+  // creates immediately with a placeholder title, then the task is auto-selected
+  // so the title can be renamed straight away in Details.
+  const handleCreateTask = (title = "New task") => {
     const trimmed = title.trim()
     if (!trimmed) return
     const currentTask = selection?.kind === "task" ? tasks.find((t) => t.id === selection.id) : null
@@ -654,6 +656,10 @@ export function TaskManager() {
             onTabChange={changeTab}
             filter={filter}
             onFilterChange={changeTreeFilter}
+            treeProjectName={treeProject.name}
+            treeProjectColor={treeProject.color}
+            onAddTask={() => handleCreateTask()}
+            addTaskDisabled={readOnly}
             statusFilter={statusFilter}
             onStatusFilterChange={changeStatusFilter}
             hideDone={hideDone}
@@ -707,25 +713,6 @@ export function TaskManager() {
                         </button>
                       )
                     })}
-                  </div>
-                )}
-                {!readOnly && (
-                  <div className="flex items-center gap-2 border-b border-border bg-card/20 px-5 py-2">
-                    <Plus className="size-3.5 shrink-0 text-muted-foreground" />
-                    <input
-                      value={newTaskTitle}
-                      onChange={(e) => setNewTaskTitle(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          handleCreateTask(newTaskTitle)
-                          setNewTaskTitle("")
-                        } else if (e.key === "Escape") {
-                          setNewTaskTitle("")
-                        }
-                      }}
-                      placeholder={`Add task in ${treeProject.name}…`}
-                      className="h-7 flex-1 rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
-                    />
                   </div>
                 )}
                 <TreeView

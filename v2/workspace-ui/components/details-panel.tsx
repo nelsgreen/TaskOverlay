@@ -151,14 +151,18 @@ export function DetailsPanel({
   // Track the snapshot at the start of the editing session for "Revert"
   const sessionBaseRef = useRef<Task | null>(task)
 
-  // When a new task is selected, reset the session base and accordion state
+  // When a new task is selected, reset the session base and accordion state.
+  // Keyed on task?.id only (matches v0's [task?.id, emphasize] dependency) so a
+  // fresh snapshot for the *same* task (e.g. after a bridge edit confirms) does
+  // not collapse open editors or discard an in-progress draft.
   useEffect(() => {
     setDraft(task)
     sessionBaseRef.current = task
     setReminderOpen(false)
     setDeadlineOpen(false)
     setDeadlineWithTime(task?.deadlineTime ? true : false)
-  }, [task])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id])
 
   // Auto-apply: push every draft change up to parent immediately
   useEffect(() => {
@@ -194,8 +198,8 @@ export function DetailsPanel({
   const locked = editMode === "readonly"
   const taskId = draft.id
   const sourceTitle = task?.title ?? draft.title
-  const sourceNotes = task?.notes ?? draft.notes ?? ""
-  const sourceWaitingFor = task?.waitingFor ?? draft.waitingFor ?? ""
+  const sourceNotes = task?.notes ?? ""
+  const sourceWaitingFor = task?.waitingFor ?? ""
 
   function sendBridgeEdit(
     field: BridgeEditField,
@@ -229,14 +233,24 @@ export function DetailsPanel({
     if (!draft) return
     const next = { ...draft, ...patch }
     setDraft(next)
-    if (connected) sendBridgeEdit("reminder", computeReminderIso(next))
+    // A partial date-only or time-only entry must not send a clear (null) to the
+    // bridge — only push once both date and time make a complete instant.
+    if (connected) {
+      const iso = computeReminderIso(next)
+      if (iso) sendBridgeEdit("reminder", iso)
+    }
   }
 
   function applyDeadlinePatch(patch: Partial<Pick<Task, "deadline" | "deadlineDate" | "deadlineTime">>) {
     if (!draft) return
     const next = { ...draft, ...patch }
     setDraft(next)
-    if (connected) sendBridgeEdit("deadline", computeDeadlineIso(next, deadlineWithTime))
+    // Same rule as reminders: an incomplete date/time combination must not clear
+    // the deadline on the bridge.
+    if (connected) {
+      const iso = computeDeadlineIso(next, deadlineWithTime)
+      if (iso) sendBridgeEdit("deadline", iso)
+    }
   }
 
   function revert() {
@@ -661,13 +675,24 @@ export function DetailsPanel({
         </div>
 
         {/* ── LOCATION ── */}
+        {/* No move/update-location bridge command exists yet, so this stays
+            disabled with an explicit reason in connected/read-only mode instead
+            of silently no-op'ing. */}
         <fieldset disabled={bridged} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40 p-3", bridged && "opacity-60")}>
+        <div
+          className={cn("rounded-lg border border-border bg-card/40 p-3", bridged && "opacity-60")}
+          title={bridged ? "Moving tasks between projects/sections is not available in this build yet" : undefined}
+        >
           <div className="mb-2 flex items-center gap-1.5">
             <MapPin className="size-3.5 text-muted-foreground" />
             <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
               Location
             </span>
+            {bridged && (
+              <span className="rounded bg-accent px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Later
+              </span>
+            )}
           </div>
           <div className="space-y-2">
             <LocationRow label="Project">
