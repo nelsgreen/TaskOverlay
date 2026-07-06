@@ -416,6 +416,22 @@ public sealed class TreeStateService
         return true;
     }
 
+    public bool SetDeadline(
+        Guid nodeId,
+        DateTimeOffset? deadlineAtUtc,
+        DateTimeOffset? now = null)
+    {
+        var task = FindTask(nodeId);
+        if (task is null)
+        {
+            return false;
+        }
+
+        task.DueAtUtc = deadlineAtUtc?.ToUniversalTime();
+        task.UpdatedAtUtc = now ?? DateTimeOffset.UtcNow;
+        return true;
+    }
+
     public bool SetPlannedWork(
         Guid nodeId,
         DateTimeOffset? plannedStartAtUtc,

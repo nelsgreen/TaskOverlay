@@ -24,6 +24,10 @@ interface Props {
   onTabChange: (tab: TabKey) => void
   filter: TreeFilter
   onFilterChange: (filter: TreeFilter) => void
+  treeProjectName: string
+  treeProjectColor: string
+  onAddTask: () => void
+  addTaskDisabled?: boolean
   statusFilter: StatusFilterKey
   onStatusFilterChange: (filter: StatusFilterKey) => void
   hideDone: boolean
@@ -84,6 +88,10 @@ export function WorkspaceHeader({
   onTabChange,
   filter,
   onFilterChange,
+  treeProjectName,
+  treeProjectColor,
+  onAddTask,
+  addTaskDisabled = false,
   statusFilter,
   onStatusFilterChange,
   hideDone,
@@ -165,6 +173,10 @@ export function WorkspaceHeader({
           <TreeToolbar
             filter={filter}
             onFilterChange={onFilterChange}
+            treeProjectName={treeProjectName}
+            treeProjectColor={treeProjectColor}
+            onAddTask={onAddTask}
+            addTaskDisabled={addTaskDisabled}
           />
         )}
         {tab === "status" && (
@@ -198,23 +210,62 @@ export function WorkspaceHeader({
 function TreeToolbar({
   filter,
   onFilterChange,
+  treeProjectName,
+  treeProjectColor,
+  onAddTask,
+  addTaskDisabled,
 }: {
   filter: TreeFilter
   onFilterChange: (filter: TreeFilter) => void
+  treeProjectName: string
+  treeProjectColor: string
+  onAddTask: () => void
+  addTaskDisabled?: boolean
 }) {
   return (
-    <div className={toolbar.segment} role="group" aria-label="Tree filter">
-      {treeFilters.map((item) => (
+    <>
+      <div className={toolbar.segment} role="group" aria-label="Tree filter">
+        {treeFilters.map((item) => (
+          <button
+            type="button"
+            key={item.key}
+            onClick={() => onFilterChange(item.key)}
+            className={toolbar.segmentItem(filter === item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Right: create target + actions — follows v0 TreeToolbar (New in: / + Section / + Task) */}
+      <div className="ml-auto flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          New in:
+          <span className="flex h-6 items-center gap-1 rounded border border-border bg-card px-2 text-[11px] font-medium text-foreground">
+            <span className="size-1.5 rounded-full" style={{ backgroundColor: treeProjectColor }} />
+            {treeProjectName}
+          </span>
+        </span>
+        <span
+          title="Adding sections from Workspace is not available in this build yet"
+          className="flex h-6 cursor-not-allowed items-center gap-1.5 rounded-md border border-border bg-card/50 px-2.5 text-[11px] font-medium text-muted-foreground/60"
+        >
+          <Plus className="size-3.5" />
+          Section
+          <span className="rounded bg-accent px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide">Later</span>
+        </span>
         <button
           type="button"
-          key={item.key}
-          onClick={() => onFilterChange(item.key)}
-          className={toolbar.segmentItem(filter === item.key)}
+          onClick={onAddTask}
+          disabled={addTaskDisabled}
+          title={addTaskDisabled ? "Read-only: connect to add tasks" : undefined}
+          className="flex h-6 items-center gap-1.5 rounded-md bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {item.label}
+          <Plus className="size-3.5" />
+          Task
         </button>
-      ))}
-    </div>
+      </div>
+    </>
   )
 }
 

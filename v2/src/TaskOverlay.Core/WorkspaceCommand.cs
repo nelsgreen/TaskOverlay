@@ -12,19 +12,21 @@ public sealed record WorkspaceCommandResult(
     string CommandId,
     bool Success,
     string? ErrorCode,
-    string? ErrorMessage)
+    string? ErrorMessage,
+    string? CreatedTaskId = null)
 {
     public const int CurrentSchemaVersion = 1;
     public const string CurrentMessageType = "commandResult";
 
-    public static WorkspaceCommandResult Succeeded(string commandId) =>
+    public static WorkspaceCommandResult Succeeded(string commandId, string? createdTaskId = null) =>
         new(
             CurrentSchemaVersion,
             CurrentMessageType,
             commandId,
             Success: true,
             ErrorCode: null,
-            ErrorMessage: null);
+            ErrorMessage: null,
+            createdTaskId);
 
     public static WorkspaceCommandResult Failed(
         string commandId,
@@ -47,6 +49,7 @@ public static class WorkspaceCommandProcessor
     public const int MaximumNotesLength = 100_000;
     public const int MinimumPlannedDurationMinutes = 5;
     public const int MaximumPlannedDurationMinutes = 24 * 60;
+    public const int MaximumWaitingForLength = 300;
 
     public static WorkspaceCommandResult Execute(
         AppState state,
@@ -100,6 +103,11 @@ public static class WorkspaceCommandProcessor
                 return UpdateWorkspaceContext(state, payload, commandId);
             }
 
+            if (type == "createTask")
+            {
+                return CreateTask(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
+            }
+
             var taskIdText = ReadString(payload, "taskId");
             if (!Guid.TryParse(taskIdText, out var taskId))
             {
@@ -141,6 +149,23 @@ public static class WorkspaceCommandProcessor
                     commandId,
                     timestamp),
                 "updateTaskPlannedWork" => UpdatePlannedWork(
+                    treeService,
+                    taskId,
+                    payload,
+                    commandId,
+                    timestamp),
+                "updateTaskWaitingFor" => UpdateWaitingFor(
+                    treeService,
+                    taskId,
+                    payload,
+                    commandId,
+                    timestamp),
+                "updateTaskReminder" => UpdateReminder(
+                    task,
+                    payload,
+                    commandId,
+                    timestamp),
+                "updateTaskDeadline" => UpdateDeadline(
                     treeService,
                     taskId,
                     payload,
@@ -284,6 +309,152 @@ public static class WorkspaceCommandProcessor
         return treeService.SetPlannedWork(taskId, plannedStart, durationMinutes, timestamp)
             ? WorkspaceCommandResult.Succeeded(commandId)
             : Fail(commandId, "mutationRejected", "Planned work could not be updated.");
+    }
+
+    private static WorkspaceCommandResult UpdateWaitingFor(
+        TreeStateService treeService,
+        Guid taskId,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        var waitingFor = ReadString(payload, "waitingFor");
+        if (waitingFor is null || waitingFor.Length > MaximumWaitingForLength)
+        {
+            return Fail(commandId, "invalidPayload", "Task waitingFor is invalid or too long.");
+        }
+
+        return treeService.SetWaitingFor(taskId, waitingFor, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "mutationRejected", "Task waitingFor could not be updated.");
+    }
+
+    private static WorkspaceCommandResult UpdateReminder(
+        TaskItem task,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!TryReadOptionalIsoTimestamp(payload, "remindAtUtc", out var remindAtUtc))
+        {
+            return Fail(commandId, "invalidPayload", "remindAtUtc must be an ISO-8601 timestamp or null.");
+        }
+
+        int? repeatMinutes = null;
+        if (payload.TryGetProperty("remindEveryMinutes", out var repeatElement) &&
+            repeatElement.ValueKind != JsonValueKind.Null)
+        {
+            if (repeatElement.ValueKind != JsonValueKind.Number ||
+                !repeatElement.TryGetInt32(out var repeatValue) ||
+                repeatValue <= 0)
+            {
+                return Fail(commandId, "invalidPayload", "remindEveryMinutes must be a positive integer or null.");
+            }
+
+            repeatMinutes = repeatValue;
+        }
+
+        ReminderService.SetSchedule(task, remindAtUtc, repeatMinutes, timestamp);
+        return WorkspaceCommandResult.Succeeded(commandId);
+    }
+
+    private static WorkspaceCommandResult UpdateDeadline(
+        TreeStateService treeService,
+        Guid taskId,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!TryReadOptionalIsoTimestamp(payload, "deadlineAtUtc", out var deadlineAtUtc))
+        {
+            return Fail(commandId, "invalidPayload", "deadlineAtUtc must be an ISO-8601 timestamp or null.");
+        }
+
+        return treeService.SetDeadline(taskId, deadlineAtUtc, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "mutationRejected", "Task deadline could not be updated.");
+    }
+
+    private static WorkspaceCommandResult CreateTask(
+        AppState state,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        var title = ReadString(payload, "title");
+        if (string.IsNullOrWhiteSpace(title) || title.Length > MaximumTitleLength)
+        {
+            return Fail(commandId, "invalidPayload", "Task title is required and must not be too long.");
+        }
+
+        if (!TryResolveSectionParent(payload, out var parentId))
+        {
+            return Fail(commandId, "invalidPayload", "A valid projectId or sectionId is required.");
+        }
+
+        var treeService = new TreeStateService(state);
+        var created = treeService.CreateTask(parentId, title, timestamp);
+        return created is not null
+            ? WorkspaceCommandResult.Succeeded(commandId, created.Id.ToString("N"))
+            : Fail(commandId, "mutationRejected", "Task could not be created in the given location.");
+    }
+
+    private static bool TryResolveSectionParent(JsonElement payload, out Guid parentId)
+    {
+        parentId = Guid.Empty;
+        var sectionId = ReadString(payload, "sectionId");
+        if (!string.IsNullOrEmpty(sectionId))
+        {
+            const string groupPrefix = "group:";
+            const string projectRootPrefix = "project:";
+            const string projectRootSuffix = ":root";
+            if (sectionId.StartsWith(groupPrefix, StringComparison.Ordinal))
+            {
+                return Guid.TryParse(sectionId[groupPrefix.Length..], out parentId);
+            }
+
+            if (sectionId.StartsWith(projectRootPrefix, StringComparison.Ordinal) &&
+                sectionId.EndsWith(projectRootSuffix, StringComparison.Ordinal))
+            {
+                var inner = sectionId[projectRootPrefix.Length..^projectRootSuffix.Length];
+                return Guid.TryParse(inner, out parentId);
+            }
+
+            return false;
+        }
+
+        var projectId = ReadString(payload, "projectId");
+        return Guid.TryParse(projectId, out parentId);
+    }
+
+    private static bool TryReadOptionalIsoTimestamp(
+        JsonElement payload,
+        string propertyName,
+        out DateTimeOffset? value)
+    {
+        value = null;
+        if (!payload.TryGetProperty(propertyName, out var element))
+        {
+            return false;
+        }
+
+        if (element.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        if (element.ValueKind != JsonValueKind.String ||
+            !DateTimeOffset.TryParse(
+                element.GetString(),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var parsed))
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
     }
 
     private static WorkspaceCommandResult UpdateWorkspaceContext(

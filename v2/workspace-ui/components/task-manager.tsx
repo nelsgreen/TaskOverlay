@@ -273,11 +273,23 @@ export function TaskManager() {
     [sections, treeProjectId],
   )
 
+  // Matches title, notes/context, waitingFor, and the task's project/section names.
+  const taskMatchesQuery = (t: Task, q: string) => {
+    if (t.title.toLowerCase().includes(q)) return true
+    if (t.notes?.toLowerCase().includes(q)) return true
+    if (t.waitingFor?.toLowerCase().includes(q)) return true
+    const project = projects.find((p) => p.id === t.projectId)
+    if (project?.name.toLowerCase().includes(q)) return true
+    const section = sections.find((s) => s.id === t.sectionId)
+    if (section?.name.toLowerCase().includes(q)) return true
+    return false
+  }
+
   const applySearch = (list: Task[], keepAncestors: boolean, query = search) => {
     if (!query.trim()) return list
     const q = query.trim().toLowerCase()
-    if (!keepAncestors) return list.filter((t) => t.title.toLowerCase().includes(q))
-    const matchIds = new Set(list.filter((t) => t.title.toLowerCase().includes(q)).map((t) => t.id))
+    if (!keepAncestors) return list.filter((t) => taskMatchesQuery(t, q))
+    const matchIds = new Set(list.filter((t) => taskMatchesQuery(t, q)).map((t) => t.id))
     const byId = new Map(list.map((t) => [t.id, t]))
     matchIds.forEach((id) => {
       let p = byId.get(id)?.parentId ? byId.get(byId.get(id)!.parentId!) : undefined
@@ -493,6 +505,49 @@ export function TaskManager() {
     }
   }
 
+  // Add task from Workspace: defaults to the current Tree project, and to the
+  // selected task's section when that task is in the same project.
+  // Matches v0's "+ Task" toolbar button (workspace-header.tsx TreeToolbar):
+  // creates immediately with a placeholder title, then the task is auto-selected
+  // so the title can be renamed straight away in Details.
+  const handleCreateTask = (title = "New task") => {
+    const trimmed = title.trim()
+    if (!trimmed) return
+    const currentTask = selection?.kind === "task" ? tasks.find((t) => t.id === selection.id) : null
+    const targetSectionId = currentTask && currentTask.projectId === treeProjectId
+      ? currentTask.sectionId
+      : null
+
+    if (connected) {
+      bridge.sendCreateTask({ title: trimmed, projectId: treeProjectId, sectionId: targetSectionId })
+      return
+    }
+    if (!bridged) {
+      const id = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      const fallbackSectionId = sections.find((s) => s.projectId === treeProjectId)?.id ?? ""
+      const created: Task = {
+        id,
+        projectId: treeProjectId,
+        sectionId: targetSectionId ?? fallbackSectionId,
+        parentId: null,
+        title: trimmed,
+        status: "TODO",
+        pinned: false,
+        reminder: "none",
+      }
+      setMockTasks((prev) => [...prev, created])
+      setSelection({ kind: "task", id })
+    }
+  }
+
+  // Once the bridge confirms a created task, select it so Details opens on it immediately.
+  useEffect(() => {
+    if (!bridge.lastCreatedTaskId) return
+    setSelection({ kind: "task", id: bridge.lastCreatedTaskId })
+    bridge.clearLastCreatedTaskId()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge.lastCreatedTaskId])
+
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null
 
   const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (id: string) =>
@@ -538,8 +593,8 @@ export function TaskManager() {
   const selectedMeet = meetItems.find((m) => m.id === selectedMeetId) ?? null
   const sendTaskEdit = (
     taskId: string,
-    field: "title" | "status" | "pinToPanel" | "notes",
-    value: string | boolean,
+    field: "title" | "status" | "pinToPanel" | "notes" | "waitingFor" | "reminder" | "deadline",
+    value: string | boolean | null,
   ) => {
     if (!connected) return false
     let command: WorkspaceTaskCommand
@@ -556,19 +611,32 @@ export function TaskManager() {
       case "notes":
         command = { type: "updateTaskNotes", taskId, notes: String(value) }
         break
+      case "waitingFor":
+        command = { type: "updateTaskWaitingFor", taskId, waitingFor: String(value ?? "") }
+        break
+      case "reminder":
+        command = { type: "updateTaskReminder", taskId, remindAtUtc: value as string | null }
+        break
+      case "deadline":
+        command = { type: "updateTaskDeadline", taskId, deadlineAtUtc: value as string | null }
+        break
     }
     return bridge.sendCommand(command)
+  }
+  const pendingFieldOf: Record<WorkspaceTaskCommand["type"], string> = {
+    updateTaskStatus: "status",
+    updateTaskPinToPanel: "pinToPanel",
+    updateTaskNotes: "notes",
+    updateTaskTitle: "title",
+    updateTaskPlannedWork: "plannedWork",
+    updateTaskWaitingFor: "waitingFor",
+    updateTaskReminder: "reminder",
+    updateTaskDeadline: "deadline",
   }
   const pendingFields = new Set(
     bridge.pendingCommands
       .filter((command) => command.taskId === selectedTaskId)
-      .map((command) => command.type === "updateTaskStatus"
-        ? "status"
-        : command.type === "updateTaskPinToPanel"
-          ? "pinToPanel"
-          : command.type === "updateTaskNotes"
-            ? "notes"
-            : "title"),
+      .map((command) => pendingFieldOf[command.type]),
   )
 
   if (bridge.status === "loading" || (bridged && !contextReady)) {
@@ -588,6 +656,10 @@ export function TaskManager() {
             onTabChange={changeTab}
             filter={filter}
             onFilterChange={changeTreeFilter}
+            treeProjectName={treeProject.name}
+            treeProjectColor={treeProject.color}
+            onAddTask={() => handleCreateTask()}
+            addTaskDisabled={readOnly}
             statusFilter={statusFilter}
             onStatusFilterChange={changeStatusFilter}
             hideDone={hideDone}

@@ -13,6 +13,7 @@ import type {
   WorkspaceCommandResult,
   WorkspaceContextCommand,
   WorkspaceContextSnapshot,
+  WorkspaceCreateTaskCommand,
   WorkspaceSnapshotContract,
   WorkspaceTaskCommand,
 } from "@/lib/types"
@@ -53,9 +54,13 @@ export interface WorkspaceBridgeState {
   canEdit: boolean
   pendingCommands: PendingWorkspaceCommand[]
   error: string | null
+  /** Id of the most recently created task once the bridge confirms it, until cleared. */
+  lastCreatedTaskId: string | null
   sendCommand(command: WorkspaceTaskCommand): boolean
+  sendCreateTask(input: Omit<WorkspaceCreateTaskCommand, "type">): boolean
   sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
   clearError(): void
+  clearLastCreatedTaskId(): void
 }
 
 export function useWorkspaceBridge(): WorkspaceBridgeState {
@@ -63,6 +68,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const [bridgeAvailable, setBridgeAvailable] = useState<boolean | null>(null)
   const [pendingCommands, setPendingCommands] = useState<PendingWorkspaceCommand[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [lastCreatedTaskId, setLastCreatedTaskId] = useState<string | null>(null)
 
   useEffect(() => {
     const webview = window.chrome?.webview
@@ -84,6 +90,8 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
           pending.filter((command) => command.commandId !== result.commandId))
         if (!result.success) {
           setError(result.errorMessage ?? "Workspace command failed.")
+        } else if (result.createdTaskId) {
+          setLastCreatedTaskId(result.createdTaskId)
         }
       }
     }
@@ -136,18 +144,26 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     return false
   }, [postCommand])
 
+  const sendCreateTask = useCallback((
+    input: Omit<WorkspaceCreateTaskCommand, "type">,
+  ): boolean => postCommand({ type: "createTask", ...input }), [postCommand])
+
   const sendWorkspaceContext = useCallback((
     context: Omit<WorkspaceContextCommand, "type">,
   ): boolean => postCommand({ type: "updateWorkspaceContext", ...context }), [postCommand])
 
   const clearError = useCallback(() => setError(null), [])
+  const clearLastCreatedTaskId = useCallback(() => setLastCreatedTaskId(null), [])
 
   const shared = {
     pendingCommands,
     error,
+    lastCreatedTaskId,
     sendCommand,
+    sendCreateTask,
     sendWorkspaceContext,
     clearError,
+    clearLastCreatedTaskId,
   }
 
   if (data) {
