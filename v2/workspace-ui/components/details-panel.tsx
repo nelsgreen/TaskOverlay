@@ -110,6 +110,53 @@ function deadlineSummary(t: Task): string {
   return t.deadline ?? "No deadline"
 }
 
+type ActiveField = "title" | "notes" | "waitingFor" | null
+
+/**
+ * Merges persisted fields from a fresh snapshot into the local draft, skipping
+ * whichever field the user is actively typing in and the Reminder/Deadline data
+ * while those editors are open (their own onChange path owns those fields until
+ * the section closes). Used both for the normal same-task snapshot reconcile
+ * and to selectively recover from a failed bridge command.
+ */
+function mergeTaskFields(
+  current: Task,
+  incoming: Task,
+  activeField: ActiveField,
+  reminderOpen: boolean,
+  deadlineOpen: boolean,
+): Task {
+  const next: Task = {
+    ...current,
+    status: incoming.status,
+    pinned: incoming.pinned,
+    projectId: incoming.projectId,
+    sectionId: incoming.sectionId,
+    parentId: incoming.parentId,
+    remindAtUtc: incoming.remindAtUtc,
+    reminderActive: incoming.reminderActive,
+    deadlineAtUtc: incoming.deadlineAtUtc,
+    plannedStartAtUtc: incoming.plannedStartAtUtc,
+    plannedDurationMinutes: incoming.plannedDurationMinutes,
+  }
+  if (activeField !== "title") next.title = incoming.title
+  if (activeField !== "notes") next.notes = incoming.notes
+  if (activeField !== "waitingFor") next.waitingFor = incoming.waitingFor
+  if (!reminderOpen) {
+    next.reminder = incoming.reminder
+    next.reminderDate = incoming.reminderDate
+    next.reminderTime = incoming.reminderTime
+    next.reminderRepeat = incoming.reminderRepeat
+    next.reminderInterval = incoming.reminderInterval
+  }
+  if (!deadlineOpen) {
+    next.deadline = incoming.deadline
+    next.deadlineDate = incoming.deadlineDate
+    next.deadlineTime = incoming.deadlineTime
+  }
+  return next
+}
+
 function getDeadlinePresets() {
   const d = new Date()
   const pad = (n: number) => String(n).padStart(2, "0")
@@ -147,31 +194,61 @@ export function DetailsPanel({
   const [reminderOpen, setReminderOpen] = useState(false)
   const [deadlineOpen, setDeadlineOpen] = useState(false)
   const [deadlineWithTime, setDeadlineWithTime] = useState(false)
+  // Which plain-text field the user is currently typing in (between focus and
+  // blur/commit). A fresh snapshot for the same task must not stomp this field,
+  // even though it reconciles every other field. Reminder/Deadline don't need an
+  // entry here — reminderOpen/deadlineOpen already mark those as "being edited".
+  const [activeField, setActiveField] = useState<"title" | "notes" | "waitingFor" | null>(null)
 
   // Track the snapshot at the start of the editing session for "Revert"
   const sessionBaseRef = useRef<Task | null>(task)
+  // Last task id this panel rendered for — distinguishes "selection changed"
+  // (full reset) from "same task, fresh snapshot" (merge) below.
+  const lastTaskIdRef = useRef<string | null>(task?.id ?? null)
 
-  // When a new task is selected, reset the session base and accordion state.
-  // Keyed on task?.id only (matches v0's [task?.id, emphasize] dependency) so a
-  // fresh snapshot for the *same* task (e.g. after a bridge edit confirms) does
-  // not collapse open editors or discard an in-progress draft.
+  // Single reconciliation effect for the connected draft/snapshot relationship:
+  // - Selecting a different task fully resets the draft and editor UI state.
+  // - A fresh snapshot for the *same* task merges every persisted field into the
+  //   draft except the one field the user is actively typing in, and except the
+  //   Reminder/Deadline data while those editors are open. This is what lets
+  //   Status/Pin/Notes/Waiting-for catch up after a bridge command completes
+  //   without re-collapsing Reminder/Deadline or discarding an in-progress edit.
   useEffect(() => {
-    setDraft(task)
-    sessionBaseRef.current = task
-    setReminderOpen(false)
-    setDeadlineOpen(false)
-    setDeadlineWithTime(task?.deadlineTime ? true : false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id])
+    const idChanged = (task?.id ?? null) !== lastTaskIdRef.current
+    lastTaskIdRef.current = task?.id ?? null
 
-  // Auto-apply: push every draft change up to parent immediately
+    if (idChanged) {
+      setDraft(task)
+      sessionBaseRef.current = task
+      setReminderOpen(false)
+      setDeadlineOpen(false)
+      setDeadlineWithTime(task?.deadlineTime ? true : false)
+      setActiveField(null)
+      return
+    }
+
+    // Mock/full mode has no independent authoritative snapshot: `task` there is
+    // just an echo of our own onApply write-back, so merging it back in would
+    // fight the very state it was derived from. Reconciliation only applies to
+    // the bridged (connected/read-only) snapshot flow.
+    if (!task || editMode === "full") return
+    setDraft((current) => current ? mergeTaskFields(current, task, activeField, reminderOpen, deadlineOpen) : task)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task, reminderOpen, deadlineOpen, activeField, editMode])
+
+  // Auto-apply: push every draft change up to parent immediately (mock mode only)
   useEffect(() => {
     if (!draft || editMode !== "full") return
     onApply(draft)
   }, [draft, editMode])
 
+  // A failed bridge command recovers by merging the (unchanged) authoritative
+  // task back in — same field-level rule as above, so an error on one field
+  // (e.g. Status) can't wipe out an in-progress edit on another (e.g. Notes).
   useEffect(() => {
-    if (bridgeError && task) setDraft(task)
+    if (!bridgeError || !task) return
+    setDraft((current) => current ? mergeTaskFields(current, task, activeField, reminderOpen, deadlineOpen) : task)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridgeError, task])
 
   if (!draft) {
@@ -258,6 +335,7 @@ export function DetailsPanel({
     setReminderOpen(false)
     setDeadlineOpen(false)
     setDeadlineWithTime(sessionBaseRef.current?.deadlineTime ? true : false)
+    setActiveField(null)
   }
 
   return (
@@ -293,8 +371,10 @@ export function DetailsPanel({
           <input
             value={draft.title}
             onChange={(e) => set("title", e.target.value)}
+            onFocus={() => setActiveField("title")}
             onBlur={() => {
               if (connected && draft.title !== sourceTitle) sendBridgeEdit("title", draft.title)
+              setActiveField(null)
             }}
             disabled={locked || pendingFields.has("title")}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
@@ -313,7 +393,14 @@ export function DetailsPanel({
               return (
                 <button
                   key={s}
-                  onClick={() => connected ? sendBridgeEdit("status", s) : set("status", s)}
+                  onClick={() => {
+                    // Optimistic: reflect immediately in Details, then the
+                    // bridge command's snapshot reconciles/corrects it. Tree
+                    // reads the same snapshot directly, so the two can no
+                    // longer disagree after the round-trip.
+                    if (connected) sendBridgeEdit("status", s)
+                    set("status", s)
+                  }}
                   disabled={locked || pendingFields.has("status")}
                   className={cn(
                     "flex items-center justify-center gap-1 rounded-md border px-1 py-2 text-[10px] font-semibold uppercase tracking-wide transition-colors",
@@ -341,9 +428,11 @@ export function DetailsPanel({
             value={draft.waitingFor ?? ""}
             placeholder="e.g. reply from Madina"
             onChange={(e) => set("waitingFor", e.target.value || undefined)}
+            onFocus={() => setActiveField("waitingFor")}
             onBlur={() => {
               const waitingFor = draft.waitingFor ?? ""
               if (connected && waitingFor !== sourceWaitingFor) sendBridgeEdit("waitingFor", waitingFor)
+              setActiveField(null)
             }}
             disabled={locked || pendingFields.has("waitingFor")}
             className="w-full rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15"
@@ -668,9 +757,13 @@ export function DetailsPanel({
             checked={draft.pinned}
             activeColor="bg-status-panel"
             disabled={locked || pendingFields.has("pinToPanel")}
-            onChange={() => connected
-              ? sendBridgeEdit("pinToPanel", !draft.pinned)
-              : set("pinned", !draft.pinned)}
+            onChange={() => {
+              // Same optimistic-then-reconciled pattern as Status: update the
+              // draft immediately, let the fresh snapshot confirm/correct it.
+              const next = !draft.pinned
+              if (connected) sendBridgeEdit("pinToPanel", next)
+              set("pinned", next)
+            }}
           />
         </div>
 
@@ -724,9 +817,11 @@ export function DetailsPanel({
           <textarea
             value={draft.notes ?? ""}
             onChange={(e) => set("notes", e.target.value || undefined)}
+            onFocus={() => setActiveField("notes")}
             onBlur={() => {
               const notes = draft.notes ?? ""
               if (connected && notes !== sourceNotes) sendBridgeEdit("notes", notes)
+              setActiveField(null)
             }}
             disabled={locked || pendingFields.has("notes")}
             rows={3}
