@@ -58,6 +58,10 @@ export interface Task {
   reminderActive?: boolean
   /** source deadline timestamp supplied by the read-only WPF bridge */
   deadlineAtUtc?: string
+  /** Calendar planned work block start (UTC ISO), independent of REMIND/DEADLINE */
+  plannedStartAtUtc?: string
+  /** Calendar planned work block duration in minutes */
+  plannedDurationMinutes?: number
 }
 
 export type TimelineKind = "MEET" | "REMIND" | "DEADLINE"
@@ -175,6 +179,8 @@ export interface WorkspaceTaskSnapshot {
   reminderEveryMinutes: number | null
   reminderActive: boolean
   deadlineAtUtc: string | null
+  plannedStartAtUtc: string | null
+  plannedDurationMinutes: number | null
 }
 
 export interface WorkspaceActiveNowSnapshot {
@@ -198,6 +204,12 @@ export type WorkspaceTaskCommand =
   | { type: "updateTaskPinToPanel"; taskId: string; pinToPanel: boolean }
   | { type: "updateTaskNotes"; taskId: string; notes: string }
   | { type: "updateTaskTitle"; taskId: string; title: string }
+  | {
+      type: "updateTaskPlannedWork"
+      taskId: string
+      plannedStartAtUtc: string | null
+      plannedDurationMinutes: number | null
+    }
 
 export type WorkspaceContextCommand = {
   type: "updateWorkspaceContext"

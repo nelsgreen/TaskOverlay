@@ -151,7 +151,7 @@ export function DetailsPanel({
 
   if (!draft) {
     return (
-      <aside className="hidden w-72 shrink-0 flex-col border-l border-border bg-sidebar xl:flex">
+      <aside className="flex h-full w-full flex-col border-l border-border bg-sidebar">
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
           <div className="flex size-12 items-center justify-center rounded-full bg-accent">
             <MapPin className="size-5 text-muted-foreground" />
@@ -209,7 +209,7 @@ export function DetailsPanel({
   }
 
   return (
-    <aside className="hidden w-72 shrink-0 flex-col border-l border-border bg-sidebar xl:flex">
+    <aside className="flex h-full w-full flex-col border-l border-border bg-sidebar">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">Details</h2>

@@ -294,11 +294,6 @@ export function TimelineView({
           })}
         </div>
       )}
-
-      {/* Footer */}
-      <div className="shrink-0 border-t border-border px-5 py-2.5 text-center text-[11px] text-muted-foreground">
-        A time-based view over MEET, REMIND &amp; Deadline — not a replacement for Tree
-      </div>
     </div>
   )
 }

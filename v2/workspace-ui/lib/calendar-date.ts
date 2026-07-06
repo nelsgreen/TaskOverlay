@@ -20,6 +20,22 @@ export function dateKeyFromIso(isoUtc: string): string | null {
   return dateKeyFromDate(parsed)
 }
 
+/** Parses an ISO/UTC timestamp into its local date key + minutes-from-midnight. */
+export function localSlotFromIso(isoUtc: string): { dateKey: string; minutes: number } | null {
+  const parsed = new Date(isoUtc)
+  if (Number.isNaN(parsed.getTime())) return null
+  return {
+    dateKey: dateKeyFromDate(parsed),
+    minutes: parsed.getHours() * 60 + parsed.getMinutes(),
+  }
+}
+
+/** Builds a UTC ISO timestamp from a local date key (YYYY-MM-DD) and local hour/minute. */
+export function isoFromLocalDateTime(dateKey: string, hour: number, minute: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number)
+  return new Date(year, month - 1, day, hour, minute, 0, 0).toISOString()
+}
+
 /** Parses a YYYY-MM-DD key as a local midnight Date. */
 export function parseDateKey(key: string): Date {
   const [year, month, day] = key.split("-").map(Number)

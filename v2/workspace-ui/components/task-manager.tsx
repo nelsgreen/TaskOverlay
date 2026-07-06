@@ -42,6 +42,11 @@ export function TaskManager() {
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string>(() => todayKey())
   const [calendarViewMode, setCalendarViewMode] = useState<"day" | "week">("week")
   const [calendarShowDone, setCalendarShowDone] = useState(false)
+  // Session-only Details panel width (no persistence yet — follow-up).
+  const [detailsWidth, setDetailsWidth] = useState(288)
+  // Optimistic planned-work overrides: reflect duration/time immediately in the
+  // grid, then reconciled by the authoritative C# snapshot (does not persist).
+  const [plannedOverrides, setPlannedOverrides] = useState<Record<string, { plannedStartAtUtc: string | null; plannedDurationMinutes: number | null }>>({})
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
   const [hideDone, setHideDone] = useState(false)
@@ -57,10 +62,41 @@ export function TaskManager() {
   const readOnly = bridged && !connected
   const projects = bridge.data?.projects ?? mockProjects
   const sections = bridge.data?.sections ?? mockSections
-  const tasks = bridge.data?.tasks ?? mockTasks
+  const rawTasks = bridge.data?.tasks ?? mockTasks
+  const tasks = useMemo(() => {
+    if (Object.keys(plannedOverrides).length === 0) return rawTasks
+    return rawTasks.map((t) => {
+      const o = plannedOverrides[t.id]
+      return o ? { ...t, plannedStartAtUtc: o.plannedStartAtUtc ?? undefined, plannedDurationMinutes: o.plannedDurationMinutes ?? undefined } : t
+    })
+  }, [rawTasks, plannedOverrides])
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
   const timelineItems = bridge.data?.timelineItems ?? mockTimelineItems
   const activeNowTaskIds = bridge.data?.activeNowTaskIds
+
+  // Drop an optimistic override once the authoritative snapshot reflects the same value.
+  useEffect(() => {
+    const data = bridge.data
+    if (!data) return
+    setPlannedOverrides((prev) => {
+      if (Object.keys(prev).length === 0) return prev
+      const sameStart = (a: string | null, b?: string) => {
+        if (a === null) return !b
+        return !!b && new Date(a).getTime() === new Date(b).getTime()
+      }
+      let changed = false
+      const next = { ...prev }
+      for (const t of data.tasks) {
+        const o = next[t.id]
+        if (o && sameStart(o.plannedStartAtUtc, t.plannedStartAtUtc) &&
+            (o.plannedDurationMinutes ?? null) === (t.plannedDurationMinutes ?? null)) {
+          delete next[t.id]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [bridge.data])
 
   useEffect(() => {
     const bridgedData = bridge.data
@@ -131,7 +167,13 @@ export function TaskManager() {
       : firstProjectId ? [firstProjectId] : []
     setSelectedProjectIds(repairedProjectIds)
     setSelection((selected) => {
-      if (tab === "calendar" || tab === "workstreams") return null
+      if (tab === "workstreams") return null
+      if (tab === "calendar") {
+        // Keep the clicked task/meet selected across snapshot refreshes.
+        if (selected?.kind === "task" && bridgedData.tasks.some((task) => task.id === selected.id)) return selected
+        if (selected?.kind === "meet" && bridgedData.meetItems.some((meet) => meet.id === selected.id)) return selected
+        return null
+      }
       if (tab === "timeline") {
         const timelineItem = selectedTimelineItemId
           ? bridgedData.timelineItems.find((item) =>
@@ -418,6 +460,38 @@ export function TaskManager() {
     setCalendarSelectedDate(dateKey)
     setCalendarViewMode("day")
   }
+  const startDetailsResize = (event: React.MouseEvent) => {
+    event.preventDefault()
+    const onMove = (e: MouseEvent) => setDetailsWidth(Math.max(260, Math.min(560, window.innerWidth - e.clientX)))
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+    }
+    document.body.style.cursor = "col-resize"
+    document.body.style.userSelect = "none"
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+  }
+  // Planned work: persists through the C# bridge when connected; local-only in dev mock mode.
+  const handlePlannedWork = (
+    taskId: string,
+    plannedStartAtUtc: string | null,
+    plannedDurationMinutes: number | null,
+  ) => {
+    if (connected) {
+      // Optimistic: reflect immediately, then the snapshot reconciles this override.
+      setPlannedOverrides((prev) => ({ ...prev, [taskId]: { plannedStartAtUtc, plannedDurationMinutes } }))
+      bridge.sendCommand({ type: "updateTaskPlannedWork", taskId, plannedStartAtUtc, plannedDurationMinutes })
+      return
+    }
+    if (!bridged) {
+      setMockTasks((prev) => prev.map((t) => (t.id === taskId
+        ? { ...t, plannedStartAtUtc: plannedStartAtUtc ?? undefined, plannedDurationMinutes: plannedDurationMinutes ?? undefined }
+        : t)))
+    }
+  }
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null
 
@@ -538,13 +612,6 @@ export function TaskManager() {
             onToggleProject={toggleProject}
             onSelectAll={selectAllProjects}
           />
-          {bridged && (
-            <div className="border-b border-border bg-primary/5 px-5 py-1.5 text-[11px] text-muted-foreground">
-              {connected
-                ? "Connected to current TaskOverlay app state · supported Details fields save through C#"
-                : "Read-only · current TaskOverlay app state"}
-            </div>
-          )}
           <div className="min-h-0 flex-1 overflow-y-auto">
             {tab === "tree" && (
               <div className="flex flex-col">
@@ -620,39 +687,54 @@ export function TaskManager() {
                 projects={projects}
                 sections={sections}
                 tasks={tasks}
+                meetItems={meetItems}
                 selectedProjectIds={selectedProjectIds}
                 selectedTaskId={selectedTaskId}
+                selectedMeetId={selectedMeetId}
                 showDone={calendarShowDone}
+                canSchedule={connected || !bridged}
                 onSelectTask={selectTask}
+                onSelectMeet={(meetId) => setSelection({ kind: "meet", id: meetId })}
                 onPickDay={handleCalendarPickDay}
+                onPlanTask={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
+                onClearPlanned={(taskId) => handlePlannedWork(taskId, null, null)}
               />
             )}
             {tab === "workstreams" && <WorkstreamsPlaceholder />}
           </div>
         </main>
 
-        {selection?.kind === "meet" && selectedMeet ? (
-          <MeetDetailsPanel
-            meet={selectedMeet}
-            projects={projects}
-            tasks={tasks}
-            onApply={handleApplyMeet}
-            onDelete={handleDeleteMeet}
+        <div className="relative hidden shrink-0 xl:flex" style={{ width: detailsWidth }}>
+          <div
+            onMouseDown={startDetailsResize}
+            role="separator"
+            aria-orientation="vertical"
+            title="Drag to resize"
+            className="absolute left-0 top-0 z-20 h-full w-1.5 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40"
           />
-        ) : (
-          <DetailsPanel
-            task={selectedTask}
-            projects={projects}
-            sections={sections}
-            onApply={handleApply}
-            onDelete={handleDelete}
-            editMode={connected ? "connected" : readOnly ? "readonly" : "full"}
-            pendingFields={pendingFields}
-            bridgeError={bridge.error}
-            onBridgeEdit={sendTaskEdit}
-            onClearBridgeError={bridge.clearError}
-          />
-        )}
+          {selection?.kind === "meet" && selectedMeet ? (
+            <MeetDetailsPanel
+              meet={selectedMeet}
+              projects={projects}
+              tasks={tasks}
+              onApply={handleApplyMeet}
+              onDelete={handleDeleteMeet}
+            />
+          ) : (
+            <DetailsPanel
+              task={selectedTask}
+              projects={projects}
+              sections={sections}
+              onApply={handleApply}
+              onDelete={handleDelete}
+              editMode={connected ? "connected" : readOnly ? "readonly" : "full"}
+              pendingFields={pendingFields}
+              bridgeError={bridge.error}
+              onBridgeEdit={sendTaskEdit}
+              onClearBridgeError={bridge.clearError}
+            />
+          )}
+        </div>
       </div>
 
       <ActiveNowStrip
