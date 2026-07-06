@@ -132,7 +132,11 @@ internal static class Program
             ("workspace command waiting for persistence", WorkspaceCommandWaitingForPersistence),
             ("workspace command reminder persistence", WorkspaceCommandReminderPersistence),
             ("workspace command reminder validation", WorkspaceCommandReminderValidation),
-            ("workspace command deadline persistence", WorkspaceCommandDeadlinePersistence)
+            ("workspace command deadline persistence", WorkspaceCommandDeadlinePersistence),
+            ("workspace command create section persistence", WorkspaceCommandCreateSectionPersistence),
+            ("workspace command create section validation", WorkspaceCommandCreateSectionValidation),
+            ("workspace command create task in created section", WorkspaceCommandCreateTaskInCreatedSection),
+            ("workspace snapshot includes created section", WorkspaceSnapshotIncludesCreatedSection)
         };
 
         foreach (var test in tests)
@@ -4247,6 +4251,147 @@ internal static class Program
         var rootCreated = state.Tasks.Single(t => t.Id == Guid.Parse(rootResult.CreatedTaskId!));
         Assert(rootCreated.ProjectId == project.Id && rootCreated.GroupId is null,
             "Task created via project-root sectionId should join the project with no group.");
+    }
+
+    private static void WorkspaceCommandCreateSectionPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-07T09:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+
+            var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                "section-1",
+                "createSection",
+                new { title = "  Workspace editing  ", projectId = project.Id.ToString("N") }),
+                now);
+
+            Assert(result.Success, "createSection should succeed with a valid project.");
+            Assert(!string.IsNullOrEmpty(result.CreatedSectionId), "createSection should return the new section id.");
+            Assert(
+                result.CreatedSectionId!.StartsWith("group:", StringComparison.Ordinal),
+                "createSection should return a snapshot-format section id.");
+
+            var groupId = Guid.Parse(result.CreatedSectionId!["group:".Length..]);
+            var loaded = store.Load();
+            var created = loaded.Groups.SingleOrDefault(g => g.Id == groupId);
+            Assert(created is not null, "Created section should persist to state.json.");
+            Assert(created!.Name == "Workspace editing", "Created section title should be trimmed and persisted.");
+            Assert(created.ProjectId == project.Id, "Created section should belong to the requested project.");
+        });
+    }
+
+    private static void WorkspaceCommandCreateSectionValidation()
+    {
+        var now = DateTimeOffset.Parse("2026-07-07T09:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+
+        var missingProject = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "section-missing-project",
+            "createSection",
+            new { title = "Orphan stream", projectId = Guid.NewGuid().ToString("N") }),
+            now);
+        Assert(!missingProject.Success, "createSection with an unknown project should fail.");
+        Assert(missingProject.ErrorCode == "mutationRejected", "Unknown project should be rejected as a mutation error.");
+
+        var malformedProject = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "section-bad-project",
+            "createSection",
+            new { title = "Bad project id", projectId = "not-a-guid" }),
+            now);
+        Assert(!malformedProject.Success, "createSection with a malformed projectId should fail.");
+        Assert(malformedProject.ErrorCode == "invalidPayload", "Malformed projectId should be an invalid payload.");
+
+        var blankTitle = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "section-blank-title",
+            "createSection",
+            new { title = "   ", projectId = project.Id.ToString("N") }),
+            now);
+        Assert(!blankTitle.Success, "createSection with a blank title should fail.");
+        Assert(blankTitle.ErrorCode == "invalidPayload", "Blank title should be an invalid payload.");
+
+        var longTitle = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "section-long-title",
+            "createSection",
+            new { title = new string('x', 501), projectId = project.Id.ToString("N") }),
+            now);
+        Assert(!longTitle.Success, "createSection with an oversized title should fail.");
+
+        Assert(state.Groups.Count == 0, "Rejected createSection commands must not add groups.");
+    }
+
+    private static void WorkspaceCommandCreateTaskInCreatedSection()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-07T09:30:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(
+                state,
+                () => store.Save(state),
+                () => { });
+
+            var sectionResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "ws-section",
+                "createSection",
+                new { title = "Calendar planning", projectId = project.Id.ToString("N") }),
+                now);
+            Assert(sectionResult.Success, "createSection should succeed before creating a task inside it.");
+
+            var taskResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "ws-task",
+                "createTask",
+                new { title = "Plan week grid", projectId = project.Id.ToString("N"), sectionId = sectionResult.CreatedSectionId }),
+                now);
+            Assert(taskResult.Success, "createTask inside the created section should succeed.");
+
+            var groupId = Guid.Parse(sectionResult.CreatedSectionId!["group:".Length..]);
+            var loaded = store.Load();
+            var created = loaded.Tasks.Single(t => t.Id == Guid.Parse(taskResult.CreatedTaskId!));
+            Assert(created.GroupId == groupId, "Task created inside a new section should join that section.");
+            Assert(created.ProjectId == project.Id, "Task created inside a new section should join the section's project.");
+        });
+    }
+
+    private static void WorkspaceSnapshotIncludesCreatedSection()
+    {
+        var now = DateTimeOffset.Parse("2026-07-07T10:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+
+        var sectionResult = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "snap-section",
+            "createSection",
+            new { title = "Reliability / QA", projectId = project.Id.ToString("N") }),
+            now);
+        Assert(sectionResult.Success, "createSection should succeed for the snapshot test.");
+
+        var taskResult = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "snap-task",
+            "createTask",
+            new { title = "Add regression test", sectionId = sectionResult.CreatedSectionId }),
+            now);
+        Assert(taskResult.Success, "createTask should succeed for the snapshot test.");
+
+        var snapshot = WorkspaceSnapshotFactory.Create(state, now);
+        var section = snapshot.Sections.SingleOrDefault(s => s.Id == sectionResult.CreatedSectionId);
+        Assert(section is not null, "Snapshot should include the created section.");
+        Assert(section!.Name == "Reliability / QA", "Snapshot section should carry the created name.");
+        Assert(section.ProjectId == project.Id.ToString("N"), "Snapshot section should reference the project.");
+        Assert(!section.IsProjectRoot, "A created workstream section must not be a project root.");
+
+        var task = snapshot.Tasks.Single(t => t.Id == taskResult.CreatedTaskId);
+        Assert(task.SectionId == sectionResult.CreatedSectionId,
+            "Snapshot task created inside the section should carry that section id.");
     }
 
     private static void WorkspaceCommandCreateTaskValidation()
