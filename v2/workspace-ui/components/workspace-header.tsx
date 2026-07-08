@@ -28,6 +28,8 @@ interface Props {
   treeProjectColor: string
   onAddTask: () => void
   addTaskDisabled?: boolean
+  onAddSection: () => void
+  addSectionDisabled?: boolean
   statusFilter: StatusFilterKey
   onStatusFilterChange: (filter: StatusFilterKey) => void
   hideDone: boolean
@@ -98,6 +100,8 @@ export function WorkspaceHeader({
   treeProjectColor,
   onAddTask,
   addTaskDisabled = false,
+  onAddSection,
+  addSectionDisabled = false,
   statusFilter,
   onStatusFilterChange,
   hideDone,
@@ -189,6 +193,8 @@ export function WorkspaceHeader({
             treeProjectColor={treeProjectColor}
             onAddTask={onAddTask}
             addTaskDisabled={addTaskDisabled}
+            onAddSection={onAddSection}
+            addSectionDisabled={addSectionDisabled}
           />
         )}
         {tab === "status" && (
@@ -235,6 +241,8 @@ function TreeToolbar({
   treeProjectColor,
   onAddTask,
   addTaskDisabled,
+  onAddSection,
+  addSectionDisabled,
 }: {
   filter: TreeFilter
   onFilterChange: (filter: TreeFilter) => void
@@ -242,6 +250,8 @@ function TreeToolbar({
   treeProjectColor: string
   onAddTask: () => void
   addTaskDisabled?: boolean
+  onAddSection: () => void
+  addSectionDisabled?: boolean
 }) {
   return (
     <>
@@ -267,14 +277,16 @@ function TreeToolbar({
             {treeProjectName}
           </span>
         </span>
-        <span
-          title="Adding sections from Workspace is not available in this build yet"
-          className="flex h-6 cursor-not-allowed items-center gap-1.5 rounded-md border border-border bg-card/50 px-2.5 text-[11px] font-medium text-muted-foreground/60"
+        <button
+          type="button"
+          onClick={onAddSection}
+          disabled={addSectionDisabled}
+          title={addSectionDisabled ? "Read-only: connect to add sections" : undefined}
+          className="flex h-6 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus className="size-3.5" />
           Section
-          <span className="rounded bg-accent px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide">Later</span>
-        </span>
+        </button>
         <button
           type="button"
           onClick={onAddTask}

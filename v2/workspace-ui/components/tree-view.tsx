@@ -1,6 +1,7 @@
 "use client"
 
-import { ChevronDown, Folder } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { ChevronDown, Folder, Plus, Trash2 } from "lucide-react"
 import type { Section, Task, TreeFilter } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { TaskRow } from "./task-row"
@@ -16,10 +17,26 @@ interface Props {
   onToggleSection: (id: string) => void
   onToggleTask: (id: string) => void
   onTogglePin: (id: string) => void
+  /** Gates the pin button (pin from Tree is not wired to the bridge yet). */
   readOnly?: boolean
+  /** Enables right-click context menus and their actions (connected or mock). */
+  canEdit?: boolean
+  onCreateTaskHere?: () => void
+  onCreateSection?: () => void
+  onAddSubtask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string) => void
 }
 
-const isActive = (t: Task) => t.status === "FOCUS" || t.status === "WAIT"
+// Badge count: attention items (FOCUS + WAIT), unchanged.
+const isAttention = (t: Task) => t.status === "FOCUS" || t.status === "WAIT"
+// Active-only filter: all non-DONE tasks (product decision, differs from v0
+// which used FOCUS/WAIT only).
+const isVisibleActive = (t: Task) => t.status !== "DONE"
+
+type TreeMenu =
+  | { kind: "empty"; x: number; y: number }
+  | { kind: "task"; x: number; y: number; taskId: string }
+  | null
 
 export function TreeView({
   sections,
@@ -33,7 +50,40 @@ export function TreeView({
   onToggleTask,
   onTogglePin,
   readOnly,
+  canEdit,
+  onCreateTaskHere,
+  onCreateSection,
+  onAddSubtask,
+  onDeleteTask,
 }: Props) {
+  const [menu, setMenu] = useState<TreeMenu>(null)
+
+  // Close the menu on outside click / Escape.
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null) }
+    window.addEventListener("mousedown", close)
+    window.addEventListener("keydown", onKey)
+    return () => {
+      window.removeEventListener("mousedown", close)
+      window.removeEventListener("keydown", onKey)
+    }
+  }, [menu])
+
+  const openEmptyMenu = (e: React.MouseEvent) => {
+    if (!canEdit) return
+    e.preventDefault()
+    setMenu({ kind: "empty", x: e.clientX, y: e.clientY })
+  }
+
+  const openTaskMenu = (e: React.MouseEvent, taskId: string) => {
+    if (!canEdit) return
+    e.preventDefault()
+    e.stopPropagation()
+    setMenu({ kind: "task", x: e.clientX, y: e.clientY, taskId })
+  }
+
   // Determine which tasks pass the filter (keeping ancestors when needed)
   const visibleIds = new Set<string>()
   if (filter === "all") {
@@ -41,7 +91,7 @@ export function TreeView({
   } else {
     const byId = new Map(tasks.map((t) => [t.id, t]))
     tasks.forEach((t) => {
-      if (isActive(t)) {
+      if (isVisibleActive(t)) {
         visibleIds.add(t.id)
         if (filter === "active-path" && t.parentId) {
           let p = byId.get(t.parentId)
@@ -72,6 +122,7 @@ export function TreeView({
             onSelect={onSelectTask}
             onToggleCollapse={onToggleTask}
             onTogglePin={onTogglePin}
+            onContextMenu={canEdit ? openTaskMenu : undefined}
             readOnly={readOnly}
           />
           {!collapsed && kids.length > 0 && renderChildren(task.id, sectionId, depth + 1)}
@@ -80,12 +131,21 @@ export function TreeView({
     })
   }
 
+  // In the full view sections always render (even empty), so "nothing here" only
+  // applies to filtered views with no matching tasks, or a project with no sections.
+  const allEmpty = sections.every(
+    (s) => tasks.filter((t) => t.sectionId === s.id && visibleIds.has(t.id)).length === 0,
+  )
+  const nothingRendered = filter === "all" ? sections.length === 0 : allEmpty
+
   return (
-    <div className="flex flex-col gap-4 px-4 py-3">
+    <div className="flex flex-col gap-4 px-4 py-3" onContextMenu={openEmptyMenu}>
       {sections.map((section) => {
         const sectionTasks = tasks.filter((t) => t.sectionId === section.id && visibleIds.has(t.id))
-        if (sectionTasks.length === 0) return null
-        const activeInSection = sectionTasks.filter(isActive).length
+        // Empty sections are shown only in the full ("all") view so a freshly
+        // created section is visible; filtered views hide sections with no match.
+        if (sectionTasks.length === 0 && filter !== "all") return null
+        const attentionInSection = sectionTasks.filter(isAttention).length
         const collapsed = collapsedSections.has(section.id)
 
         return (
@@ -100,9 +160,9 @@ export function TreeView({
               <Folder className="size-4 text-muted-foreground" />
               <span className="text-sm font-semibold text-foreground">{section.name}</span>
               <span className="ml-2 flex items-center gap-1.5">
-                {activeInSection > 0 && (
+                {attentionInSection > 0 && (
                   <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                    {activeInSection} active
+                    {attentionInSection} active
                   </span>
                 )}
                 <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-muted-foreground tabular-nums">
@@ -111,14 +171,131 @@ export function TreeView({
               </span>
             </button>
 
-            {!collapsed && <div className="mt-1 space-y-0.5">{renderChildren(null, section.id, 0)}</div>}
+            {!collapsed && (
+              <div className="mt-1 space-y-0.5">
+                {sectionTasks.length === 0 ? (
+                  <p className="px-2 py-1.5 text-[11px] text-muted-foreground/70">No tasks in this section yet.</p>
+                ) : (
+                  renderChildren(null, section.id, 0)
+                )}
+              </div>
+            )}
           </section>
         )
       })}
 
-      {sections.every((s) => tasks.filter((t) => t.sectionId === s.id && visibleIds.has(t.id)).length === 0) && (
-        <div className="py-16 text-center text-sm text-muted-foreground">Нет задач по выбранному фильтру.</div>
+      {nothingRendered && (
+        <div className="py-16 text-center text-sm text-muted-foreground">
+          Нет задач по выбранному фильтру.
+          {canEdit && (
+            <span className="mt-1 block text-xs text-muted-foreground/70">
+              Правый клик по пустой области, чтобы создать задачу или раздел.
+            </span>
+          )}
+        </div>
+      )}
+
+      {menu && (
+        <TreeContextMenu
+          menu={menu}
+          onCreateTask={onCreateTaskHere}
+          onCreateSection={onCreateSection}
+          onAddSubtask={onAddSubtask}
+          onDeleteTask={onDeleteTask}
+          onClose={() => setMenu(null)}
+        />
       )}
     </div>
+  )
+}
+
+function TreeContextMenu({
+  menu,
+  onCreateTask,
+  onCreateSection,
+  onAddSubtask,
+  onDeleteTask,
+  onClose,
+}: {
+  menu: NonNullable<TreeMenu>
+  onCreateTask?: () => void
+  onCreateSection?: () => void
+  onAddSubtask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string) => void
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Keep the menu within the viewport.
+  const [pos, setPos] = useState({ x: menu.x, y: menu.y })
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const x = Math.min(menu.x, window.innerWidth - rect.width - 8)
+    const y = Math.min(menu.y, window.innerHeight - rect.height - 8)
+    setPos({ x: Math.max(8, x), y: Math.max(8, y) })
+  }, [menu])
+
+  const run = (action?: () => void) => {
+    action?.()
+    onClose()
+  }
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      // Stop the window mousedown-to-close from firing before the click lands.
+      onMouseDown={(e) => e.stopPropagation()}
+      style={{ left: pos.x, top: pos.y }}
+      className="fixed z-50 min-w-44 overflow-hidden rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+    >
+      {menu.kind === "empty" ? (
+        <>
+          <MenuItem icon={Plus} label="Create task" onClick={() => run(onCreateTask)} />
+          <MenuItem icon={Folder} label="Create section / folder" onClick={() => run(onCreateSection)} />
+        </>
+      ) : (
+        <>
+          <MenuItem icon={Plus} label="Add subtask" onClick={() => run(() => onAddSubtask?.(menu.taskId))} />
+          <MenuItem
+            icon={Trash2}
+            label="Delete task"
+            destructive
+            onClick={() => run(() => onDeleteTask?.(menu.taskId))}
+          />
+        </>
+      )}
+    </div>
+  )
+}
+
+function MenuItem({
+  icon: Icon,
+  label,
+  onClick,
+  destructive,
+}: {
+  icon: typeof Plus
+  label: string
+  onClick: () => void
+  destructive?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors",
+        destructive
+          ? "text-destructive hover:bg-destructive/10"
+          : "text-foreground hover:bg-accent",
+      )}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      {label}
+    </button>
   )
 }

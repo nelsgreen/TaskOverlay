@@ -16,6 +16,8 @@ interface Props {
   /** Called on every draft change — auto-apply, no Save button */
   onApply: (task: Task) => void
   onDelete: (id: string) => void
+  /** Move the task to a snapshot section id (group:{id} or project:{id}:root). */
+  onMoveTask?: (taskId: string, sectionId: string) => void
   editMode?: "full" | "connected" | "readonly"
   pendingFields?: Set<string>
   bridgeError?: string | null
@@ -184,6 +186,7 @@ export function DetailsPanel({
   sections,
   onApply,
   onDelete,
+  onMoveTask,
   editMode = "full",
   pendingFields = new Set(),
   bridgeError,
@@ -768,32 +771,29 @@ export function DetailsPanel({
         </div>
 
         {/* ── LOCATION ── */}
-        {/* No move/update-location bridge command exists yet, so this stays
-            disabled with an explicit reason in connected/read-only mode instead
-            of silently no-op'ing. */}
-        <fieldset disabled={bridged} className="contents">
-        <div
-          className={cn("rounded-lg border border-border bg-card/40 p-3", bridged && "opacity-60")}
-          title={bridged ? "Moving tasks between projects/sections is not available in this build yet" : undefined}
-        >
+        {/* Connected: changing project/section sends moveTask; the fresh snapshot
+            reconciles the draft. Mock: updates the local draft directly.
+            Changing project moves the task to that project's root by default. */}
+        <fieldset disabled={locked || pendingFields.has("location")} className="contents">
+        <div className={cn("rounded-lg border border-border bg-card/40 p-3", locked && "opacity-60")}>
           <div className="mb-2 flex items-center gap-1.5">
             <MapPin className="size-3.5 text-muted-foreground" />
             <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
               Location
             </span>
-            {bridged && (
-              <span className="rounded bg-accent px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Later
-              </span>
-            )}
           </div>
           <div className="space-y-2">
             <LocationRow label="Project">
               <Select
                 value={draft.projectId}
                 onChange={(v) => {
-                  const first = sections.find((s) => s.projectId === v)
-                  setDraft((d) => d ? { ...d, projectId: v, sectionId: first ? first.id : d.sectionId, parentId: null } : d)
+                  if (v === draft.projectId) return
+                  if (connected) {
+                    onMoveTask?.(draft.id, `project:${v}:root`)
+                  } else {
+                    const first = sections.find((s) => s.projectId === v)
+                    setDraft((d) => d ? { ...d, projectId: v, sectionId: first ? first.id : d.sectionId, parentId: null } : d)
+                  }
                 }}
                 options={projects.map((p) => ({ value: p.id, label: p.name }))}
               />
@@ -801,7 +801,11 @@ export function DetailsPanel({
             <LocationRow label="Section">
               <Select
                 value={draft.sectionId}
-                onChange={(v) => set("sectionId", v)}
+                onChange={(v) => {
+                  if (v === draft.sectionId) return
+                  if (connected) onMoveTask?.(draft.id, v)
+                  else set("sectionId", v)
+                }}
                 options={projectSections.map((s) => ({ value: s.id, label: s.name }))}
               />
             </LocationRow>
@@ -835,8 +839,8 @@ export function DetailsPanel({
       <div className="flex items-center gap-2 border-t border-border px-4 py-3">
         <button
           onClick={() => onDelete(draft.id)}
-          disabled={bridged}
-          className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
+          disabled={locked}
+          className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Trash2 className="size-3.5" />
           Delete task

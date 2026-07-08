@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { FolderTree } from "lucide-react"
+import { Folder, FolderTree } from "lucide-react"
 import type { MeetItem, Section, Status, StatusFilterKey, TabKey, Task, TimelineItem, TreeFilter, WorkspaceTaskCommand, WorkstreamFilter } from "@/lib/types"
 import {
   initialMeetItems,
@@ -56,6 +56,9 @@ export function TaskManager() {
   const [hideDone, setHideDone] = useState(false)
   const [wsFilter, setWsFilter] = useState<WorkstreamFilter>("all")
   const [addingWorkstream, setAddingWorkstream] = useState(false)
+  const [addingTreeSection, setAddingTreeSection] = useState(false)
+  const [newSectionName, setNewSectionName] = useState("")
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
@@ -686,12 +689,128 @@ export function TaskManager() {
     if (!selectedProjectIds.includes(updated.projectId)) setSelectedProjectIds([updated.projectId])
   }
 
+  // Choose a safe selection after the current task disappears (deleted/moved out
+  // of scope): the next sibling in the same section, else clear.
+  const clearSelectionAfterRemoval = (removedId: string) => {
+    if (selection?.kind !== "task" || selection.id !== removedId) return
+    const removed = tasks.find((t) => t.id === removedId)
+    const nearby = removed
+      ? tasks.find((t) => t.id !== removedId && t.sectionId === removed.sectionId && t.projectId === removed.projectId)
+      : null
+    setSelection(nearby ? { kind: "task", id: nearby.id } : null)
+    setSelectedTimelineItemId(null)
+  }
+
   const handleDelete = (id: string) => {
-    if (bridged) return
-    setMockTasks((prev) => prev.filter((t) => t.id !== id && t.parentId !== id))
-    if (selection?.kind === "task" && selection.id === id) {
-      setSelection(null)
-      setSelectedTimelineItemId(null)
+    if (connected) {
+      bridge.sendCommand({ type: "deleteTask", taskId: id })
+      clearSelectionAfterRemoval(id)
+      return
+    }
+    if (!bridged) {
+      // Match connected DeleteNode: reparent direct children up to the deleted
+      // task's parent instead of cascade-deleting them.
+      const removed = tasks.find((t) => t.id === id)
+      const newParent = removed?.parentId ?? null
+      setMockTasks((prev) => prev
+        .filter((t) => t.id !== id)
+        .map((t) => (t.parentId === id ? { ...t, parentId: newParent } : t)))
+      clearSelectionAfterRemoval(id)
+    }
+  }
+
+  // Delete always routes through a confirmation dialog (Tree menu + Details button).
+  const requestDeleteTask = (id: string) => setPendingDelete(id)
+  const confirmDeleteTask = () => {
+    if (pendingDelete) handleDelete(pendingDelete)
+    setPendingDelete(null)
+  }
+  const pendingDeleteTask = pendingDelete ? tasks.find((t) => t.id === pendingDelete) ?? null : null
+  const pendingDeleteHasSubtasks = pendingDeleteTask
+    ? tasks.some((t) => t.parentId === pendingDeleteTask.id)
+    : false
+
+  // Add a subtask under a specific task (Tree context menu). Reuses createTask
+  // with parentTaskId so the new task inherits the parent's project/section.
+  const handleAddSubtask = (parentTaskId: string) => {
+    if (connected) {
+      bridge.sendCreateTask({ title: "New task", parentTaskId })
+      return
+    }
+    if (!bridged) {
+      const parent = tasks.find((t) => t.id === parentTaskId)
+      if (!parent) return
+      const id = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      const created: Task = {
+        id,
+        projectId: parent.projectId,
+        sectionId: parent.sectionId,
+        parentId: parent.id,
+        title: "New task",
+        status: "TODO",
+        pinned: false,
+        reminder: "none",
+      }
+      setMockTasks((prev) => [...prev, created])
+      setSelection({ kind: "task", id })
+    }
+  }
+
+  // Move a task to another section/project root through the bridge. sectionId is
+  // the snapshot section id (group:{id} or project:{id}:root).
+  const handleMoveTask = (taskId: string, sectionId: string) => {
+    if (connected) {
+      bridge.sendCommand({ type: "moveTask", taskId, sectionId })
+      return
+    }
+    if (!bridged) {
+      const section = sections.find((s) => s.id === sectionId)
+      if (!section) return
+      setMockTasks((prev) => prev.map((t) => (t.id === taskId
+        ? { ...t, sectionId: section.id, projectId: section.projectId, parentId: null }
+        : t)))
+    }
+  }
+
+  // Create a task at the current Tree project's root (empty-area context menu).
+  const handleCreateTaskAtRoot = () => {
+    const rootSectionId = `project:${treeProjectId}:root`
+    if (connected) {
+      bridge.sendCreateTask({ title: "New task", projectId: treeProjectId, sectionId: rootSectionId })
+      return
+    }
+    if (!bridged) {
+      const fallbackSectionId = sections.find((s) => s.projectId === treeProjectId)?.id ?? ""
+      const id = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      const created: Task = {
+        id,
+        projectId: treeProjectId,
+        sectionId: fallbackSectionId,
+        parentId: null,
+        title: "New task",
+        status: "TODO",
+        pinned: false,
+        reminder: "none",
+      }
+      setMockTasks((prev) => [...prev, created])
+      setSelection({ kind: "task", id })
+    }
+  }
+
+  // Create a section under the current Tree project. Sections have no rename
+  // command yet, so the name is taken up front via an inline input.
+  const handleCreateTreeSection = (title: string) => {
+    const trimmed = title.trim()
+    if (!trimmed) return
+    if (connected) {
+      bridge.sendCreateSection({ title: trimmed, projectId: treeProjectId })
+      setAddingTreeSection(false)
+      return
+    }
+    if (!bridged) {
+      const id = `local-s-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      setMockSectionList((prev) => [...prev, { id, projectId: treeProjectId, name: trimmed }])
+      setAddingTreeSection(false)
     }
   }
 
@@ -752,6 +871,8 @@ export function TaskManager() {
     updateTaskWaitingFor: "waitingFor",
     updateTaskReminder: "reminder",
     updateTaskDeadline: "deadline",
+    moveTask: "location",
+    deleteTask: "delete",
   }
   const pendingFields = new Set(
     bridge.pendingCommands
@@ -780,6 +901,8 @@ export function TaskManager() {
             treeProjectColor={treeProject.color}
             onAddTask={() => handleCreateTask()}
             addTaskDisabled={readOnly}
+            onAddSection={() => setAddingTreeSection(true)}
+            addSectionDisabled={readOnly}
             statusFilter={statusFilter}
             onStatusFilterChange={changeStatusFilter}
             hideDone={hideDone}
@@ -841,6 +964,42 @@ export function TaskManager() {
                     })}
                   </div>
                 )}
+                {addingTreeSection && !readOnly && (
+                  <div className="flex items-center gap-2 border-b border-border bg-card/40 px-5 py-2">
+                    <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+                    <input
+                      autoFocus
+                      value={newSectionName}
+                      onChange={(e) => setNewSectionName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleCreateTreeSection(newSectionName)
+                          setNewSectionName("")
+                        } else if (e.key === "Escape") {
+                          setAddingTreeSection(false)
+                          setNewSectionName("")
+                        }
+                      }}
+                      placeholder={`New section in ${treeProject.name}…`}
+                      className="h-7 flex-1 rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { handleCreateTreeSection(newSectionName); setNewSectionName("") }}
+                      disabled={!newSectionName.trim()}
+                      className="h-7 rounded-md bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Create
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setAddingTreeSection(false); setNewSectionName("") }}
+                      className="h-7 rounded-md border border-border px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
                 <TreeView
                   sections={projectSections}
                   tasks={treeTasks}
@@ -853,6 +1012,11 @@ export function TaskManager() {
                   onToggleTask={toggle(setCollapsedTasks)}
                   onTogglePin={handleTogglePin}
                   readOnly={bridged}
+                  canEdit={!readOnly}
+                  onCreateTaskHere={handleCreateTaskAtRoot}
+                  onCreateSection={() => setAddingTreeSection(true)}
+                  onAddSubtask={handleAddSubtask}
+                  onDeleteTask={requestDeleteTask}
                 />
               </div>
             )}
@@ -951,7 +1115,8 @@ export function TaskManager() {
               projects={projects}
               sections={sections}
               onApply={handleApply}
-              onDelete={handleDelete}
+              onDelete={requestDeleteTask}
+              onMoveTask={handleMoveTask}
               editMode={connected ? "connected" : readOnly ? "readonly" : "full"}
               pendingFields={pendingFields}
               bridgeError={bridge.error}
@@ -970,6 +1135,44 @@ export function TaskManager() {
         onSelectTask={selectTask}
         taskIds={activeNowTaskIds}
       />
+
+      {pendingDeleteTask && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setPendingDelete(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-xl"
+          >
+            <h2 className="text-sm font-semibold text-foreground">Delete task?</h2>
+            <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+              "{pendingDeleteTask.title}" will be deleted.
+              {pendingDeleteHasSubtasks
+                ? " Its subtasks will be moved up to the parent, not deleted."
+                : ""}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDelete(null)}
+                className="rounded-md border border-border px-3 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteTask}
+                className="rounded-md bg-destructive px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-destructive/90"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -226,6 +226,8 @@ export type WorkspaceTaskCommand =
       remindEveryMinutes?: number | null
     }
   | { type: "updateTaskDeadline"; taskId: string; deadlineAtUtc: string | null }
+  | { type: "moveTask"; taskId: string; sectionId: string }
+  | { type: "deleteTask"; taskId: string }
 
 export type WorkspaceContextCommand = {
   type: "updateWorkspaceContext"
@@ -241,8 +243,10 @@ export type WorkspaceContextCommand = {
 export type WorkspaceCreateTaskCommand = {
   type: "createTask"
   title: string
-  projectId: string
+  projectId?: string
   sectionId?: string | null
+  /** When set, the new task becomes a subtask of this task and inherits its project/section. */
+  parentTaskId?: string
 }
 
 /** Creates a top-level section (workstream) under a project. The bridge returns the section id. */
