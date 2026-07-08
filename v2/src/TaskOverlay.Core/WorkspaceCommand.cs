@@ -13,12 +13,16 @@ public sealed record WorkspaceCommandResult(
     bool Success,
     string? ErrorCode,
     string? ErrorMessage,
-    string? CreatedTaskId = null)
+    string? CreatedTaskId = null,
+    string? CreatedSectionId = null)
 {
     public const int CurrentSchemaVersion = 1;
     public const string CurrentMessageType = "commandResult";
 
-    public static WorkspaceCommandResult Succeeded(string commandId, string? createdTaskId = null) =>
+    public static WorkspaceCommandResult Succeeded(
+        string commandId,
+        string? createdTaskId = null,
+        string? createdSectionId = null) =>
         new(
             CurrentSchemaVersion,
             CurrentMessageType,
@@ -26,7 +30,8 @@ public sealed record WorkspaceCommandResult(
             Success: true,
             ErrorCode: null,
             ErrorMessage: null,
-            createdTaskId);
+            createdTaskId,
+            createdSectionId);
 
     public static WorkspaceCommandResult Failed(
         string commandId,
@@ -106,6 +111,11 @@ public static class WorkspaceCommandProcessor
             if (type == "createTask")
             {
                 return CreateTask(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
+            }
+
+            if (type == "createSection")
+            {
+                return CreateSection(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
             }
 
             var taskIdText = ReadString(payload, "taskId");
@@ -397,6 +407,33 @@ public static class WorkspaceCommandProcessor
         return created is not null
             ? WorkspaceCommandResult.Succeeded(commandId, created.Id.ToString("N"))
             : Fail(commandId, "mutationRejected", "Task could not be created in the given location.");
+    }
+
+    private static WorkspaceCommandResult CreateSection(
+        AppState state,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        var title = ReadString(payload, "title");
+        if (string.IsNullOrWhiteSpace(title) || title.Length > MaximumTitleLength)
+        {
+            return Fail(commandId, "invalidPayload", "Section title is required and must not be too long.");
+        }
+
+        var projectIdText = ReadString(payload, "projectId");
+        if (!Guid.TryParse(projectIdText, out var projectId))
+        {
+            return Fail(commandId, "invalidPayload", "A valid projectId is required.");
+        }
+
+        var treeService = new TreeStateService(state);
+        var created = treeService.CreateGroup(projectId, title, timestamp);
+        return created is not null
+            ? WorkspaceCommandResult.Succeeded(
+                commandId,
+                createdSectionId: $"group:{created.Id.ToString("N")}")
+            : Fail(commandId, "mutationRejected", "Section could not be created in the given project.");
     }
 
     private static bool TryResolveSectionParent(JsonElement payload, out Guid parentId)

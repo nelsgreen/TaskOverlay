@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { FolderTree } from "lucide-react"
-import type { MeetItem, Status, StatusFilterKey, TabKey, Task, TimelineItem, TreeFilter, WorkspaceTaskCommand } from "@/lib/types"
+import type { MeetItem, Section, Status, StatusFilterKey, TabKey, Task, TimelineItem, TreeFilter, WorkspaceTaskCommand, WorkstreamFilter } from "@/lib/types"
 import {
   initialMeetItems,
   initialTasks,
@@ -23,6 +23,7 @@ import { CalendarView } from "./calendar-view"
 import { DetailsPanel } from "./details-panel"
 import { MeetDetailsPanel } from "./meet-details-panel"
 import { ActiveNowStrip } from "./active-now-strip"
+import { WorkstreamsView, WorkstreamDetailPanel, deriveWorkstreamState, isRootSection } from "./workstreams-view"
 
 type WorkspaceSelection =
   | { kind: "task"; id: string }
@@ -33,6 +34,9 @@ export function TaskManager() {
   const bridge = useWorkspaceBridge()
   const [mockTasks, setMockTasks] = useState<Task[]>(initialTasks)
   const [mockMeetItems, setMockMeetItems] = useState<MeetItem[]>(initialMeetItems)
+  // Sections need local state in mock mode so "Add workstream" stays usable for
+  // orientation; connected mode always uses the authoritative snapshot sections.
+  const [mockSectionList, setMockSectionList] = useState<Section[]>(mockSections)
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>(["kazchess"])
   const [selection, setSelection] = useState<WorkspaceSelection>({ kind: "task", id: "t-pr-1" })
   const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<string | null>(null)
@@ -50,6 +54,8 @@ export function TaskManager() {
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
   const [hideDone, setHideDone] = useState(false)
+  const [wsFilter, setWsFilter] = useState<WorkstreamFilter>("all")
+  const [addingWorkstream, setAddingWorkstream] = useState(false)
   const [search, setSearch] = useState("")
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
@@ -61,7 +67,7 @@ export function TaskManager() {
   const connected = bridged && bridge.canEdit
   const readOnly = bridged && !connected
   const projects = bridge.data?.projects ?? mockProjects
-  const sections = bridge.data?.sections ?? mockSections
+  const sections = bridge.data?.sections ?? mockSectionList
   const rawTasks = bridge.data?.tasks ?? mockTasks
   const tasks = useMemo(() => {
     if (Object.keys(plannedOverrides).length === 0) return rawTasks
@@ -139,11 +145,16 @@ export function TaskManager() {
       const restoredTimelineItem = context.activeTab === "timeline" && restoredTask
         ? restoredTimeline?.id ?? null
         : null
+      // A persisted workstream id may reference a since-deleted section.
+      const restoredWorkstream = context.selectedWorkstreamId &&
+        bridgedData.sections.some((section) => section.id === context.selectedWorkstreamId)
+        ? context.selectedWorkstreamId
+        : null
 
       setSelectedProjectIds(restoredProjectIds)
       setSelection(restoredTask ? { kind: "task", id: restoredTask } : null)
       setSelectedTimelineItemId(restoredTimelineItem)
-      setSelectedWorkstreamId(context.selectedWorkstreamId)
+      setSelectedWorkstreamId(restoredWorkstream)
       setTab(context.activeTab)
       setFilter(context.filter)
       lastPersistedContext.current = JSON.stringify({
@@ -151,7 +162,7 @@ export function TaskManager() {
         selectedProjectIds: restoredProjectIds,
         selectedTaskId: restoredTask,
         selectedTimelineItemId: restoredTimelineItem,
-        selectedWorkstreamId: context.selectedWorkstreamId,
+        selectedWorkstreamId: restoredWorkstream,
         filter: context.filter,
       })
       contextHydrated.current = true
@@ -167,7 +178,12 @@ export function TaskManager() {
       : firstProjectId ? [firstProjectId] : []
     setSelectedProjectIds(repairedProjectIds)
     setSelection((selected) => {
-      if (tab === "workstreams") return null
+      if (tab === "workstreams") {
+        // Keep the clicked task selected across snapshot refreshes so Details
+        // editing keeps working inside Workstreams.
+        if (selected?.kind === "task" && bridgedData.tasks.some((task) => task.id === selected.id)) return selected
+        return null
+      }
       if (tab === "calendar") {
         // Keep the clicked task/meet selected across snapshot refreshes.
         if (selected?.kind === "task" && bridgedData.tasks.some((task) => task.id === selected.id)) return selected
@@ -202,6 +218,10 @@ export function TaskManager() {
     setSelectedTimelineItemId((selected) =>
       tab === "timeline" && selected && bridgedData.timelineItems.some((item) =>
         item.id === selected && (!item.projectId || repairedProjectIds.includes(item.projectId)))
+        ? selected
+        : null)
+    setSelectedWorkstreamId((selected) =>
+      selected && bridgedData.sections.some((section) => section.id === selected)
         ? selected
         : null)
   }, [bridge.status, bridge.data])
@@ -401,6 +421,16 @@ export function TaskManager() {
       if (!itemInScope || !selectionMatches) clearDetailsSelection()
       return
     }
+    if (tab === "workstreams") {
+      clearDetailsSelection()
+      // Drop the selected workstream when its project leaves the scope.
+      setSelectedWorkstreamId((selected) => {
+        if (!selected) return null
+        const section = sections.find((candidate) => candidate.id === selected)
+        return section && scopeIds.includes(section.projectId) ? selected : null
+      })
+      return
+    }
     clearDetailsSelection()
   }
 
@@ -548,7 +578,97 @@ export function TaskManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge.lastCreatedTaskId])
 
+  // ── Workstreams: a workstream is a top-level section under a project ──
+  const singleProjectScope = selectedProjectIds.length === 1
+  const canCreateWorkstream = singleProjectScope && !readOnly
+  const createWorkstreamHint = !singleProjectScope
+    ? "Select one project in Project Scope to add a workstream."
+    : readOnly
+      ? "Read-only: connect to add workstreams."
+      : null
+
+  const handleSelectWorkstream = (id: string) => {
+    setSelectedWorkstreamId(id)
+    // Clearing the task selection switches the right panel to the workstream view.
+    setSelection(null)
+    setSelectedTimelineItemId(null)
+  }
+
+  const handleCreateWorkstream = (title: string) => {
+    const trimmed = title.trim()
+    if (!trimmed || !singleProjectScope) return
+    const projectId = selectedProjectIds[0]
+    if (connected) {
+      bridge.sendCreateSection({ title: trimmed, projectId })
+      setAddingWorkstream(false)
+      return
+    }
+    if (!bridged) {
+      const id = `local-s-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      setMockSectionList((prev) => [...prev, { id, projectId, name: trimmed }])
+      setSelectedWorkstreamId(id)
+      setSelection(null)
+      setAddingWorkstream(false)
+    }
+  }
+
+  // Add task inside the currently selected workstream (uses the createTask
+  // bridge command with the workstream's sectionId).
+  const handleAddTaskInWorkstream = () => {
+    const section = selectedWorkstreamId
+      ? sections.find((candidate) => candidate.id === selectedWorkstreamId)
+      : null
+    if (!section) return
+    if (connected) {
+      bridge.sendCreateTask({ title: "New task", projectId: section.projectId, sectionId: section.id })
+      return
+    }
+    if (!bridged) {
+      const id = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      const created: Task = {
+        id,
+        projectId: section.projectId,
+        sectionId: section.id,
+        parentId: null,
+        title: "New task",
+        status: "TODO",
+        pinned: false,
+        reminder: "none",
+      }
+      setMockTasks((prev) => [...prev, created])
+      setSelection({ kind: "task", id })
+    }
+  }
+
+  // Once the bridge confirms a created workstream, select it so its (empty)
+  // task list opens immediately in the right panel.
+  useEffect(() => {
+    if (!bridge.lastCreatedSectionId) return
+    setSelectedWorkstreamId(bridge.lastCreatedSectionId)
+    setSelection(null)
+    bridge.clearLastCreatedSectionId()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge.lastCreatedSectionId])
+
+  // Toolbar summary counts for the Workstreams filter chips (real rollups).
+  const wsSummary = useMemo(() => {
+    const scoped = sections.filter((section) =>
+      selectedProjectIds.includes(section.projectId) && !isRootSection(section))
+    const counts: Record<string, number> = { all: scoped.length, active: 0, waiting: 0, done: 0 }
+    for (const section of scoped) {
+      const state = deriveWorkstreamState(tasks.filter((task) => task.sectionId === section.id))
+      if (state && state in counts) counts[state]++
+    }
+    return counts
+  }, [sections, tasks, selectedProjectIds])
+
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null
+  const selectedWorkstreamSection = selectedWorkstreamId
+    ? sections.find((s) => s.id === selectedWorkstreamId && !isRootSection(s)) ?? null
+    : null
+  const selectedWorkstreamProject = selectedWorkstreamSection
+    ? projects.find((p) => p.id === selectedWorkstreamSection.projectId) ?? null
+    : null
 
   const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (id: string) =>
     setter((prev) => {
@@ -675,6 +795,12 @@ export function TaskManager() {
             onCalendarStep={handleCalendarStep}
             onCalendarShowDoneChange={setCalendarShowDone}
             onCalendarViewModeChange={setCalendarViewMode}
+            wsFilter={wsFilter}
+            onWsFilterChange={setWsFilter}
+            wsSummary={wsSummary}
+            onAddWorkstream={() => setAddingWorkstream(true)}
+            addWorkstreamDisabled={!canCreateWorkstream}
+            addWorkstreamHint={createWorkstreamHint}
           />
           <ProjectScopeBar
             projects={projects}
@@ -772,7 +898,24 @@ export function TaskManager() {
                 onClearPlanned={(taskId) => handlePlannedWork(taskId, null, null)}
               />
             )}
-            {tab === "workstreams" && <WorkstreamsPlaceholder />}
+            {tab === "workstreams" && (
+              <WorkstreamsView
+                projects={projects}
+                sections={sections}
+                tasks={tasks}
+                selectedProjectIds={selectedProjectIds}
+                wsFilter={wsFilter}
+                search={search}
+                selectedWorkstreamId={selectedWorkstreamId}
+                onSelectWorkstream={handleSelectWorkstream}
+                adding={addingWorkstream}
+                onAddingChange={setAddingWorkstream}
+                onCreateWorkstream={handleCreateWorkstream}
+                canCreate={canCreateWorkstream}
+                createHint={createWorkstreamHint}
+                addProjectName={treeProject.name}
+              />
+            )}
           </div>
         </main>
 
@@ -791,6 +934,16 @@ export function TaskManager() {
               tasks={tasks}
               onApply={handleApplyMeet}
               onDelete={handleDeleteMeet}
+            />
+          ) : tab === "workstreams" && !selectedTask && selectedWorkstreamSection && selectedWorkstreamProject ? (
+            <WorkstreamDetailPanel
+              section={selectedWorkstreamSection}
+              project={selectedWorkstreamProject}
+              tasks={tasks.filter((t) => t.sectionId === selectedWorkstreamSection.id)}
+              search={search}
+              readOnly={readOnly}
+              onSelectTask={selectTask}
+              onAddTask={handleAddTaskInWorkstream}
             />
           ) : (
             <DetailsPanel
@@ -817,26 +970,6 @@ export function TaskManager() {
         onSelectTask={selectTask}
         taskIds={activeNowTaskIds}
       />
-    </div>
-  )
-}
-
-function WorkstreamsPlaceholder() {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-accent">
-        <FolderTree className="size-5 text-muted-foreground" />
-      </div>
-      <div>
-        <p className="text-sm font-medium text-foreground">Workstreams</p>
-        <p className="mt-1 max-w-sm text-xs text-muted-foreground text-pretty">
-          Workstreams will group long-running work tracks across projects. Not the same as a Project, Status, or
-          Timeline — coming later.
-        </p>
-      </div>
-      <span className="rounded bg-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        Later
-      </span>
     </div>
   )
 }

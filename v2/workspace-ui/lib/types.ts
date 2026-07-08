@@ -120,6 +120,14 @@ export type TreeFilter = "all" | "active" | "active-path"
 export type StatusFilterKey = "all" | "panel" | Status | "remind"
 export type TabKey = "tree" | "status" | "timeline" | "calendar" | "workstreams"
 
+/**
+ * Derived workstream activity state, computed from the real tasks in the
+ * section (v0 also had "blocked"/"stale", which need data the model does not
+ * track yet). null = workstream has no tasks.
+ */
+export type WorkstreamState = "active" | "waiting" | "todo" | "done"
+export type WorkstreamFilter = "all" | "active" | "waiting" | "done"
+
 /** How the workspace project scope is selected */
 export interface ProjectScope {
   /** ids of currently selected projects (>=1) */
@@ -237,7 +245,18 @@ export type WorkspaceCreateTaskCommand = {
   sectionId?: string | null
 }
 
-export type WorkspaceCommand = WorkspaceTaskCommand | WorkspaceContextCommand | WorkspaceCreateTaskCommand
+/** Creates a top-level section (workstream) under a project. The bridge returns the section id. */
+export type WorkspaceCreateSectionCommand = {
+  type: "createSection"
+  title: string
+  projectId: string
+}
+
+export type WorkspaceCommand =
+  | WorkspaceTaskCommand
+  | WorkspaceContextCommand
+  | WorkspaceCreateTaskCommand
+  | WorkspaceCreateSectionCommand
 
 export type WorkspaceCommandPayload = WorkspaceCommand extends infer Command
   ? Command extends { type: string }
@@ -260,6 +279,7 @@ export interface WorkspaceCommandResult {
   errorCode: string | null
   errorMessage: string | null
   createdTaskId?: string | null
+  createdSectionId?: string | null
 }
 
 export interface PendingWorkspaceCommand {

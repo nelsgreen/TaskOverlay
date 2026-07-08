@@ -14,7 +14,7 @@ import {
   Search,
   Video,
 } from "lucide-react"
-import type { StatusFilterKey, TabKey, Task, TreeFilter } from "@/lib/types"
+import type { StatusFilterKey, TabKey, Task, TreeFilter, WorkstreamFilter } from "@/lib/types"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { cn } from "@/lib/utils"
 import { addDaysKey, formatWeekLabel, mondayOfWeekKey, parseDateKey, todayKey } from "@/lib/calendar-date"
@@ -43,6 +43,12 @@ interface Props {
   onCalendarStep: (dir: number) => void
   onCalendarShowDoneChange: (showDone: boolean) => void
   onCalendarViewModeChange: (mode: "day" | "week") => void
+  wsFilter: WorkstreamFilter
+  onWsFilterChange: (filter: WorkstreamFilter) => void
+  wsSummary: Record<string, number>
+  onAddWorkstream: () => void
+  addWorkstreamDisabled?: boolean
+  addWorkstreamHint?: string | null
 }
 
 const tabs: { key: TabKey; label: string; icon: typeof FolderTree; later?: boolean }[] = [
@@ -50,7 +56,7 @@ const tabs: { key: TabKey; label: string; icon: typeof FolderTree; later?: boole
   { key: "status", label: "Status", icon: ListChecks },
   { key: "timeline", label: "Timeline", icon: CalendarClock },
   { key: "calendar", label: "Calendar", icon: CalendarDays },
-  { key: "workstreams", label: "Workstreams", icon: Layers, later: true },
+  { key: "workstreams", label: "Workstreams", icon: Layers },
 ]
 
 const treeFilters: { key: TreeFilter; label: string }[] = [
@@ -107,8 +113,14 @@ export function WorkspaceHeader({
   onCalendarStep,
   onCalendarShowDoneChange,
   onCalendarViewModeChange,
+  wsFilter,
+  onWsFilterChange,
+  wsSummary,
+  onAddWorkstream,
+  addWorkstreamDisabled = false,
+  addWorkstreamHint = null,
 }: Props) {
-  const searchDisabled = tab === "calendar" || tab === "workstreams"
+  const searchDisabled = tab === "calendar"
 
   return (
     <header className="shrink-0 border-b border-border">
@@ -201,7 +213,16 @@ export function WorkspaceHeader({
             onViewModeChange={onCalendarViewModeChange}
           />
         )}
-        {tab === "workstreams" && <LaterToolbar label="Workstreams are planned for a later release" />}
+        {tab === "workstreams" && (
+          <WorkstreamsToolbar
+            wsFilter={wsFilter}
+            onWsFilterChange={onWsFilterChange}
+            wsSummary={wsSummary}
+            onAddWorkstream={onAddWorkstream}
+            addDisabled={addWorkstreamDisabled}
+            addHint={addWorkstreamHint}
+          />
+        )}
       </div>
     </header>
   )
@@ -471,13 +492,74 @@ function CalendarToolbar({
   )
 }
 
-function LaterToolbar({ label }: { label: string }) {
+// Workstream state filter chips — follows v0 TreeToolbar/WorkstreamsToolbar
+// (v0 workspace-header.tsx wsFilterCards), limited to states derivable from
+// real task data (v0's "blocked"/"stale" need data the model does not track).
+const wsFilterCards: {
+  filter: WorkstreamFilter
+  label: string
+  countKey: string
+  activeColor: string
+  activeText: string
+}[] = [
+  { filter: "all", label: "All", countKey: "all", activeColor: "bg-accent border-border", activeText: "text-foreground" },
+  { filter: "active", label: "Active", countKey: "active", activeColor: "bg-status-focus/10 border-status-focus/40", activeText: "text-status-focus" },
+  { filter: "waiting", label: "Waiting", countKey: "waiting", activeColor: "bg-status-wait/10 border-status-wait/40", activeText: "text-status-wait" },
+  { filter: "done", label: "Done", countKey: "done", activeColor: "bg-muted/60 border-border", activeText: "text-muted-foreground" },
+]
+
+function WorkstreamsToolbar({
+  wsFilter,
+  onWsFilterChange,
+  wsSummary,
+  onAddWorkstream,
+  addDisabled,
+  addHint,
+}: {
+  wsFilter: WorkstreamFilter
+  onWsFilterChange: (filter: WorkstreamFilter) => void
+  wsSummary: Record<string, number>
+  onAddWorkstream: () => void
+  addDisabled?: boolean
+  addHint?: string | null
+}) {
   return (
-    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-      <span>{label}</span>
-      <span className="rounded bg-accent px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide">
-        Later
-      </span>
-    </div>
+    <>
+      <div className="flex items-center gap-1">
+        {wsFilterCards.map((card) => {
+          const count = wsSummary[card.countKey] ?? 0
+          const isActive = wsFilter === card.filter
+          return (
+            <button
+              type="button"
+              key={card.filter}
+              onClick={() => onWsFilterChange(isActive && card.filter !== "all" ? "all" : card.filter)}
+              className={cn(
+                "flex h-6 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors",
+                isActive
+                  ? cn(card.activeColor, card.activeText)
+                  : "border-border bg-card/50 text-muted-foreground hover:bg-accent/30 hover:text-foreground",
+              )}
+            >
+              <span className="font-mono font-bold tabular-nums">{count}</span>
+              {card.label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="ml-auto">
+        <button
+          type="button"
+          onClick={onAddWorkstream}
+          disabled={addDisabled}
+          title={addDisabled ? addHint ?? undefined : undefined}
+          className="flex h-6 items-center gap-1.5 rounded-md bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Plus className="size-3.5" />
+          Workstream
+        </button>
+      </div>
+    </>
   )
 }
