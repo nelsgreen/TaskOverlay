@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Bell, ChevronDown, ChevronRight, Flag, MapPin, Pin, Repeat, Trash2, UndoDot, X } from "lucide-react"
-import type { Project, ReminderPreset, ReminderState, RepeatInterval, Section, Status, Task } from "@/lib/types"
+import { ArrowDown, ArrowUp, Bell, Check, ChevronDown, ChevronRight, Flag, ListChecks, MapPin, Pin, Repeat, Trash2, UndoDot, X } from "lucide-react"
+import type { Project, ReminderPreset, ReminderState, RepeatInterval, Section, Status, Task, TaskCheckpoint, WorkspaceTaskCommand } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { isoFromLocalDateTime } from "@/lib/calendar-date"
 import { statusConfig } from "./status-badge"
@@ -31,6 +31,8 @@ interface Props {
     field: BridgeEditField,
     value: BridgeEditValue,
   ) => boolean
+  /** Sends a fully-shaped checkpoint ("Steps") command through the bridge when connected. */
+  onCheckpointCommand?: (command: WorkspaceTaskCommand) => boolean
   onClearBridgeError?: () => void
 }
 
@@ -120,6 +122,33 @@ const repeatIntervals: { value: RepeatInterval; label: string }[] = [
   { value: "monthly", label: "Monthly" },
 ]
 
+/** Steps in stable order; absent and empty both mean "no steps". */
+function sortedCheckpoints(t: Task): TaskCheckpoint[] {
+  return [...(t.checkpoints ?? [])].sort((a, b) => a.order - b.order)
+}
+
+function checkpointProgress(t: Task): { done: number; total: number; summary: string } {
+  const items = t.checkpoints ?? []
+  const total = items.length
+  const done = items.filter((c) => c.done).length
+  const summary = total === 0 ? "No steps" : done === total ? "All steps ready" : `${done}/${total}`
+  return { done, total, summary }
+}
+
+/** Splits pasted text into step titles: one per non-empty line. */
+function splitPastedSteps(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+/** Local id for mock/dev-mode steps (connected mode gets real ids from the snapshot). */
+function newCheckpointId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID()
+  return `step-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 function deriveReminderState(t: Task): ReminderState {
   if (t.reminder === "none" && !t.reminderDate && !t.reminderTime) return "none"
   if (t.reminderDate || t.reminderTime || t.reminder === "custom") return "scheduled"
@@ -190,6 +219,9 @@ function mergeTaskFields(
     deadlineAtUtc: incoming.deadlineAtUtc,
     plannedStartAtUtc: incoming.plannedStartAtUtc,
     plannedDurationMinutes: incoming.plannedDurationMinutes,
+    // Checkpoints always take the authoritative snapshot: in-progress row edits
+    // and the add-step input live in separate local buffers, never in the draft.
+    checkpoints: incoming.checkpoints,
   }
   if (activeField !== "title") next.title = incoming.title
   if (activeField !== "notes") next.notes = incoming.notes
@@ -241,6 +273,7 @@ export function DetailsPanel({
   pendingFields = new Set(),
   bridgeError,
   onBridgeEdit,
+  onCheckpointCommand,
   onClearBridgeError,
 }: Props) {
   const [draft, setDraft] = useState<Task | null>(task)
@@ -252,6 +285,12 @@ export function DetailsPanel({
   // even though it reconciles every other field. Reminder/Deadline don't need an
   // entry here — reminderOpen/deadlineOpen already mark those as "being edited".
   const [activeField, setActiveField] = useState<"title" | "notes" | "waitingFor" | null>(null)
+  // Steps editor state — all separate from the draft so snapshot reconciliation
+  // can always take the authoritative checkpoint list without stomping typing.
+  const [stepsOpen, setStepsOpen] = useState(false)
+  const [newStepText, setNewStepText] = useState("")
+  const [editingStepId, setEditingStepId] = useState<string | null>(null)
+  const [editingStepText, setEditingStepText] = useState("")
 
   // Track the snapshot at the start of the editing session for "Revert"
   const sessionBaseRef = useRef<Task | null>(task)
@@ -277,6 +316,10 @@ export function DetailsPanel({
       setDeadlineOpen(false)
       setDeadlineWithTime(task?.deadlineTime ? true : false)
       setActiveField(null)
+      setStepsOpen(false)
+      setNewStepText("")
+      setEditingStepId(null)
+      setEditingStepText("")
       return
     }
 
@@ -447,12 +490,92 @@ export function DetailsPanel({
     }
   }
 
+  // ── Steps (checkpoints) ──
+  // Connected: send the granular command, update the draft optimistically, and
+  // let the fresh snapshot reconcile (same pattern as Status/Pin). Mock/full:
+  // the draft mutation itself is the persistence via onApply.
+  const checkpoints = sortedCheckpoints(draft)
+  const progress = checkpointProgress(draft)
+  const checkpointsPending = pendingFields.has("checkpoints")
+
+  function sendCheckpoint(command: WorkspaceTaskCommand) {
+    if (!connected || checkpointsPending) return
+    onClearBridgeError?.()
+    onCheckpointCommand?.(command)
+  }
+
+  function setDraftCheckpoints(update: (items: TaskCheckpoint[]) => TaskCheckpoint[]) {
+    setDraft((d) => {
+      if (!d) return d
+      const next = update(sortedCheckpoints(d)).map((item, index) => ({ ...item, order: index }))
+      return { ...d, checkpoints: next }
+    })
+  }
+
+  function addSteps(titles: string[]) {
+    const clean = titles.map((t) => t.trim()).filter(Boolean)
+    if (clean.length === 0) return
+    if (connected) sendCheckpoint({ type: "addTaskCheckpoints", taskId, titles: clean })
+    // Optimistic ids are placeholders until the snapshot reconciles; while the
+    // command is pending, all step controls are disabled, so a placeholder id
+    // can never be sent back to the bridge.
+    setDraftCheckpoints((items) => [
+      ...items,
+      ...clean.map((title, index) => ({
+        id: connected ? `pending-${items.length + index}` : newCheckpointId(),
+        title,
+        done: false,
+        order: items.length + index,
+      })),
+    ])
+    setNewStepText("")
+  }
+
+  function toggleStep(checkpointId: string, done: boolean) {
+    if (connected) sendCheckpoint({ type: "toggleTaskCheckpoint", taskId, checkpointId, done })
+    setDraftCheckpoints((items) => items.map((c) => c.id === checkpointId ? { ...c, done } : c))
+  }
+
+  function commitStepEdit() {
+    const checkpointId = editingStepId
+    const title = editingStepText.trim()
+    setEditingStepId(null)
+    setEditingStepText("")
+    if (!checkpointId || !title) return
+    const current = checkpoints.find((c) => c.id === checkpointId)
+    if (!current || current.title === title) return
+    if (connected) sendCheckpoint({ type: "updateTaskCheckpointTitle", taskId, checkpointId, title })
+    setDraftCheckpoints((items) => items.map((c) => c.id === checkpointId ? { ...c, title } : c))
+  }
+
+  function deleteStep(checkpointId: string) {
+    if (connected) sendCheckpoint({ type: "deleteTaskCheckpoint", taskId, checkpointId })
+    setDraftCheckpoints((items) => items.filter((c) => c.id !== checkpointId))
+  }
+
+  function moveStep(checkpointId: string, delta: -1 | 1) {
+    const index = checkpoints.findIndex((c) => c.id === checkpointId)
+    if (index < 0) return
+    const targetIndex = Math.min(Math.max(index + delta, 0), checkpoints.length - 1)
+    if (targetIndex === index) return
+    if (connected) sendCheckpoint({ type: "reorderTaskCheckpoint", taskId, checkpointId, targetIndex })
+    setDraftCheckpoints((items) => {
+      const next = [...items]
+      const [moved] = next.splice(index, 1)
+      next.splice(targetIndex, 0, moved)
+      return next
+    })
+  }
+
   function revert() {
     setDraft(sessionBaseRef.current)
     setReminderOpen(false)
     setDeadlineOpen(false)
     setDeadlineWithTime(sessionBaseRef.current?.deadlineTime ? true : false)
     setActiveField(null)
+    setNewStepText("")
+    setEditingStepId(null)
+    setEditingStepText("")
   }
 
   return (
@@ -945,6 +1068,211 @@ export function DetailsPanel({
             className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
           />
         </div>
+
+        {/* ── STEPS — lightweight execution checkpoints, separate from Notes ── */}
+        <fieldset disabled={locked} className="contents">
+        <div className={cn("rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
+          {/* Header — entire row is clickable */}
+          <button
+            type="button"
+            onClick={() => setStepsOpen((o) => !o)}
+            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
+            aria-expanded={stepsOpen}
+          >
+            <ListChecks
+              className={cn(
+                "size-3.5 shrink-0",
+                progress.total > 0 ? "text-primary" : "text-muted-foreground",
+              )}
+            />
+            <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">Steps</span>
+            <span className="flex flex-1 items-center justify-end gap-1.5 overflow-hidden">
+              <span
+                className={cn(
+                  "truncate text-[11px]",
+                  progress.total > 0 && progress.done === progress.total
+                    ? "text-status-done"
+                    : progress.total > 0
+                      ? "text-foreground"
+                      : "text-muted-foreground",
+                )}
+              >
+                {progress.summary}
+              </span>
+            </span>
+            {stepsOpen
+              ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+              : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+            }
+          </button>
+
+          {/* Subtle progress bar — only when there are at least 2 steps */}
+          {progress.total >= 2 && (
+            <div className="px-3 pb-2">
+              <div
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={progress.total}
+                aria-valuenow={progress.done}
+                aria-label={`${progress.done} of ${progress.total} steps done`}
+                className="h-1 overflow-hidden rounded-full bg-border/60"
+              >
+                <div
+                  className="h-full rounded-full bg-primary/60 transition-[width]"
+                  style={{ width: `${(progress.done / progress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Expanded editor */}
+          {stepsOpen && (
+            <div className="space-y-2 border-t border-border/50 px-3 pb-3 pt-2.5">
+              {/* Step rows — quiet by default; actions appear on hover/focus */}
+              {checkpoints.map((step, index) => (
+                <div
+                  key={step.id}
+                  className="group/step flex items-center gap-2 rounded px-1 py-0.5 focus-within:bg-accent/40 hover:bg-accent/40"
+                >
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={step.done}
+                    aria-label={step.done ? `Reopen step: ${step.title}` : `Complete step: ${step.title}`}
+                    disabled={checkpointsPending}
+                    onClick={() => toggleStep(step.id, !step.done)}
+                    className={cn(
+                      "flex size-4 shrink-0 items-center justify-center rounded border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                      step.done
+                        ? "border-status-done/60 bg-status-done/20 text-status-done"
+                        : "border-input bg-background text-transparent hover:border-primary/50",
+                    )}
+                  >
+                    <Check className="size-3" aria-hidden />
+                  </button>
+
+                  {editingStepId === step.id ? (
+                    <input
+                      autoFocus
+                      value={editingStepText}
+                      onChange={(e) => setEditingStepText(e.target.value)}
+                      onBlur={commitStepEdit}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          commitStepEdit()
+                        } else if (e.key === "Escape") {
+                          setEditingStepId(null)
+                          setEditingStepText("")
+                        }
+                      }}
+                      className="min-w-0 flex-1 rounded border border-input bg-background px-1.5 py-0.5 text-xs text-foreground outline-none focus:border-primary/60"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (checkpointsPending) return
+                        setEditingStepId(step.id)
+                        setEditingStepText(step.title)
+                      }}
+                      title="Edit step"
+                      className={cn(
+                        "min-w-0 flex-1 truncate rounded text-left text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                        step.done ? "text-muted-foreground line-through" : "text-foreground",
+                      )}
+                    >
+                      {step.title}
+                    </button>
+                  )}
+
+                  {/* Row actions — hidden until hover or keyboard focus lands in the row */}
+                  <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-focus-within/step:opacity-100 group-hover/step:opacity-100">
+                    <button
+                      type="button"
+                      aria-label="Move step up"
+                      disabled={checkpointsPending || index === 0}
+                      onClick={() => moveStep(step.id, -1)}
+                      className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ArrowUp className="size-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Move step down"
+                      disabled={checkpointsPending || index === checkpoints.length - 1}
+                      onClick={() => moveStep(step.id, 1)}
+                      className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ArrowDown className="size-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete step: ${step.title}`}
+                      disabled={checkpointsPending}
+                      onClick={() => deleteStep(step.id)}
+                      className="rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                </div>
+              ))}
+
+              {/* Add input — Enter adds one step; pasting a multiline list adds them all */}
+              <input
+                value={newStepText}
+                onChange={(e) => setNewStepText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    addSteps([newStepText])
+                  } else if (e.key === "Escape") {
+                    setNewStepText("")
+                  }
+                }}
+                onPaste={(e) => {
+                  const text = e.clipboardData.getData("text")
+                  if (!text.includes("\n")) return
+                  e.preventDefault()
+                  addSteps(splitPastedSteps(text))
+                }}
+                disabled={checkpointsPending}
+                placeholder="+ Next step… (paste a list to add several)"
+                className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60"
+              />
+
+              {/* Footer — remaining count, or the explicit complete-task action */}
+              {progress.total > 0 && progress.done === progress.total ? (
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <span className="text-[11px] font-medium text-status-done">All steps ready</span>
+                  {draft.status !== "DONE" && (
+                    <button
+                      type="button"
+                      disabled={pendingFields.has("status")}
+                      onClick={() => {
+                        // Completing the parent is always this explicit action —
+                        // finishing the last step never auto-completes the task.
+                        if (connected) sendBridgeEdit("status", "DONE")
+                        set("status", "DONE")
+                      }}
+                      className="rounded border border-status-done/40 bg-status-done/10 px-2 py-1 text-[11px] font-medium text-status-done transition-colors hover:bg-status-done/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Complete task
+                    </button>
+                  )}
+                </div>
+              ) : progress.total > 0 ? (
+                <p className="pt-0.5 text-[11px] text-muted-foreground">
+                  {progress.total - progress.done === 1
+                    ? "1 step left"
+                    : `${progress.total - progress.done} steps left`}
+                </p>
+              ) : null}
+            </div>
+          )}
+        </div>
+        </fieldset>
       </div>
 
       {/* ── Bottom actions: Delete (left) + Revert (right) ── */}

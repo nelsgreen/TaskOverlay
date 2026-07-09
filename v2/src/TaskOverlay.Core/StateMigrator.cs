@@ -189,6 +189,11 @@ public static class StateMigrator
                 task.ParentTaskId = null;
                 changed = true;
             }
+
+            if (CheckpointService.Normalize(task))
+            {
+                changed = true;
+            }
         }
 
         var visitState = new Dictionary<Guid, int>();

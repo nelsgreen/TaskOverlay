@@ -303,6 +303,13 @@ function adaptTask(source: WorkspaceSnapshotContract["tasks"][number]): Task {
     deadlineAtUtc: source.deadlineAtUtc ?? undefined,
     plannedStartAtUtc: source.plannedStartAtUtc ?? undefined,
     plannedDurationMinutes: source.plannedDurationMinutes ?? undefined,
+    checkpoints: (source.checkpoints ?? []).map((checkpoint) => ({
+      id: checkpoint.id,
+      title: checkpoint.title,
+      done: checkpoint.done,
+      order: checkpoint.sortOrder,
+      completedAtUtc: checkpoint.completedAtUtc,
+    })),
   }
 }
 

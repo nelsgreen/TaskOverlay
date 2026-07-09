@@ -128,6 +128,13 @@ public sealed class TaskItem
     public DateTimeOffset? PlannedStartAtUtc { get; set; }
     public int? PlannedDurationMinutes { get; set; }
 
+    // Lightweight execution steps ("Steps" in the UI). Null on states saved
+    // before checkpoints existed — treat null and empty the same everywhere.
+    // A checkpoint is deliberately NOT a task: no status/REMIND/DEADLINE/WAIT/
+    // pin/priority of its own. Checkpoint state is independent of parent task
+    // status; marking the parent DONE must not mutate checkpoint states.
+    public List<CheckpointItem>? Checkpoints { get; set; }
+
     public Guid? ProjectId { get; set; }
     public Guid? GroupId { get; set; }
     public Guid? ParentTaskId { get; set; }
@@ -150,6 +157,23 @@ public sealed class TaskItem
             ProjectId = projectId
         };
     }
+}
+
+/// <summary>
+/// One lightweight execution step inside a task ("Steps" in the Workspace UI).
+/// Intentionally minimal: title + done + order. Anything that needs its own
+/// status/reminder/deadline/visibility should become a real child task later
+/// (promotion is out of scope for the MVP).
+/// </summary>
+public sealed class CheckpointItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Title { get; set; } = string.Empty;
+    public bool Done { get; set; }
+    public int SortOrder { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? CompletedAtUtc { get; set; }
 }
 
 public enum TaskPriority
