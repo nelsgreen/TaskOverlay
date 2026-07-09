@@ -65,7 +65,8 @@ Active product scope:
   - TODO, FOCUS, and WAIT visible;
   - DONE hidden.
   - Product decision overrides older v0 FOCUS/WAIT-only behavior.
-  - Implemented by PR #45, verify UX details in main when touching this area.
+  - Reported/likely implemented by PR #45; verify UX details in main when
+    touching this area.
 - DONE cleanup:
   - when a task becomes DONE, clear REMIND/reminder and DEADLINE/`DueAtUtc` so
     Timeline/attention does not show DONE tasks as active;
@@ -296,6 +297,7 @@ Active product scope:
   - clearing block removes planned work, not task.
 - Duration chips / resize handles:
   - 15/30/45/60/90/120.
+- Gantt-like future planning view.
 - Timeline and Calendar have different jobs:
   - Timeline = attention/risk horizon;
   - Calendar = time allocation.
@@ -424,6 +426,31 @@ Active product scope:
 
 ## Workstreams
 
+- Keep the current tree view as the primary structured task view.
+- Workstreams tab/view is a future alternate project view over the same project
+  tasks.
+- Workstreams should visualize parallel streams and relationships, not replace
+  the tree.
+- Workstreams view answers:
+  - which streams are running;
+  - how tasks are related;
+  - what blocks what.
+- A Workstream can contain sections and nested tasks.
+- A project may have multiple workstreams running in parallel.
+- Tasks may need cross-links across workstreams; support many-to-many
+  relationships later.
+- Cross-links should express dependencies, blockers, related tasks, duplicates,
+  or "see also" relations without forcing a strict parent-child tree.
+- Workstreams view visual ideas:
+  - columns or swimlanes per workstream, with compact task cards inside each
+    stream;
+  - optional connector lines/arrows for cross-stream dependencies when
+    relationship view is enabled;
+  - relationship badges on cards even when connector lines are hidden, for
+    example Blocks, Blocked by, Related, Duplicate, See also;
+  - selecting a card opens the same right-side Details panel as the tree view;
+  - many-to-many relationships stay as a separate links layer over the same task
+    nodes, not duplicate tasks.
 - Workstream narrative fields later:
   - goal;
   - nextAction;
@@ -441,16 +468,19 @@ Active product scope:
 
 ## Already Done / Probably Obsolete
 
-- WPF v2 foundation is implemented.
-- Basic Project/Section/Task Workspace exists.
-- Overlay attention layer exists; verify current UX when changing overlay.
+- WPF v2 foundation is present in main; verify behavior when touching it.
+- Basic Project/Section/Task Workspace is present in main; verify behavior when
+  touching it.
+- Overlay attention layer is present in main; verify current UX when changing
+  overlay.
 - PR #29 automatic backup MVP is merged; retention and dialog polish remain.
 - v0 Workspace generation is done as product/design input.
 - "Task Management Window" naming is obsolete; use Workspace.
 - Direct v0 GitHub sync is rejected.
 - ActiveNowStrip `localStorage` production persistence anti-pattern is corrected
   if main still routes mutations through the bridge; verify if touching this.
-- PR #44 Workstreams MVP is merged as an MVP; model evolution remains open.
+- PR #44 Workstreams MVP is merged as an MVP; verify behavior in main before
+  treating follow-ups as complete.
 - PR #45 Tree Operations MVP is merged into main. It likely covers Tree/Section
   context menus, subtask operations, `deleteTask`, `moveTask`, Details Location,
   Active-only, and DONE cleanup; verify behavior in main before marking any
