@@ -8,6 +8,11 @@ import { isoFromLocalDateTime } from "@/lib/calendar-date"
 import { statusConfig } from "./status-badge"
 
 type BridgeEditField = "title" | "status" | "pinToPanel" | "notes" | "waitingFor" | "reminder" | "deadline"
+/** The bridge's updateTaskReminder command always replaces both fields at once (the C# side has
+ * no partial-patch form), so every reminder push must carry the instant and the repeat cadence
+ * together — otherwise an unrelated edit silently wipes whichever half it omits. */
+type ReminderBridgeValue = { remindAtUtc: string | null; remindEveryMinutes: number | null }
+type BridgeEditValue = string | boolean | null | ReminderBridgeValue
 
 interface Props {
   task: Task | null
@@ -24,7 +29,7 @@ interface Props {
   onBridgeEdit?: (
     taskId: string,
     field: BridgeEditField,
-    value: string | boolean | null,
+    value: BridgeEditValue,
   ) => boolean
   onClearBridgeError?: () => void
 }
@@ -34,6 +39,50 @@ function computeReminderIso(t: Task): string | null {
   if (!t.reminderDate || !t.reminderTime) return null
   const [h, m] = t.reminderTime.split(":").map(Number)
   return isoFromLocalDateTime(t.reminderDate, h, m)
+}
+
+/**
+ * Concrete UTC instant for a one-shot reminder preset, computed fresh from "now" — presets don't
+ * write into the custom date/time fields (kept as a separate entry path, matching the v0
+ * reference). Tomorrow morning/afternoon anchor to 10:00/14:00 local; 10:00 matches the existing
+ * WPF ReminderService.GetTomorrowMorning precedent. Next workday morning skips Sat/Sun.
+ */
+function computePresetReminderIso(preset: ReminderPreset, now: Date): string | null {
+  const localAt = (daysAhead: number, hour: number) => {
+    const d = new Date(now)
+    d.setDate(d.getDate() + daysAhead)
+    d.setHours(hour, 0, 0, 0)
+    return d.toISOString()
+  }
+  switch (preset) {
+    case "30m": return new Date(now.getTime() + 30 * 60_000).toISOString()
+    case "1h": return new Date(now.getTime() + 60 * 60_000).toISOString()
+    case "2h": return new Date(now.getTime() + 120 * 60_000).toISOString()
+    case "morning": return localAt(1, 10)
+    case "afternoon": return localAt(1, 14)
+    case "next-morning": {
+      const d = new Date(now)
+      d.setDate(d.getDate() + 1)
+      while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1)
+      d.setHours(10, 0, 0, 0)
+      return d.toISOString()
+    }
+    default: return null
+  }
+}
+
+/**
+ * Flat repeat cadence in minutes for the bridge's remindEveryMinutes. Monthly has no flat-minute
+ * equivalent the backend can represent (calendar months vary in length), so it intentionally
+ * returns null here and stays mock-only — see the "Later" hint on the Monthly button below.
+ */
+function repeatIntervalMinutes(interval: RepeatInterval | undefined): number | null {
+  switch (interval) {
+    case "every2h": return 120
+    case "daily": return 1440
+    case "weekly": return 10080
+    default: return null
+  }
 }
 
 /** Date-only deadlines are treated as due by end of that local day. */
@@ -58,14 +107,14 @@ const quickPresets: { value: ReminderPreset; label: string }[] = [
 const advancedPresets: { value: ReminderPreset; label: string }[] = [
   { value: "30m", label: "In 30m" },
   { value: "1h", label: "In 1h" },
-  { value: "afternoon", label: "In 2h" },
+  { value: "2h", label: "In 2h" },
   { value: "morning", label: "Tomorrow morning" },
-  { value: "next-morning", label: "Tomorrow afternoon" },
+  { value: "afternoon", label: "Tomorrow afternoon" },
   { value: "next-morning", label: "Next workday morning" },
 ]
 
 const repeatIntervals: { value: RepeatInterval; label: string }[] = [
-  { value: "daily", label: "Every 2h" },
+  { value: "every2h", label: "Every 2h" },
   { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" },
   { value: "monthly", label: "Monthly" },
@@ -88,6 +137,7 @@ function reminderSummary(t: Task): string {
     none: "No reminder",
     "30m": "In 30 minutes",
     "1h": "In 1 hour",
+    "2h": "In 2 hours",
     morning: "Tomorrow morning",
     afternoon: "Tomorrow afternoon",
     "next-morning": "Next workday morning",
@@ -283,7 +333,7 @@ export function DetailsPanel({
 
   function sendBridgeEdit(
     field: BridgeEditField,
-    value: string | boolean | null,
+    value: BridgeEditValue,
   ) {
     if (!connected || pendingFields.has(field)) return
     onClearBridgeError?.()
@@ -291,7 +341,7 @@ export function DetailsPanel({
   }
 
   function clearReminder() {
-    if (connected) sendBridgeEdit("reminder", null)
+    if (connected) sendBridgeEdit("reminder", { remindAtUtc: null, remindEveryMinutes: null })
     setDraft((d) => d ? {
       ...d,
       reminder: "none",
@@ -314,10 +364,74 @@ export function DetailsPanel({
     const next = { ...draft, ...patch }
     setDraft(next)
     // A partial date-only or time-only entry must not send a clear (null) to the
-    // bridge — only push once both date and time make a complete instant.
+    // bridge — only push once both date and time make a complete instant. The
+    // existing repeat cadence rides along unchanged so editing the date/time
+    // doesn't silently wipe an already-active repeat (SetSchedule replaces both
+    // fields at once — see ReminderBridgeValue).
     if (connected) {
       const iso = computeReminderIso(next)
-      if (iso) sendBridgeEdit("reminder", iso)
+      if (iso) {
+        sendBridgeEdit("reminder", {
+          remindAtUtc: iso,
+          remindEveryMinutes: next.reminderRepeat ? repeatIntervalMinutes(next.reminderInterval) : null,
+        })
+      }
+    }
+  }
+
+  /** One-shot preset pick — always turns Repeat off, matching the WPF ReminderEditor precedent
+   * of resetting recurrence when a fresh preset is chosen. */
+  function applyReminderPreset(preset: ReminderPreset) {
+    setDraft((d) => d ? {
+      ...d,
+      reminder: preset,
+      reminderDate: undefined,
+      reminderTime: undefined,
+      reminderRepeat: false,
+      reminderInterval: undefined,
+    } : d)
+    if (connected) {
+      const iso = computePresetReminderIso(preset, new Date())
+      if (iso) sendBridgeEdit("reminder", { remindAtUtc: iso, remindEveryMinutes: null })
+    }
+  }
+
+  /** Effective one-shot instant to carry alongside a repeat change: the custom date/time when
+   * set, else a freshly recomputed instant for the active preset, else null (the bridge then
+   * auto-schedules the first occurrence from now + interval). */
+  function effectiveReminderIso(t: Task): string | null {
+    return computeReminderIso(t) ??
+      (t.reminder !== "none" && t.reminder !== "custom" ? computePresetReminderIso(t.reminder, new Date()) : null)
+  }
+
+  function applyReminderRepeatToggle() {
+    if (!draft) return
+    const turningOn = !draft.reminderRepeat
+    const currentInterval = draft.reminderInterval
+    const interval: RepeatInterval =
+      currentInterval && currentInterval !== "monthly" && currentInterval !== "custom" ? currentInterval : "weekly"
+    const next: Task = {
+      ...draft,
+      reminderRepeat: turningOn,
+      reminderInterval: turningOn ? interval : draft.reminderInterval,
+    }
+    setDraft(next)
+    if (connected) {
+      const iso = effectiveReminderIso(next)
+      const repeatMinutes = turningOn ? repeatIntervalMinutes(interval) : null
+      if (iso || repeatMinutes) sendBridgeEdit("reminder", { remindAtUtc: iso, remindEveryMinutes: repeatMinutes })
+    }
+  }
+
+  function applyReminderInterval(interval: RepeatInterval) {
+    if (!draft) return
+    if (connected && interval === "monthly") return
+    const next: Task = { ...draft, reminderInterval: interval }
+    setDraft(next)
+    if (connected) {
+      const iso = effectiveReminderIso(next)
+      const repeatMinutes = repeatIntervalMinutes(interval)
+      if (iso || repeatMinutes) sendBridgeEdit("reminder", { remindAtUtc: iso, remindEveryMinutes: repeatMinutes })
     }
   }
 
@@ -491,14 +605,15 @@ export function DetailsPanel({
             }
           </button>
 
-          {/* Collapsed + no reminder: relative quick presets — dev/full mode only (no bridge command for these) */}
-          {!connected && !reminderOpen && !hasReminder && (
+          {/* Collapsed + no reminder: relative quick presets — computed client-side and pushed through the bridge when connected */}
+          {!reminderOpen && !hasReminder && (
             <div className="flex gap-1.5 border-t border-border/50 px-3 pb-2.5 pt-2">
               {quickPresets.map((r) => (
                 <button
                   key={r.value}
-                  onClick={() => setDraft((d) => d ? { ...d, reminder: r.value, reminderDate: undefined, reminderTime: undefined } : d)}
-                  className="flex-1 rounded border border-border px-1 py-1.5 text-center text-[10px] font-medium text-muted-foreground transition-colors hover:border-status-remind/40 hover:bg-status-remind/10 hover:text-status-remind"
+                  onClick={() => applyReminderPreset(r.value)}
+                  disabled={pendingFields.has("reminder")}
+                  className="flex-1 rounded border border-border px-1 py-1.5 text-center text-[10px] font-medium text-muted-foreground transition-colors hover:border-status-remind/40 hover:bg-status-remind/10 hover:text-status-remind disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {r.label}
                 </button>
@@ -509,30 +624,27 @@ export function DetailsPanel({
           {/* Expanded editor */}
           {reminderOpen && (
             <div className="space-y-3 border-t border-border/50 px-3 pb-3 pt-3">
-              {/* Relative presets — dev/full mode only (no bridge command for these) */}
-              {!connected && (
-                <div className="grid grid-cols-2 gap-1.5">
-                  {advancedPresets.map((r, i) => {
-                    const active = draft.reminder === r.value && !draft.reminderDate
-                    return (
-                      <button
-                        key={`${r.value}-${i}`}
-                        onClick={() =>
-                          setDraft((d) => d ? { ...d, reminder: r.value, reminderDate: undefined, reminderTime: undefined } : d)
-                        }
-                        className={cn(
-                          "rounded border px-2 py-1.5 text-left text-[11px] font-medium transition-colors",
-                          active
-                            ? "border-status-remind/40 bg-status-remind/10 text-status-remind"
-                            : "border-border text-muted-foreground hover:bg-accent",
-                        )}
-                      >
-                        {r.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
+              {/* Relative presets — computed client-side and pushed through the bridge when connected */}
+              <div className="grid grid-cols-2 gap-1.5">
+                {advancedPresets.map((r, i) => {
+                  const active = draft.reminder === r.value && !draft.reminderDate
+                  return (
+                    <button
+                      key={`${r.value}-${i}`}
+                      onClick={() => applyReminderPreset(r.value)}
+                      disabled={pendingFields.has("reminder")}
+                      className={cn(
+                        "rounded border px-2 py-1.5 text-left text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                        active
+                          ? "border-status-remind/40 bg-status-remind/10 text-status-remind"
+                          : "border-border text-muted-foreground hover:bg-accent",
+                      )}
+                    >
+                      {r.label}
+                    </button>
+                  )
+                })}
+              </div>
 
               {/* Custom date + time — persists through the bridge when connected */}
               <div className="grid grid-cols-2 gap-1.5">
@@ -561,53 +673,53 @@ export function DetailsPanel({
                 <p className="text-[10px] text-muted-foreground">Pick a time to save this reminder.</p>
               )}
 
-              {/* Repeat — dev/full mode only in this release */}
-              {!connected && (
-                <>
-                  <div className="flex items-center gap-2 border-t border-border/50 pt-2.5">
-                    <Repeat
-                      className={cn(
-                        "size-3.5 shrink-0",
-                        draft.reminderRepeat ? "text-status-remind" : "text-muted-foreground",
-                      )}
-                    />
-                    <span className="flex-1 text-[11px] font-medium text-foreground">Repeat</span>
-                    <Switch
-                      checked={!!draft.reminderRepeat}
-                      activeColor="bg-status-remind"
-                      onChange={() =>
-                        setDraft((d) => d ? {
-                          ...d,
-                          reminderRepeat: !d.reminderRepeat,
-                          reminderInterval: !d.reminderRepeat ? (d.reminderInterval ?? "weekly") : d.reminderInterval,
-                        } : d)
-                      }
-                    />
-                  </div>
-
-                  {/* Repeat intervals — only when Repeat ON */}
-                  {draft.reminderRepeat && (
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {repeatIntervals.map((iv, i) => {
-                        const active = draft.reminderInterval === iv.value
-                        return (
-                          <button
-                            key={`${iv.value}-${i}`}
-                            onClick={() => set("reminderInterval", iv.value)}
-                            className={cn(
-                              "rounded border px-2 py-1.5 text-[11px] font-medium transition-colors",
-                              active
-                                ? "border-status-remind/40 bg-status-remind/10 text-status-remind"
-                                : "border-border text-muted-foreground hover:bg-accent",
-                            )}
-                          >
-                            {iv.label}
-                          </button>
-                        )
-                      })}
-                    </div>
+              {/* Repeat — cadence pushed through the bridge as remindEveryMinutes when connected */}
+              <div className="flex items-center gap-2 border-t border-border/50 pt-2.5">
+                <Repeat
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    draft.reminderRepeat ? "text-status-remind" : "text-muted-foreground",
                   )}
-                </>
+                />
+                <span className="flex-1 text-[11px] font-medium text-foreground">Repeat</span>
+                <Switch
+                  checked={!!draft.reminderRepeat}
+                  activeColor="bg-status-remind"
+                  disabled={pendingFields.has("reminder")}
+                  onChange={applyReminderRepeatToggle}
+                />
+              </div>
+
+              {/* Repeat intervals — only when Repeat ON. Monthly has no flat-minute equivalent
+                  the backend can represent yet, so it's disabled (not hidden) with a "Later"
+                  hint when connected; it still works in mock/dev mode. */}
+              {draft.reminderRepeat && (
+                <div className="grid grid-cols-2 gap-1.5">
+                  {repeatIntervals.map((iv, i) => {
+                    const active = draft.reminderInterval === iv.value
+                    const monthlyDisabled = connected && iv.value === "monthly"
+                    return (
+                      <button
+                        key={`${iv.value}-${i}`}
+                        type="button"
+                        onClick={() => applyReminderInterval(iv.value)}
+                        disabled={monthlyDisabled || pendingFields.has("reminder")}
+                        title={monthlyDisabled ? "Needs a calendar-aware recurrence model — coming later" : undefined}
+                        className={cn(
+                          "rounded border px-2 py-1.5 text-[11px] font-medium transition-colors",
+                          monthlyDisabled
+                            ? "cursor-not-allowed border-border/50 text-muted-foreground/40"
+                            : active
+                              ? "border-status-remind/40 bg-status-remind/10 text-status-remind"
+                              : "border-border text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50",
+                        )}
+                      >
+                        {iv.label}
+                        {monthlyDisabled && <span className="ml-1 text-[9px] uppercase tracking-wide">Later</span>}
+                      </button>
+                    )
+                  })}
+                </div>
               )}
             </div>
           )}

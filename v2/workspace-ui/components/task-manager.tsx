@@ -833,7 +833,7 @@ export function TaskManager() {
   const sendTaskEdit = (
     taskId: string,
     field: "title" | "status" | "pinToPanel" | "notes" | "waitingFor" | "reminder" | "deadline",
-    value: string | boolean | null,
+    value: string | boolean | null | { remindAtUtc: string | null; remindEveryMinutes: number | null },
   ) => {
     if (!connected) return false
     let command: WorkspaceTaskCommand
@@ -853,9 +853,16 @@ export function TaskManager() {
       case "waitingFor":
         command = { type: "updateTaskWaitingFor", taskId, waitingFor: String(value ?? "") }
         break
-      case "reminder":
-        command = { type: "updateTaskReminder", taskId, remindAtUtc: value as string | null }
+      case "reminder": {
+        const reminder = value as { remindAtUtc: string | null; remindEveryMinutes: number | null }
+        command = {
+          type: "updateTaskReminder",
+          taskId,
+          remindAtUtc: reminder.remindAtUtc,
+          remindEveryMinutes: reminder.remindEveryMinutes,
+        }
         break
+      }
       case "deadline":
         command = { type: "updateTaskDeadline", taskId, deadlineAtUtc: value as string | null }
         break
