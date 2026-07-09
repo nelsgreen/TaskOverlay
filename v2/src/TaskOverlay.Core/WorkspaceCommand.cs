@@ -181,6 +181,17 @@ public static class WorkspaceCommandProcessor
                     payload,
                     commandId,
                     timestamp),
+                "moveTask" => MoveTask(
+                    treeService,
+                    taskId,
+                    payload,
+                    commandId,
+                    timestamp),
+                "deleteTask" => DeleteTask(
+                    treeService,
+                    taskId,
+                    commandId,
+                    timestamp),
                 _ => Fail(commandId, "unknownCommandType", "Unknown Workspace command type.")
             };
         }
@@ -397,7 +408,26 @@ public static class WorkspaceCommandProcessor
             return Fail(commandId, "invalidPayload", "Task title is required and must not be too long.");
         }
 
-        if (!TryResolveSectionParent(payload, out var parentId))
+        // A subtask is a task created under another task: parentTaskId wins over
+        // the project/section fields and makes the new task inherit the parent's
+        // project and section (TreeStateService.CreateTask handles this).
+        Guid parentId;
+        var parentTaskIdText = ReadString(payload, "parentTaskId");
+        if (!string.IsNullOrEmpty(parentTaskIdText))
+        {
+            if (!Guid.TryParse(parentTaskIdText, out var parentTaskId))
+            {
+                return Fail(commandId, "invalidPayload", "parentTaskId must be a valid task id.");
+            }
+
+            if (!state.Tasks.Any(candidate => candidate.Id == parentTaskId))
+            {
+                return Fail(commandId, "mutationRejected", "The parent task does not exist.");
+            }
+
+            parentId = parentTaskId;
+        }
+        else if (!TryResolveSectionParent(payload, out parentId))
         {
             return Fail(commandId, "invalidPayload", "A valid projectId or sectionId is required.");
         }
@@ -407,6 +437,39 @@ public static class WorkspaceCommandProcessor
         return created is not null
             ? WorkspaceCommandResult.Succeeded(commandId, created.Id.ToString("N"))
             : Fail(commandId, "mutationRejected", "Task could not be created in the given location.");
+    }
+
+    private static WorkspaceCommandResult MoveTask(
+        TreeStateService treeService,
+        Guid taskId,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        // Reuse the createTask location resolver: the Details Location control
+        // sends a snapshot section id (group:{id} or project:{id}:root), which
+        // resolves to the group or project the task should move under.
+        if (!TryResolveSectionParent(payload, out var newParentId))
+        {
+            return Fail(commandId, "invalidPayload", "A valid sectionId or projectId is required.");
+        }
+
+        return treeService.MoveNode(taskId, newParentId, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "mutationRejected", "Task could not be moved to the given location.");
+    }
+
+    private static WorkspaceCommandResult DeleteTask(
+        TreeStateService treeService,
+        Guid taskId,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        // TreeStateService.DeleteNode reparents any subtasks up to the deleted
+        // task's parent (project/section/task); it does not cascade-delete them.
+        return treeService.DeleteNode(taskId, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "mutationRejected", "Task could not be deleted.");
     }
 
     private static WorkspaceCommandResult CreateSection(

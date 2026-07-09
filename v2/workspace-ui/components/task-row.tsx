@@ -14,6 +14,7 @@ interface Props {
   onSelect: (id: string) => void
   onToggleCollapse: (id: string) => void
   onTogglePin: (id: string) => void
+  onContextMenu?: (event: React.MouseEvent, taskId: string) => void
   readOnly?: boolean
 }
 
@@ -26,6 +27,7 @@ export function TaskRow({
   onSelect,
   onToggleCollapse,
   onTogglePin,
+  onContextMenu,
   readOnly,
 }: Props) {
   const isDone = task.status === "DONE"
@@ -35,6 +37,7 @@ export function TaskRow({
       role="button"
       tabIndex={0}
       onClick={() => onSelect(task.id)}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(e, task.id) : undefined}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault()

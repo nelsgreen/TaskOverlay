@@ -146,9 +146,20 @@ public static class TaskInteractionService
             task,
             ReminderPreset.None,
             timestamp);
+
+        // A completed task has no pending deadline: clear the due date alongside
+        // the reminder so Timeline and Details stop surfacing it.
+        var deadlineCleared = task.DueAtUtc is not null;
+        task.DueAtUtc = null;
+
         if (task.Completed && task.Status == TaskStatus.Done)
         {
-            return reminderResolved;
+            if (deadlineCleared)
+            {
+                task.UpdatedAtUtc = timestamp;
+            }
+
+            return reminderResolved || deadlineCleared;
         }
 
         task.Completed = true;

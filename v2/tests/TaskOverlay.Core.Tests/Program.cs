@@ -136,7 +136,15 @@ internal static class Program
             ("workspace command create section persistence", WorkspaceCommandCreateSectionPersistence),
             ("workspace command create section validation", WorkspaceCommandCreateSectionValidation),
             ("workspace command create task in created section", WorkspaceCommandCreateTaskInCreatedSection),
-            ("workspace snapshot includes created section", WorkspaceSnapshotIncludesCreatedSection)
+            ("workspace snapshot includes created section", WorkspaceSnapshotIncludesCreatedSection),
+            ("workspace command create subtask persistence", WorkspaceCommandCreateSubtaskPersistence),
+            ("workspace command create subtask validation", WorkspaceCommandCreateSubtaskValidation),
+            ("workspace command delete task persistence", WorkspaceCommandDeleteTaskPersistence),
+            ("workspace command delete task reparents subtasks", WorkspaceCommandDeleteTaskReparentsSubtasks),
+            ("workspace command move task to section", WorkspaceCommandMoveTaskToSectionPersistence),
+            ("workspace command move task to project root", WorkspaceCommandMoveTaskToProjectRootPersistence),
+            ("workspace command move task invalid target", WorkspaceCommandMoveTaskInvalidTarget),
+            ("workspace command done clears reminder and deadline", WorkspaceCommandDoneClearsReminderAndDeadline)
         };
 
         foreach (var test in tests)
@@ -1756,8 +1764,10 @@ internal static class Program
 
             task.Description = "Stored description";
             task.Priority = TaskPriority.High;
-            task.DueAtUtc = DateTimeOffset.UtcNow.AddHours(2);
             TaskInteractionService.Complete(task);
+            // Completing clears the due date, so set it afterward purely to
+            // exercise DueAtUtc serialization roundtrip on a done task.
+            task.DueAtUtc = DateTimeOffset.UtcNow.AddHours(2);
             state.WindowPlacement.Left = 123.5;
             state.WindowPlacement.Top = 456.5;
 
@@ -4392,6 +4402,257 @@ internal static class Program
         var task = snapshot.Tasks.Single(t => t.Id == taskResult.CreatedTaskId);
         Assert(task.SectionId == sectionResult.CreatedSectionId,
             "Snapshot task created inside the section should carry that section id.");
+    }
+
+    private static void WorkspaceCommandCreateSubtaskPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-08T09:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var group = new GroupItem
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = project.Id,
+                Name = "Backlog",
+                SortOrder = 0,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.Groups.Add(group);
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var parentResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "parent-task", "createTask",
+                new { title = "Parent task", sectionId = $"group:{group.Id:N}" }), now);
+            Assert(parentResult.Success, "Parent task creation should succeed.");
+            var parentId = Guid.Parse(parentResult.CreatedTaskId!);
+
+            var subtaskResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "subtask", "createTask",
+                new { title = "  Subtask under parent  ", parentTaskId = parentId.ToString("N") }), now);
+            Assert(subtaskResult.Success, "Subtask creation with parentTaskId should succeed.");
+
+            var subtaskId = Guid.Parse(subtaskResult.CreatedTaskId!);
+            var loaded = store.Load();
+            var subtask = loaded.Tasks.SingleOrDefault(t => t.Id == subtaskId);
+            Assert(subtask is not null, "Created subtask should persist to state.json.");
+            Assert(subtask!.Title == "Subtask under parent", "Subtask title should be trimmed and persisted.");
+            Assert(subtask.ParentTaskId == parentId, "Subtask should reference the parent task.");
+            Assert(subtask.ProjectId == project.Id, "Subtask should inherit the parent's project.");
+            Assert(subtask.GroupId == group.Id, "Subtask should inherit the parent's section.");
+        });
+    }
+
+    private static void WorkspaceCommandCreateSubtaskValidation()
+    {
+        var now = DateTimeOffset.Parse("2026-07-08T09:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var initialCount = state.Tasks.Count;
+
+        var malformed = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "subtask-bad-id", "createTask",
+            new { title = "Orphan subtask", parentTaskId = "not-a-guid" }), now);
+        Assert(!malformed.Success && malformed.ErrorCode == "invalidPayload",
+            "Malformed parentTaskId should be an invalid payload.");
+
+        var missingParent = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "subtask-missing-parent", "createTask",
+            new { title = "Orphan subtask", parentTaskId = Guid.NewGuid().ToString("N") }), now);
+        Assert(!missingParent.Success && missingParent.ErrorCode == "mutationRejected",
+            "Unknown parentTaskId should be rejected as a mutation error.");
+
+        Assert(state.Tasks.Count == initialCount, "Rejected subtask commands must not add tasks.");
+    }
+
+    private static void WorkspaceCommandDeleteTaskPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-08T09:15:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var created = dispatcher.Dispatch(WorkspaceCommandJson(
+                "make-task", "createTask",
+                new { title = "Disposable task", projectId = project.Id.ToString("N") }), now);
+            Assert(created.Success, "Task creation should succeed before delete.");
+            var taskId = Guid.Parse(created.CreatedTaskId!);
+            Assert(store.Load().Tasks.Any(t => t.Id == taskId), "Task should exist before deletion.");
+
+            var deleteResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "delete-task", "deleteTask", new { taskId = taskId.ToString("N") }), now);
+            Assert(deleteResult.Success, "deleteTask should succeed for an existing task.");
+            Assert(!store.Load().Tasks.Any(t => t.Id == taskId),
+                "Deleted task should be removed from state.json.");
+
+            var deleteMissing = dispatcher.Dispatch(WorkspaceCommandJson(
+                "delete-missing", "deleteTask", new { taskId = Guid.NewGuid().ToString("N") }), now);
+            Assert(!deleteMissing.Success && deleteMissing.ErrorCode == "taskNotFound",
+                "Deleting a non-existent task should fail with taskNotFound.");
+        });
+    }
+
+    private static void WorkspaceCommandDeleteTaskReparentsSubtasks()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-08T09:30:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var parent = dispatcher.Dispatch(WorkspaceCommandJson(
+                "rp-parent", "createTask",
+                new { title = "Parent", projectId = project.Id.ToString("N") }), now);
+            var parentId = Guid.Parse(parent.CreatedTaskId!);
+            var child = dispatcher.Dispatch(WorkspaceCommandJson(
+                "rp-child", "createTask",
+                new { title = "Child", parentTaskId = parentId.ToString("N") }), now);
+            var childId = Guid.Parse(child.CreatedTaskId!);
+
+            var deleteParent = dispatcher.Dispatch(WorkspaceCommandJson(
+                "rp-delete", "deleteTask", new { taskId = parentId.ToString("N") }), now);
+            Assert(deleteParent.Success, "Deleting a parent task with subtasks should succeed.");
+
+            var loaded = store.Load();
+            Assert(!loaded.Tasks.Any(t => t.Id == parentId), "Deleted parent must be gone.");
+            var reparented = loaded.Tasks.SingleOrDefault(t => t.Id == childId);
+            Assert(reparented is not null, "Subtask must survive deletion of its parent (reparented, not cascaded).");
+            Assert(reparented!.ParentTaskId is null, "Reparented subtask should move up to the project root.");
+            Assert(reparented.ProjectId == project.Id, "Reparented subtask should stay in the project.");
+        });
+    }
+
+    private static void WorkspaceCommandMoveTaskToSectionPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-08T09:45:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var group = new GroupItem
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = project.Id,
+                Name = "Target section",
+                SortOrder = 0,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.Groups.Add(group);
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var created = dispatcher.Dispatch(WorkspaceCommandJson(
+                "mv-make", "createTask",
+                new { title = "Movable task", projectId = project.Id.ToString("N") }), now);
+            var taskId = Guid.Parse(created.CreatedTaskId!);
+            Assert(store.Load().Tasks.Single(t => t.Id == taskId).GroupId is null,
+                "Task should start at project root.");
+
+            var moveResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "mv-section", "moveTask",
+                new { taskId = taskId.ToString("N"), sectionId = $"group:{group.Id:N}" }), now);
+            Assert(moveResult.Success, "moveTask to a section should succeed.");
+
+            var moved = store.Load().Tasks.Single(t => t.Id == taskId);
+            Assert(moved.GroupId == group.Id, "Moved task should join the target section.");
+            Assert(moved.ProjectId == project.Id, "Moved task should stay in the project.");
+        });
+    }
+
+    private static void WorkspaceCommandMoveTaskToProjectRootPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-08T10:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var group = new GroupItem
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = project.Id,
+                Name = "Origin section",
+                SortOrder = 0,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.Groups.Add(group);
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var created = dispatcher.Dispatch(WorkspaceCommandJson(
+                "mvr-make", "createTask",
+                new { title = "Task in section", sectionId = $"group:{group.Id:N}" }), now);
+            var taskId = Guid.Parse(created.CreatedTaskId!);
+            Assert(store.Load().Tasks.Single(t => t.Id == taskId).GroupId == group.Id,
+                "Task should start in the section.");
+
+            var moveResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "mvr-root", "moveTask",
+                new { taskId = taskId.ToString("N"), sectionId = $"project:{project.Id:N}:root" }), now);
+            Assert(moveResult.Success, "moveTask to project root should succeed.");
+
+            var moved = store.Load().Tasks.Single(t => t.Id == taskId);
+            Assert(moved.GroupId is null, "Moved task should sit at project root with no section.");
+            Assert(moved.ProjectId == project.Id, "Moved task should stay in the project.");
+        });
+    }
+
+    private static void WorkspaceCommandMoveTaskInvalidTarget()
+    {
+        var now = DateTimeOffset.Parse("2026-07-08T10:15:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var task = state.Tasks[0];
+
+        var malformed = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "mv-bad", "moveTask",
+            new { taskId = task.Id.ToString("N"), sectionId = "group:not-a-guid" }), now);
+        Assert(!malformed.Success && malformed.ErrorCode == "invalidPayload",
+            "Malformed section id should be an invalid payload.");
+
+        var unknownGroup = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "mv-unknown", "moveTask",
+            new { taskId = task.Id.ToString("N"), sectionId = $"group:{Guid.NewGuid():N}" }), now);
+        Assert(!unknownGroup.Success && unknownGroup.ErrorCode == "mutationRejected",
+            "Moving to a non-existent section should be rejected as a mutation error.");
+
+        Assert(task.GroupId is null, "Rejected moveTask commands must not mutate the task.");
+    }
+
+    private static void WorkspaceCommandDoneClearsReminderAndDeadline()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-08T10:30:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            task.RemindAtUtc = now.AddHours(1);
+            task.RemindEveryMinutes = 60;
+            task.ReminderActive = true;
+            task.DueAtUtc = now.AddDays(1);
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var doneResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "done-clear", "updateTaskStatus",
+                new { taskId = task.Id.ToString("N"), status = "DONE" }), now);
+            Assert(doneResult.Success, "Marking a task DONE should succeed.");
+
+            var loaded = store.Load().Tasks.Single(t => t.Id == task.Id);
+            Assert(loaded.Status == TaskStatus.Done, "Task should be DONE after the command.");
+            Assert(loaded.RemindAtUtc is null && loaded.RemindEveryMinutes is null,
+                "DONE must clear the reminder schedule.");
+            Assert(!loaded.ReminderActive, "DONE must clear the active reminder flag.");
+            Assert(loaded.DueAtUtc is null, "DONE must clear the deadline (DueAtUtc).");
+        });
     }
 
     private static void WorkspaceCommandCreateTaskValidation()
