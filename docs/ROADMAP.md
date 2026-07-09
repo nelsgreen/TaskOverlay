@@ -1,21 +1,96 @@
 # TaskOverlay Roadmap
 
-This roadmap is intentionally lightweight. Use it to orient near-term work, not
-as a full release plan.
+This roadmap is intentionally practical. It orders likely work without turning
+the backlog into a full release plan.
 
-## Current
+## Immediate
 
-- Finish PR #22 Task Details UX redesign.
+1. Verify current main after recent merges, especially PR #45 Tree Operations
+   MVP.
+2. Create and merge the docs-only backlog/decisions/roadmap PR.
+3. Do not start drag/drop or major features until docs are reconciled.
 
-## Next
+## Near-Term Reliability / Polish
 
-- Overlay mode cleanup / Working mode.
-- Quick Add + Settings visual refresh.
+1. Backup dialog polish and retention settings.
+2. Reminder quick presets + Repeat connected to the Workspace bridge/AppState.
+3. Timeline `DetailEmphasis`.
+4. Timeline DONE/completed handling and overdue sorting.
+5. Notes resize/auto-grow.
+6. Window shell cleanup.
+7. Workspace lifecycle/loading/stale selection polish if not already covered by
+   merged work.
 
-## Later
+## Tree / Project Management
 
-- Backlog docs refinement.
-- Tree mode.
-- Deadlines.
-- Sync/cloud.
-- Functional handle / attention hub.
+1. Verify PR #45 Tree Operations in main.
+2. Section operations.
+3. Project Root.
+4. Project edit mode.
+5. Create project flow.
+6. Tree drag/drop after `moveTask` is stable.
+7. Better task/tray context menus.
+
+## Workspace Evolution
+
+1. Stabilize shell and Details layout.
+2. Adaptive layout/collapsible panels.
+3. Hotkey toggle behavior.
+4. Auto-open Workspace after backup checks.
+5. Keep old Tree Manager fallback until Workspace is stable.
+6. Bridge changes as connected vertical slices only.
+
+## Scheduling / Planning
+
+1. Work schedule settings.
+2. Deadline polish.
+3. Calendar/Timeline MVP.
+4. Timeline Now marker.
+5. Calendar day/week planner.
+6. Planning pool.
+7. Duration chips/resize.
+8. Reminder action system.
+
+## MEET
+
+1. MEET persistence and Details.
+2. MEET Timeline interaction.
+3. New MEET action.
+4. Handle next MEET countdown.
+5. Local recording.
+6. Emergency recording.
+7. Post-meeting transcription.
+8. AI meeting analysis.
+9. Suggested tasks review/create selected.
+
+## Task Quality
+
+1. Priority.
+2. Checklist.
+3. Attachments.
+4. Undo/archive/draft recovery.
+5. Templates/routines.
+6. Chunking helper.
+7. Focus mode.
+8. Low-stimulus/reduced motion.
+
+## Reporting / Analytics
+
+1. `CompletedAtUtc` reliability.
+2. Completed tasks report.
+3. Weekly report support.
+4. Work Pattern Analytics.
+
+## Workstreams
+
+1. Keep Workstream = section/group MVP.
+2. Add narrative fields only after model decision.
+3. Later decide if cross-sectional curated Workstream is needed.
+
+## Work/Home And Sync/Mobile
+
+1. Decide Work/Home storage.
+2. Stabilize local model.
+3. Server-mediated offline-first sync.
+4. Mobile companion later.
+5. No P2P/CRDT first.
