@@ -4730,6 +4730,30 @@ internal static class Program
             Assert(clearResult.Success, "Clearing a reminder should succeed.");
             Assert(store.Load().Tasks.Single(t => t.Id == task.Id).RemindAtUtc is null,
                 "Cleared reminder should persist as null.");
+
+            // Workspace Reminder editor's Repeat toggle (every2h/daily/weekly) pushes a positive
+            // remindEveryMinutes alongside remindAtUtc — only null/negative repeat values were
+            // previously covered here.
+            var repeatRemindAt = "2026-07-07T09:00:00Z";
+            var repeatResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "rem-repeat-set", "updateTaskReminder",
+                new { taskId = task.Id.ToString("N"), remindAtUtc = repeatRemindAt, remindEveryMinutes = 10080 }), now);
+            Assert(repeatResult.Success, "Setting a weekly-repeating reminder should succeed.");
+            var afterRepeatSet = store.Load().Tasks.Single(t => t.Id == task.Id);
+            Assert(afterRepeatSet.RemindAtUtc == DateTimeOffset.Parse(repeatRemindAt),
+                "Repeating reminder's next occurrence should persist through state.json.");
+            Assert(afterRepeatSet.RemindEveryMinutes == 10080,
+                "Weekly repeat cadence (10080 minutes) should persist through state.json.");
+
+            var repeatOffResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "rem-repeat-off", "updateTaskReminder",
+                new { taskId = task.Id.ToString("N"), remindAtUtc = repeatRemindAt, remindEveryMinutes = (int?)null }), now);
+            Assert(repeatOffResult.Success, "Turning repeat off while keeping the reminder should succeed.");
+            var afterRepeatOff = store.Load().Tasks.Single(t => t.Id == task.Id);
+            Assert(afterRepeatOff.RemindAtUtc == DateTimeOffset.Parse(repeatRemindAt),
+                "Turning repeat off must not clear the reminder's own time.");
+            Assert(afterRepeatOff.RemindEveryMinutes is null,
+                "Turning repeat off should clear the repeat cadence.");
         });
     }
 

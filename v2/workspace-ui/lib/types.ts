@@ -4,6 +4,7 @@ export type ReminderPreset =
   | "none"
   | "30m"
   | "1h"
+  | "2h"
   | "morning"
   | "afternoon"
   | "next-morning"
@@ -12,7 +13,7 @@ export type ReminderPreset =
 /** Lifecycle state of a reminder, independent from the chosen preset */
 export type ReminderState = "none" | "active" | "scheduled"
 
-export type RepeatInterval = "daily" | "weekly" | "monthly" | "custom"
+export type RepeatInterval = "every2h" | "daily" | "weekly" | "monthly" | "custom"
 
 export interface Project {
   id: string

@@ -260,6 +260,17 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
   }
 }
 
+/** Maps the backend's flat repeat-minutes back to a repeat-interval chip, so reopening the
+ * Reminder editor after a fresh snapshot re-highlights the interval that's actually scheduled. */
+function reminderIntervalFromMinutes(minutes: number | null): Task["reminderInterval"] {
+  switch (minutes) {
+    case 120: return "every2h"
+    case 1440: return "daily"
+    case 10080: return "weekly"
+    default: return minutes ? "custom" : undefined
+  }
+}
+
 function adaptTask(source: WorkspaceSnapshotContract["tasks"][number]): Task {
   const reminder = source.reminderAtUtc ? "custom" : "none"
   const reminderLocal = source.reminderAtUtc
@@ -279,7 +290,7 @@ function adaptTask(source: WorkspaceSnapshotContract["tasks"][number]): Task {
     pinned: source.pinToPanel,
     reminder,
     reminderRepeat: (source.reminderEveryMinutes ?? 0) > 0,
-    reminderInterval: source.reminderEveryMinutes === 1440 ? "daily" : "custom",
+    reminderInterval: reminderIntervalFromMinutes(source.reminderEveryMinutes),
     reminderDate: reminderLocal?.date,
     reminderTime: reminderLocal?.time,
     waitingFor: source.waitingFor || undefined,
