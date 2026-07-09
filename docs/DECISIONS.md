@@ -1,21 +1,90 @@
 # TaskOverlay Product Decisions
 
-This document records current product and implementation decisions. Revisit a
-decision here when the product direction changes, then update the relevant
-roadmap or backlog item.
+This document records current product and implementation decisions. Update it
+when product direction changes, then update the relevant roadmap or backlog
+item.
 
-## Current Decisions
+## Product Direction
 
-- WPF v2 is the main product.
+- TaskOverlay is memory-support, attention-support, and work-recovery software,
+  not just a task list.
+- WPF v2 is the active product.
 - Go v1 is legacy.
-- The correct executable for v2 is `TaskOverlay.V2.exe`.
-- The correct development artifact is `TaskOverlayV2_WPF_FrameworkDependent`.
+- Workspace is the main management surface.
+- Overlay is the attention layer, not the full task manager.
+- Tree is the master structure.
+- Repo docs are the source of truth for backlog/decisions/roadmap; chat memory
+  alone is not.
+
+## Names And Artifacts
+
+- Correct solution: `v2/TaskOverlay.sln`.
+- Correct executable: `TaskOverlay.V2.exe`.
+- Correct development artifact: `TaskOverlayV2_WPF_FrameworkDependent`.
+- Runtime state: `%APPDATA%\TaskOverlayV2\state.json`.
+- Logs: `%APPDATA%\TaskOverlayV2\logs`.
 - Use REMIND, not DUE.
 - Use FOCUS, not IN WORK.
 - Use Focus, not Acknowledge.
+- Statuses are TODO / FOCUS / WAIT / DONE.
+
+## State And Persistence
+
+- C# `AppState` / `state.json` is the current desktop source of truth.
+- Production Workspace mutations must remain connected:
+  React -> WebView2 bridge -> C# `AppState` / `TreeStateService` ->
+  `state.json` -> fresh snapshot -> React.
+- React must not write directly to `state.json`.
+- `localStorage` must not be used for production persistence.
+- No mock-only production controls.
+- Backups are backup, not sync.
+
+## Overlay And Attention
+
+- Overlay Working = FOCUS + active REMIND only.
+- Working does not show arbitrary TODO tasks.
+- PinToPanel is visibility, not status.
+- Display mode and task filter are separate.
 - REMIND is not Deadline.
-- Deadline is not REMIND.
-- Overlay is the attention layer.
-- Tree is the master structure.
-- Handle anchor is the source of truth and must not be derived from panel position.
+- Deadline is not REMIND and does not trigger a popup by itself in MVP.
+- MEET is a separate entity, not a task/status/REMIND/Deadline.
+- Handle is a functional surface, not branding.
+- Handle anchor is the source of truth and must not be derived from panel
+  position.
+
+## Workspace And Structure
+
+- Sections/folders are the same model for now.
+- Workstream = top-level section/group is the MVP simplification.
+- Cross-sectional Workstream is deferred.
+- No permanent left Projects sidebar in Workspace; use the horizontal Project
+  Scope Bar.
+- Old WPF Tree Manager remains fallback until Workspace is stable.
+- Old WPF Task Details remains temporary fallback until Workspace Details is
+  primary.
+- Quick Add and Settings stay WPF/native for now.
+
+## Scheduling And Planning
+
+- Timeline and Calendar have different jobs:
+  - Timeline = attention/risk horizon.
+  - Calendar = time allocation.
+- Workstreams are context recovery, not a Kanban/status board/Calendar.
+- Direct meeting service integrations are not MVP.
+- AI suggests tasks; the user confirms selected tasks.
+- No embedded ChatGPT window inside the app.
+
+## Sync And Platform
+
+- Full sync/mobile/cloud comes later.
+- Server-mediated offline-first sync is preferred.
+- P2P/CRDT is not the first sync architecture.
+
+## Process
+
+- Manual UX acceptance beats a green build.
+- Codex GUI automation is not final UI acceptance.
+- v0 is design/product direction when explicitly referenced, but not the domain
+  source of truth.
+- No fake controls.
 - Keep PRs bounded, but avoid micro-PRs for tiny UI changes.

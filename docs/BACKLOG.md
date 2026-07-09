@@ -1,141 +1,509 @@
 # TaskOverlay Product Backlog
 
-This document keeps product backlog items out of chat history and close to the
-codebase. Items here are not commitments for the next PR. They are grouped by
-product area so implementation work can be split into bounded changes.
+This document is the maintainable source of truth for product backlog items that
+should not live only in chat history. Items are grouped by product area and are
+not commitments for the next PR.
 
-## 1. Overlay Modes And Handle
+Active product scope:
+
+- WPF v2 is the active product.
+- Go v1 is legacy and should not be changed for v2 work.
+- Correct solution: `v2/TaskOverlay.sln`.
+- Correct executable: `TaskOverlay.V2.exe`.
+- Correct development artifact: `TaskOverlayV2_WPF_FrameworkDependent`.
+- Runtime state: `%APPDATA%\TaskOverlayV2\state.json`.
+- Logs: `%APPDATA%\TaskOverlayV2\logs`.
+- `AppState` / `state.json` is the desktop source of truth.
+- Production Workspace mutations must remain connected:
+  React -> WebView2 bridge -> C# `AppState` / `TreeStateService` ->
+  `state.json` -> fresh snapshot -> React.
+- No React direct writes to `state.json`.
+- No `localStorage` production persistence.
+- No mock-only production controls.
+
+## Backup
+
+- Hide or rename user-facing "Work" in backup UI. "Work" is an internal future
+  task-space marker; user-facing copy should be "latest backup", "this
+  computer", etc. `taskSpace` can remain metadata or a filename segment.
+- Make backup retention configurable:
+  - backup interval;
+  - max backup count;
+  - max retention days;
+  - approximate backup folder size;
+  - cleanup old backups.
+- Restore safety:
+  - if local state is newer than the latest backup, disable Restore latest
+    backup or show an explicit warning that restoring an older backup replaces
+    newer local data.
+- Polish "Newer backup found" dialog:
+  - clipped/truncated layout;
+  - typo `avilable` -> `available`;
+  - local/backup details partly hidden;
+  - footer/buttons overlap content;
+  - add min width/height or scrollable content above a fixed footer;
+  - keep the dark theme.
+
+## Workspace, WebView2, And Lifecycle
+
+- Workspace loading state for the 1-2 second startup delay.
+- No stale selection:
+  - TASK -> MEET -> TASK must always show the matching Details panel type.
+  - Details must not remain stale after tab/project scope/filter/search changes.
+- Workspace window lifecycle:
+  - Open Workspace from tray focuses the existing window, not a duplicate.
+  - Closing Workspace does not exit the app.
+- Graceful WebView2 runtime/static files error.
+- Robust local path loading for spaces, Cyrillic paths, AppData, and Program
+  Files.
+- Hide overlay/handle/hover panel from Alt+Tab and the normal Windows app
+  switcher; keep Quick Add, Task Details, and Settings as normal windows.
+
+## Tree And Details
+
+- Tree Active-only = all non-DONE tasks:
+  - TODO, FOCUS, and WAIT visible;
+  - DONE hidden.
+  - Product decision overrides older v0 FOCUS/WAIT-only behavior.
+  - Reported/likely implemented by PR #45; verify UX details in main when
+    touching this area.
+- DONE cleanup:
+  - when a task becomes DONE, clear REMIND/reminder and DEADLINE/`DueAtUtc` so
+    Timeline/attention does not show DONE tasks as active;
+  - likely covered by PR #45, verify in main.
+- Tree Details stale state after delete:
+  - clear selection or select a safe nearby item.
+- WAITING FOR block:
+  - visible only when status = WAIT;
+  - placed directly under status chips;
+  - preserve value when switching away and back.
+- Details Delete in connected mode with confirmation and no stale panel.
+- Details Location in connected mode through `moveTask`.
+- Notes textarea manual vertical resize or auto-grow to max height with
+  scrollbar.
+
+## Timeline, Reminder, And Deadline
+
+- Reminder quick presets + Repeat in connected Workspace:
+  - connect to bridge/AppState;
+  - no mock-only gate;
+  - support calculated `remindAtUtc` and `remindEveryMinutes`.
+- Timeline click `DetailEmphasis`:
+  - REMIND opens Task Details with Reminder expanded;
+  - DEADLINE opens Task Details with Deadline expanded.
+- Timeline overdue-first sorting / v0 fidelity:
+  - low-priority fix or document the intentional difference.
+- Timeline should not show DONE/completed tasks as active attention items:
+  - default hide completed or make completed distinction explicit.
+- Reminder block:
+  - compact/collapsible;
+  - Clear/Off accessible without scrolling;
+  - whole header clickable.
+- Deadline block:
+  - compact/collapsible;
+  - supports date-only and date+time;
+  - whole header clickable.
+
+## Overlay And Attention
 
 - Working mode:
-  - Show only FOCUS tasks.
-  - Do not show descriptions by default.
-  - Use a lower contrast idle display.
-  - On hover, tasks become normal contrast and descriptions appear.
-- Hide or remove Auto quest tracker mode for now.
-- Do not show TaskOverlay overlay/handle/panel windows in Alt+Tab or the normal Windows app switcher.
-- Future functional handle / attention hub.
-- Handle redesign:
-  - Make the handle prettier.
-  - Make the handle more functional.
-  - Keep the v0 attention-hub direction: a wider pill-shaped handle with MEET countdown, counters, project/task color dots, and a strong dark/purple visual identity is acceptable and preferred.
-  - Do not over-compact the handle just because it is a handle; the v0 size felt usable and visually successful.
-  - Do not show static app logo or the literal TaskOverlay name on the handle by default; that space should be used for functional attention information.
-  - Colored compact counters/dots may represent projects or current task counts if the meaning stays discoverable through hover/tooltips.
-  - Show countdown to the next MEET item on the handle.
-  - Support compact attention counters for FOCUS / REMIND / WAIT / Panel where useful.
-  - Preserve the handle anchor invariant: handle position is the source of truth and must not be derived from panel position.
-- Window size controls per mode in Settings.
+  - show only FOCUS tasks;
+  - show active REMIND items;
+  - do not show arbitrary TODO tasks;
+  - do not show descriptions by default;
+  - use a lower contrast idle display;
+  - on hover, tasks become normal contrast and descriptions may appear.
+- Hide or remove Auto quest tracker mode for now if it conflicts with the
+  current Workspace + Working direction.
+- Overlay left-click task opens Task Details, not DONE. Completion must be
+  explicit.
+- Overlay cards show notes/description under title and WAIT metadata after
+  notes.
+- REMIND filter includes active/triggered and scheduled reminders, excluding
+  DONE:
+  - active first;
+  - scheduled-only does not enter Working.
+- Remove redundant leading dots/markers.
+- Pinned/Collapsed default filter = Panel, not all TODO/backlog.
+- Project grouping in overlay:
+  - do not repeat project chip on every card in the same group.
+- Collapsible WAIT group.
+- One-click visibility to surface a task in overlay regardless of status.
+- Overlay filters/chips:
+  - Panel;
+  - Priority;
+  - FOCUS;
+  - WAIT;
+  - REMIND;
+  - TODO;
+  - DONE is not default.
+- Reminder display settings for scheduled reminders before trigger:
+  - tag;
+  - countdown;
+  - exact time;
+  - compact indicator.
+- Attention hub handle redesign:
+  - handle is a functional surface, not branding;
+  - show next MEET/counts/state/drag affordance;
+  - no logo/name by default;
+  - preserve handle anchor as source of truth.
+- Window size controls per overlay mode in Settings.
 
-## 2. Reminder, Calendar, Meetings, And Scheduling
-
-- Deadlines for tasks.
-- Deadline should be an optional task field.
-- Keep Deadline separate from REMIND.
-- Show task deadlines in future calendar views.
-- Meetings module:
-  - MEET is not a task and not a task status.
-  - MEET is a separate calendar-like item for meeting attention and countdown.
-  - MEET does not combine with TODO / FOCUS / WAIT / DONE / REMIND because it is not a task lifecycle item.
-  - MEET should support project, title, description/notes, explicit date, explicit time, optional duration, optional location, and optional meeting link.
-  - MEET should not use relative reminder-style presets such as +30 min, +1 hour, Tomorrow morning, or Next workday morning.
-  - MEET creation should optimize for exact future date/time entry, for example Tuesday 15:00, plus the meeting link.
-  - MEET should have a fast compact editor similar in density to the REMIND editor, but with separate meeting-specific behavior.
-  - The handle should show time to the next meeting or current/next meetings.
-  - Manual MEET items first; external calendar integration later.
-- Application calendar:
-  - Add an internal calendar/timeline view to TaskOverlay.
-  - Calendar should show MEET items, task REMIND items, and task Deadline items together.
-  - Calendar should keep the concepts visually separate: MEET, REMIND, and Deadline are different item types.
-  - Calendar is an app-level planning/attention view, not a replacement for Tree Manager.
-- REMIND display settings.
-- Upcoming reminder display settings.
-- Reminder/date/time UX improvements.
-
-## 3. Notes
-
-- Short important notes module.
-- Quick access from handle or expanded panel.
-- Notes should not be mixed with tasks.
-- Workflow/context notes:
-  - Provide a place to write important project or section/workstream context that is not a task.
-  - Support notes for Project, Workstream, and Section first; Task/Subtask notes can remain later or reuse existing description fields.
-  - Use this for workflow nuances, decisions, links, constraints, or things the user tends to forget.
-  - Surface these notes in Tree Manager details so each project/workstream/section has an obvious "where do I write this?" place.
-  - Do not show workflow notes in the small active overlay by default.
-  - Candidate UI labels: Context notes, Workflow notes, Section notes, Workstream notes.
-
-## 4. Task Interactions
+## Task Interactions
 
 - WAIT fast flow:
-  - When a task status is changed to WAIT, show a Waiting for field immediately in Task Details and Quick Add.
-  - Waiting for is where the user writes what or whom the task is waiting for.
-  - In Task Details, switching task to WAIT focuses Waiting for.
-  - In Quick Add, selecting WAIT should reveal the same compact Waiting for field before task creation.
+  - switching a task to WAIT opens or reveals Task Details;
+  - cursor focuses Waiting for;
   - Enter saves where appropriate.
+- Quick Add WAIT flow:
+  - selecting WAIT reveals the compact Waiting for field before task creation.
 - Empty status area left click opens quick status menu.
 - Task Details keyboard shortcuts:
-  - Enter saves and closes.
-  - Shift+Enter inserts a new paragraph in Notes.
+  - Enter saves and closes;
+  - Shift+Enter inserts a new paragraph in Notes;
   - Esc cancels.
 
-## 5. Tree Mode And Planning
+## Tree, Sections, And Projects
 
 - Tree as master structure.
 - Overlay as active subset.
 - Hierarchy:
-  - Project.
-  - Workstream.
-  - Section.
-  - Task.
+  - Project;
+  - Workstream;
+  - Section;
+  - Task;
   - Subtask.
-- Tree Manager project views:
-  - Keep the current tree view as the primary structured task view.
-  - Add a future Workstreams tab inside the same Tree Manager window as an alternate project view.
-  - The Workstreams tab should not replace the tree; it should visualize the same project tasks through parallel streams and relationships.
-  - Tree view answers "where is this task in the hierarchy?".
-  - Workstreams view answers "which streams are running, how are tasks related, and what blocks what?".
-- Workstreams:
-  - Use Workstream for parallel streams of work inside a project.
-  - A Workstream can contain sections and nested tasks.
-  - A project may have multiple workstreams running in parallel.
-  - Tasks may need cross-links across workstreams; support many-to-many relationships later.
-  - Cross-links should express dependencies, blockers, related tasks, duplicates, or "see also" relations without forcing a strict parent-child tree.
-  - Keep the main hierarchy simple for MVP, but plan the data model so node links can be added later.
-- Workstreams view visual ideas:
-  - Start with columns or swimlanes per workstream, with compact task cards inside each stream.
-  - Show cross-stream dependencies with optional connector lines/arrows when the user enables relationship view.
-  - Consider sticky-note style cards for lightweight planning, but avoid a full Kanban workflow unless explicitly scoped later.
-  - Support relationship badges on cards even when connector lines are hidden, for example Blocks, Blocked by, Related, Duplicate, See also.
-  - Allow selecting a card to open the same right-side details panel as the tree view.
-  - Keep many-to-many relationships as a separate links layer over the same task nodes, not as duplicate tasks.
-- Section remains useful as a folder/subdivision inside a workstream or project.
-- Gantt-like future planning view.
 - Active + ancestors display mode.
 - Do not render the full backlog inside the small overlay.
+- Section context menu:
+  - Rename section;
+  - Add subsection;
+  - Create task in this section;
+  - Delete section with confirmation;
+  - Hide/show section in Active-only.
+- Subsections nested under parent section and compatible with the current
+  Workstream model.
+- All sections visible by default in Tree Active-only, including empty sections,
+  if this remains accepted UX.
+- Project Root appears at top and uses project name.
+- New sections created at bottom of section list by default.
+- Create task from section context menu creates the task inside the clicked
+  section.
+- After section-create-task:
+  - Details opens;
+  - focus goes to empty Title;
+  - Tab -> Notes;
+  - Enter in Notes must be defined safely.
+- Project edit mode in Project Scope Bar:
+  - rename;
+  - hide/show;
+  - reorder;
+  - color;
+  - add;
+  - archive projects.
+- Create project flow:
+  - set name/color;
+  - allow moving existing tasks into it.
+- Multi-project selection:
+  - single project;
+  - all projects;
+  - custom selected projects;
+  - Status/Timeline aggregate selected projects;
+  - Tree defaults to single-project.
+- Tree drag/drop after `moveTask` is stable:
+  - reorder/move tasks between sections/projects/workstreams/root.
+- Move task context menu:
+  - rename Change project to Move to project;
+  - later Move > Project / Section.
+- Pin/Unpin from panel in task context menu.
+- Contextual Mark done / Reopen.
 
-## 6. Sync And Cloud
+## Sync And Cloud
 
 - Research cloud sync options.
 - Telegram as a possible capture/sync channel.
 - Prefer offline-first local state with later server-mediated sync.
 - Avoid early CRDT/P2P unless needed.
 
-## 7. Settings
+## Workspace UX
+
+- Adaptive Workspace layout:
+  - collapse/expand left area;
+  - right Details panel;
+  - bottom Active Now strip;
+  - resize handles;
+  - smart layout redistribution.
+- Right Details panel sizing:
+  - min around 280;
+  - preferred 340-380;
+  - max 520-560;
+  - hard max about 45%;
+  - subtle splitter;
+  - persist width.
+- Open Workspace on app startup after backup checks:
+  - open once;
+  - likely configurable.
+- Hotkeys toggle utility windows:
+  - Quick Add;
+  - Settings;
+  - Task Details;
+  - Workspace open/focus/close focused.
+- Tray/context menu cleanup:
+  - tray is the system/app entry;
+  - task context menu is fast task actions;
+  - root tray menu short;
+  - clipboard capture under submenu.
+- Dark styled task action popover later; system tray can remain system-style
+  longer.
+- Overlay Show/Hide should be one context-sensitive item.
+
+## Scheduling, Calendar, And Timeline
+
+- Work schedule settings:
+  - start/end;
+  - working days;
+  - timezone display;
+  - later lunch/break and Friday schedule;
+  - defaults Mon-Fri 09:00-18:00.
+- Deadline:
+  - optional date/date+time;
+  - separate from REMIND;
+  - no popup by itself;
+  - shown in Tree/Status/Timeline/overlay metadata.
+- Calendar/Timeline MVP:
+  - temporal layer for MEET, REMIND, and Deadline;
+  - Today / Tomorrow / This week / Later.
+- Timeline Now marker:
+  - include Before workday / After workday edge states.
+- Calendar production UX:
+  - day/week planner, not a Google Calendar clone;
+  - time grid;
+  - free slots;
+  - planning pool;
+  - work blocks;
+  - MEET blocks;
+  - REMIND/DEADLINE point markers;
+  - `selectedDate` source of truth.
+- Calendar date behavior:
+  - Today/Tomorrow;
+  - day arrows +/-1 day;
+  - week arrows +/-7 days;
+  - Monday-Sunday week;
+  - deterministic Show done;
+  - no dead buttons.
+- Planning pool:
+  - unscheduled focus tasks;
+  - drag to grid creates planned WORK block;
+  - clearing block removes planned work, not task.
+- Duration chips / resize handles:
+  - 15/30/45/60/90/120.
+- Gantt-like future planning view.
+- Timeline and Calendar have different jobs:
+  - Timeline = attention/risk horizon;
+  - Calendar = time allocation.
+
+## MEET
+
+- MEET base model:
+  - project;
+  - title;
+  - notes/agenda/context;
+  - exact date;
+  - start time;
+  - duration/end time;
+  - location;
+  - link;
+  - optional linked task.
+- MEET Timeline interaction:
+  - click MEET row -> MEET Details;
+  - New MEET action in Timeline.
+- MEET persistence:
+  - `MeetItem` in state;
+  - bridge commands create/update/delete.
+- Handle next MEET countdown.
+- Local MEET recording MVP:
+  - Start/Stop from MEET;
+  - record system audio + mic locally;
+  - no OpenAI yet.
+- Emergency recording:
+  - start first, classify later;
+  - save as new MEET / link existing / keep recording only / transcribe /
+    delete.
+- Post-meeting transcription:
+  - explicit upload;
+  - save transcript json/md.
+- Meeting analysis:
+  - decisions;
+  - my tasks;
+  - others' tasks;
+  - waiting for;
+  - risks;
+  - questions.
+- Suggested tasks from meeting:
+  - no auto-create;
+  - user reviews checkbox list and creates selected tasks.
+- Provider abstraction:
+  - `ITranscriptionProvider`;
+  - `IMeetingAnalysisProvider`;
+  - OpenAI first, AssemblyAI/Deepgram/Local Whisper later.
+- Two-track audio:
+  - mic + system audio locally;
+  - default process mixed;
+  - better mode keeps both tracks.
+
+## Task Quality And Neuroinclusive Planning
+
+- Priority:
+  - important/not important first;
+  - model as enum if practical;
+  - not status, FOCUS, REMIND, or PinToPanel;
+  - no effect on Working.
+- One-click Priority toggle in Tree/Status rows and later overlay cards.
+- Priority filters/sorting.
+- Checklist inside task:
+  - checklist item has only text/isDone;
+  - no status/reminder/wait/pin/priority.
+- Attachments:
+  - images/documents attached to a task;
+  - connected through AppState/state.json/fresh snapshot;
+  - decide storage/copy/reference/preview/missing files/max size/future sync.
+- Work/Home task spaces:
+  - isolated task memories;
+  - Settings switch;
+  - backup metadata already has `taskSpace` but feature is not implemented.
+- Work Pattern Analytics:
+  - local-first event log for snooze loop, stale task, WAIT without follow-up,
+    deadline drift, overloaded day, project/workstream neglect, and meeting
+    follow-up gap;
+  - not medical diagnosis or productivity scoring.
+- Weekly reporting support.
+- Export completed tasks report for selected period:
+  - needs reliable `CompletedAtUtc`;
+  - group by project;
+  - include title, section/path, completed datetime, optional notes.
+- Chunking/break task into 3-7 small steps and next physical step.
+- Templates/routines:
+  - morning start;
+  - meeting prep;
+  - after meeting;
+  - deep work.
+- Reminder as action system:
+  - start 5 min;
+  - snooze;
+  - reschedule;
+  - break into steps.
+- Focus mode / one thing at a time.
+- Low-stimulus / reduced motion.
+- Undo/archive/autosave/draft recovery; hard delete only with confirmation.
+
+## Notes
+
+- Short important notes module.
+- Quick access from handle or expanded panel.
+- Notes should not be mixed with tasks.
+- Workflow/context notes:
+  - Project, Workstream, and Section first;
+  - use for nuances, decisions, links, constraints, or memory support;
+  - surface in Workspace/Tree Details;
+  - do not show workflow notes in the small overlay by default.
+- Candidate UI labels:
+  - Context notes;
+  - Workflow notes;
+  - Section notes;
+  - Workstream notes.
+
+## Settings
 
 - Redesign Settings window.
-- Add Work/Home task spaces:
-  - Provide a Settings switch between Work mode and Home mode.
-  - Work mode is the current product/task space being developed now.
-  - Home mode should use the same app functionality but a completely separate task memory for household, home, personal chores, and non-work tasks.
-  - Work and Home tasks must be isolated and must not appear in each other's Tree Manager, overlay, reminders, calendar views, backups, or search by default.
-  - Switching mode should swap the active task store/context safely without mixing tasks.
-  - Store the active task space selection and make it visible in Settings and possibly on the handle/panel later.
-  - Plan for separate backup files per task space.
 - Add window size controls:
-  - Auto quest tracker.
-  - Collapsed hover panel.
-  - Pinned expanded.
-  - Quick Add.
+  - Auto quest tracker;
+  - Collapsed hover panel;
+  - Pinned expanded;
+  - Quick Add;
   - Task Details.
 - Future editable hotkeys.
 - Storage/logs/diagnostics section.
+
+## Workstreams
+
+- Keep the current tree view as the primary structured task view.
+- Workstreams tab/view is a future alternate project view over the same project
+  tasks.
+- Workstreams should visualize parallel streams and relationships, not replace
+  the tree.
+- Workstreams view answers:
+  - which streams are running;
+  - how tasks are related;
+  - what blocks what.
+- A Workstream can contain sections and nested tasks.
+- A project may have multiple workstreams running in parallel.
+- Tasks may need cross-links across workstreams; support many-to-many
+  relationships later.
+- Cross-links should express dependencies, blockers, related tasks, duplicates,
+  or "see also" relations without forcing a strict parent-child tree.
+- Workstreams view visual ideas:
+  - columns or swimlanes per workstream, with compact task cards inside each
+    stream;
+  - optional connector lines/arrows for cross-stream dependencies when
+    relationship view is enabled;
+  - relationship badges on cards even when connector lines are hidden, for
+    example Blocks, Blocked by, Related, Duplicate, See also;
+  - selecting a card opens the same right-side Details panel as the tree view;
+  - many-to-many relationships stay as a separate links layer over the same task
+    nodes, not duplicate tasks.
+- Workstream narrative fields later:
+  - goal;
+  - nextAction;
+  - blocker;
+  - waitingFor;
+  - activityLog;
+  - lastActivity;
+  - weekly report draft.
+- Workstreams UX should be context recovery:
+  - not Kanban;
+  - not Calendar;
+  - not a folder list.
+- Current Workstream = top-level section/group MVP.
+- Cross-sectional curated Workstream only after explicit decision.
+
+## Already Done / Probably Obsolete
+
+- WPF v2 foundation is present in main; verify behavior when touching it.
+- Basic Project/Section/Task Workspace is present in main; verify behavior when
+  touching it.
+- Overlay attention layer is present in main; verify current UX when changing
+  overlay.
+- PR #29 automatic backup MVP is merged; retention and dialog polish remain.
+- v0 Workspace generation is done as product/design input.
+- "Task Management Window" naming is obsolete; use Workspace.
+- Direct v0 GitHub sync is rejected.
+- ActiveNowStrip `localStorage` production persistence anti-pattern is corrected
+  if main still routes mutations through the bridge; verify if touching this.
+- PR #44 Workstreams MVP is merged as an MVP; verify behavior in main before
+  treating follow-ups as complete.
+- PR #45 Tree Operations MVP is merged into main. It likely covers Tree/Section
+  context menus, subtask operations, `deleteTask`, `moveTask`, Details Location,
+  Active-only, and DONE cleanup; verify behavior in main before marking any
+  remaining follow-up complete.
+- Long Go v1 history in prompts is obsolete for WPF v2 planning.
+
+## Needs Clarification
+
+- Active + path semantics.
+- Section delete and task delete behavior with children.
+- Empty-area Create task target.
+- Move between projects behavior.
+- Workstream fields on `GroupItem` vs a separate Workstream model.
+- Notes behavior and Enter in Notes.
+- Priority icon/color/naming/model/sorting.
+- Overlay WAIT group scope and chip count scope.
+- Backup retention defaults.
+- Work/Home storage model.
+- Attachments storage and missing-file behavior.
+- MEET persistence timing.
+- Transcription provider and privacy wording.
+- Completed report format.
+- Workspace auto-open default.
+- Workspace layout preference storage.
+- Drag/drop safe actions.
+- Old WPF Task Details fate.
