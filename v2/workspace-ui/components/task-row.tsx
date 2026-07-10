@@ -89,6 +89,14 @@ export function TaskRow({
       </span>
 
       {/* inline metadata */}
+      {(task.checkpoints?.length ?? 0) > 0 && (
+        <span
+          className="hidden shrink-0 rounded bg-accent px-1 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground md:inline"
+          title={`${task.checkpoints!.filter((c) => c.done).length} of ${task.checkpoints!.length} steps done`}
+        >
+          {task.checkpoints!.filter((c) => c.done).length}/{task.checkpoints!.length}
+        </span>
+      )}
       {task.status === "WAIT" && task.waitingFor && (
         <span className="hidden items-center gap-1 truncate text-xs text-status-wait/80 md:flex">
           <Clock className="size-3" />

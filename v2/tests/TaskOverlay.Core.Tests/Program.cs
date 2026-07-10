@@ -144,7 +144,12 @@ internal static class Program
             ("workspace command move task to section", WorkspaceCommandMoveTaskToSectionPersistence),
             ("workspace command move task to project root", WorkspaceCommandMoveTaskToProjectRootPersistence),
             ("workspace command move task invalid target", WorkspaceCommandMoveTaskInvalidTarget),
-            ("workspace command done clears reminder and deadline", WorkspaceCommandDoneClearsReminderAndDeadline)
+            ("workspace command done clears reminder and deadline", WorkspaceCommandDoneClearsReminderAndDeadline),
+            ("workspace command checkpoint persistence", WorkspaceCommandCheckpointPersistence),
+            ("workspace command checkpoint reorder persistence", WorkspaceCommandCheckpointReorderPersistence),
+            ("workspace command checkpoint validation", WorkspaceCommandCheckpointValidation),
+            ("workspace checkpoint snapshot and safe load", WorkspaceCheckpointSnapshotAndSafeLoad),
+            ("workspace checkpoint independent of parent done", WorkspaceCheckpointIndependentOfParentDone)
         };
 
         foreach (var test in tests)
@@ -4652,6 +4657,253 @@ internal static class Program
                 "DONE must clear the reminder schedule.");
             Assert(!loaded.ReminderActive, "DONE must clear the active reminder flag.");
             Assert(loaded.DueAtUtc is null, "DONE must clear the deadline (DueAtUtc).");
+        });
+    }
+
+    private static void WorkspaceCommandCheckpointPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-09T09:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+            var taskId = task.Id.ToString("N");
+
+            // Batch add (multiline paste shape) preserves input order and skips blank lines.
+            var addResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-add", "addTaskCheckpoints",
+                new { taskId, titles = new[] { "Collect numbers", "  ", "Check previous month", "Write summary" } }), now);
+            Assert(addResult.Success, "Adding checkpoints should succeed.");
+            var afterAdd = store.Load().Tasks.Single(t => t.Id == task.Id);
+            Assert(afterAdd.Checkpoints is { Count: 3 }, "Three non-empty checkpoints should persist (blank line skipped).");
+            Assert(afterAdd.Checkpoints![0].Title == "Collect numbers" &&
+                   afterAdd.Checkpoints[1].Title == "Check previous month" &&
+                   afterAdd.Checkpoints[2].Title == "Write summary",
+                "Checkpoint order must match input order.");
+            Assert(afterAdd.Checkpoints.Select(c => c.SortOrder).SequenceEqual(new[] { 0, 1, 2 }),
+                "Checkpoint SortOrder must be renumbered 0..n-1.");
+            Assert(afterAdd.Checkpoints.All(c => !c.Done && c.CompletedAtUtc is null),
+                "New checkpoints start open without CompletedAtUtc.");
+
+            // Toggle done sets CompletedAtUtc; toggling back clears it.
+            var firstId = task.Checkpoints![0].Id.ToString("N");
+            var toggleOn = dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-done", "toggleTaskCheckpoint", new { taskId, checkpointId = firstId, done = true }), now);
+            Assert(toggleOn.Success, "Toggling a checkpoint done should succeed.");
+            var afterToggle = store.Load().Tasks.Single(t => t.Id == task.Id).Checkpoints![0];
+            Assert(afterToggle.Done && afterToggle.CompletedAtUtc == now,
+                "Done checkpoint must persist with CompletedAtUtc set.");
+
+            var toggleOff = dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-reopen", "toggleTaskCheckpoint", new { taskId, checkpointId = firstId, done = false }), now);
+            Assert(toggleOff.Success, "Reopening a checkpoint should succeed.");
+            var afterReopen = store.Load().Tasks.Single(t => t.Id == task.Id).Checkpoints![0];
+            Assert(!afterReopen.Done && afterReopen.CompletedAtUtc is null,
+                "Reopened checkpoint must persist with CompletedAtUtc cleared.");
+
+            // Rename persists trimmed.
+            var rename = dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-rename", "updateTaskCheckpointTitle",
+                new { taskId, checkpointId = firstId, title = "  Collect all numbers  " }), now);
+            Assert(rename.Success, "Renaming a checkpoint should succeed.");
+            Assert(store.Load().Tasks.Single(t => t.Id == task.Id).Checkpoints![0].Title == "Collect all numbers",
+                "Renamed checkpoint title should persist trimmed.");
+
+            // Delete removes the item and renumbers the rest.
+            var delete = dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-delete", "deleteTaskCheckpoint", new { taskId, checkpointId = firstId }), now);
+            Assert(delete.Success, "Deleting a checkpoint should succeed.");
+            var afterDelete = store.Load().Tasks.Single(t => t.Id == task.Id).Checkpoints!;
+            Assert(afterDelete.Count == 2 &&
+                   afterDelete[0].Title == "Check previous month" &&
+                   afterDelete.Select(c => c.SortOrder).SequenceEqual(new[] { 0, 1 }),
+                "Delete must persist and renumber remaining checkpoints.");
+
+            // Unrelated task fields must be untouched by checkpoint commands.
+            Assert(afterDelete[0].Id != Guid.Empty, "Persisted checkpoints keep their ids.");
+            var reloaded = store.Load().Tasks.Single(t => t.Id == task.Id);
+            Assert(reloaded.Status == TaskStatus.Todo && reloaded.RemindAtUtc is null && reloaded.DueAtUtc is null,
+                "Checkpoint commands must not mutate status/reminder/deadline.");
+        });
+    }
+
+    private static void WorkspaceCommandCheckpointReorderPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-09T09:30:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+            var taskId = task.Id.ToString("N");
+
+            dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-seed", "addTaskCheckpoints",
+                new { taskId, titles = new[] { "A", "B", "C" } }), now);
+            var lastId = task.Checkpoints![2].Id.ToString("N");
+
+            var moveUp = dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-move", "reorderTaskCheckpoint",
+                new { taskId, checkpointId = lastId, targetIndex = 0 }), now);
+            Assert(moveUp.Success, "Reordering a checkpoint should succeed.");
+            var reordered = store.Load().Tasks.Single(t => t.Id == task.Id).Checkpoints!;
+            Assert(reordered.Select(c => c.Title).SequenceEqual(new[] { "C", "A", "B" }),
+                "Reorder must persist the new order.");
+            Assert(reordered.Select(c => c.SortOrder).SequenceEqual(new[] { 0, 1, 2 }),
+                "Reorder must renumber SortOrder 0..n-1.");
+
+            // Out-of-range target index clamps instead of failing.
+            var clamp = dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-clamp", "reorderTaskCheckpoint",
+                new { taskId, checkpointId = lastId, targetIndex = 99 }), now);
+            Assert(clamp.Success, "Over-large targetIndex should clamp, not fail.");
+            var clamped = store.Load().Tasks.Single(t => t.Id == task.Id).Checkpoints!;
+            Assert(clamped.Select(c => c.Title).SequenceEqual(new[] { "A", "B", "C" }),
+                "Clamped reorder should move the checkpoint to the end.");
+        });
+    }
+
+    private static void WorkspaceCommandCheckpointValidation()
+    {
+        var now = DateTimeOffset.Parse("2026-07-09T10:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var task = state.Tasks[0];
+        var taskId = task.Id.ToString("N");
+        CheckpointService.Add(task, new[] { "Only step" }, now);
+        var checkpointId = task.Checkpoints![0].Id.ToString("N");
+
+        var unknownTask = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "cp-bad-task", "toggleTaskCheckpoint",
+            new { taskId = Guid.NewGuid().ToString("N"), checkpointId, done = true }), now);
+        Assert(!unknownTask.Success && unknownTask.ErrorCode == "taskNotFound",
+            "Unknown taskId must be rejected.");
+
+        var unknownCheckpoint = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "cp-bad-id", "toggleTaskCheckpoint",
+            new { taskId, checkpointId = Guid.NewGuid().ToString("N"), done = true }), now);
+        Assert(!unknownCheckpoint.Success && unknownCheckpoint.ErrorCode == "checkpointNotFound",
+            "Unknown checkpointId must be rejected.");
+
+        var invalidCheckpointId = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "cp-invalid-id", "deleteTaskCheckpoint",
+            new { taskId, checkpointId = "not-a-guid" }), now);
+        Assert(!invalidCheckpointId.Success && invalidCheckpointId.ErrorCode == "invalidCheckpointId",
+            "Malformed checkpointId must be rejected.");
+
+        var emptyBatch = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "cp-empty-batch", "addTaskCheckpoints",
+            new { taskId, titles = new[] { "   ", "" } }), now);
+        Assert(!emptyBatch.Success && emptyBatch.ErrorCode == "invalidPayload",
+            "A batch with no non-empty titles must be rejected.");
+
+        var emptyRename = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "cp-empty-title", "updateTaskCheckpointTitle",
+            new { taskId, checkpointId, title = "   " }), now);
+        Assert(!emptyRename.Success && emptyRename.ErrorCode == "invalidPayload",
+            "Blank rename must be rejected.");
+
+        var badTitles = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "cp-bad-titles", "addTaskCheckpoints",
+            new { taskId, titles = "not-an-array" }), now);
+        Assert(!badTitles.Success && badTitles.ErrorCode == "invalidPayload",
+            "Non-array titles must be rejected.");
+
+        var badIndex = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "cp-bad-index", "reorderTaskCheckpoint",
+            new { taskId, checkpointId, targetIndex = -1 }), now);
+        Assert(!badIndex.Success && badIndex.ErrorCode == "invalidPayload",
+            "Negative targetIndex must be rejected.");
+
+        Assert(task.Checkpoints.Count == 1 && task.Checkpoints[0].Title == "Only step" && !task.Checkpoints[0].Done,
+            "Rejected checkpoint commands must not mutate checkpoints.");
+    }
+
+    private static void WorkspaceCheckpointSnapshotAndSafeLoad()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-09T11:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+
+            // A state saved before checkpoints existed loads with null Checkpoints
+            // and must round-trip safely (null and empty both mean "no steps").
+            store.Save(state);
+            var legacyLoaded = store.Load();
+            Assert(legacyLoaded.Tasks.All(t => t.Checkpoints is null),
+                "State without checkpoints must load with null Checkpoints.");
+            var legacySnapshot = WorkspaceSnapshotFactory.Create(legacyLoaded, now);
+            Assert(legacySnapshot.Tasks.All(t => t.Checkpoints is { Count: 0 }),
+                "Snapshot must expose an empty checkpoint list for tasks without steps.");
+
+            // Snapshot carries checkpoints in stable order with done flags.
+            CheckpointService.Add(task, new[] { "First", "Second" }, now);
+            CheckpointService.Toggle(task, task.Checkpoints![1].Id, done: true, now);
+            var snapshot = WorkspaceSnapshotFactory.Create(state, now);
+            var snapshotTask = snapshot.Tasks.Single(t => t.Id == task.Id.ToString("N"));
+            Assert(snapshotTask.Checkpoints is { Count: 2 } &&
+                   snapshotTask.Checkpoints[0].Title == "First" && !snapshotTask.Checkpoints[0].Done &&
+                   snapshotTask.Checkpoints[1].Title == "Second" && snapshotTask.Checkpoints[1].Done &&
+                   snapshotTask.Checkpoints[1].CompletedAtUtc == now,
+                "Snapshot must carry ordered checkpoints with done state and CompletedAtUtc.");
+
+            // Repair normalizes corrupted checkpoint data: empty titles dropped,
+            // stale CompletedAtUtc cleared, SortOrder renumbered.
+            task.Checkpoints.Add(new CheckpointItem { Title = "   ", SortOrder = 5 });
+            task.Checkpoints[0].SortOrder = 40;
+            task.Checkpoints[0].CompletedAtUtc = now; // not done — stale timestamp
+            var repaired = StateMigrator.RepairCurrentState(state);
+            Assert(repaired, "Repair must report checkpoint normalization changes.");
+            Assert(task.Checkpoints.Count == 2 &&
+                   task.Checkpoints.Select(c => c.SortOrder).SequenceEqual(new[] { 0, 1 }) &&
+                   task.Checkpoints.All(c => c.Done || c.CompletedAtUtc is null),
+                "Repair must drop empty steps, renumber order, and clear stale CompletedAtUtc.");
+        });
+    }
+
+    private static void WorkspaceCheckpointIndependentOfParentDone()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-09T12:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+            var taskId = task.Id.ToString("N");
+
+            dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-mixed", "addTaskCheckpoints",
+                new { taskId, titles = new[] { "Done step", "Open step" } }), now);
+            dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-mixed-done", "toggleTaskCheckpoint",
+                new { taskId, checkpointId = task.Checkpoints![0].Id.ToString("N"), done = true }), now);
+
+            // Marking the parent DONE must leave checkpoint states exactly as-is
+            // (unlike reminder/deadline, which DONE clears by design).
+            var doneResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-parent-done", "updateTaskStatus",
+                new { taskId, status = "DONE" }), now);
+            Assert(doneResult.Success, "Marking the parent DONE should succeed.");
+            var afterDone = store.Load().Tasks.Single(t => t.Id == task.Id);
+            Assert(afterDone.Status == TaskStatus.Done, "Parent should be DONE.");
+            Assert(afterDone.Checkpoints is { Count: 2 } &&
+                   afterDone.Checkpoints![0].Done && !afterDone.Checkpoints[1].Done,
+                "Parent DONE must not mutate checkpoint states.");
+
+            // Reopening the parent must also preserve checkpoint states.
+            var reopen = dispatcher.Dispatch(WorkspaceCommandJson(
+                "cp-parent-reopen", "updateTaskStatus",
+                new { taskId, status = "TODO" }), now);
+            Assert(reopen.Success, "Reopening the parent should succeed.");
+            var afterReopen = store.Load().Tasks.Single(t => t.Id == task.Id);
+            Assert(afterReopen.Checkpoints is { Count: 2 } &&
+                   afterReopen.Checkpoints![0].Done && !afterReopen.Checkpoints[1].Done,
+                "Reopening the parent must not reset completed checkpoints.");
         });
     }
 

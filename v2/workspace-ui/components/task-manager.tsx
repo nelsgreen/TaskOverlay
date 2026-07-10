@@ -869,6 +869,12 @@ export function TaskManager() {
     }
     return bridge.sendCommand(command)
   }
+  // Checkpoint ("Steps") mutations already arrive as fully-shaped commands from
+  // DetailsPanel — no field/value translation needed, just the connected gate.
+  const sendCheckpointCommand = (command: WorkspaceTaskCommand) => {
+    if (!connected) return false
+    return bridge.sendCommand(command)
+  }
   const pendingFieldOf: Record<WorkspaceTaskCommand["type"], string> = {
     updateTaskStatus: "status",
     updateTaskPinToPanel: "pinToPanel",
@@ -880,6 +886,11 @@ export function TaskManager() {
     updateTaskDeadline: "deadline",
     moveTask: "location",
     deleteTask: "delete",
+    addTaskCheckpoints: "checkpoints",
+    updateTaskCheckpointTitle: "checkpoints",
+    toggleTaskCheckpoint: "checkpoints",
+    deleteTaskCheckpoint: "checkpoints",
+    reorderTaskCheckpoint: "checkpoints",
   }
   const pendingFields = new Set(
     bridge.pendingCommands
@@ -1128,6 +1139,7 @@ export function TaskManager() {
               pendingFields={pendingFields}
               bridgeError={bridge.error}
               onBridgeEdit={sendTaskEdit}
+              onCheckpointCommand={sendCheckpointCommand}
               onClearBridgeError={bridge.clearError}
             />
           )}

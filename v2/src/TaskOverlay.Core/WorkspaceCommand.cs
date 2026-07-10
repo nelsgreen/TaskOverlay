@@ -181,6 +181,31 @@ public static class WorkspaceCommandProcessor
                     payload,
                     commandId,
                     timestamp),
+                "addTaskCheckpoints" => AddCheckpoints(
+                    task,
+                    payload,
+                    commandId,
+                    timestamp),
+                "updateTaskCheckpointTitle" => UpdateCheckpointTitle(
+                    task,
+                    payload,
+                    commandId,
+                    timestamp),
+                "toggleTaskCheckpoint" => ToggleCheckpoint(
+                    task,
+                    payload,
+                    commandId,
+                    timestamp),
+                "deleteTaskCheckpoint" => DeleteCheckpoint(
+                    task,
+                    payload,
+                    commandId,
+                    timestamp),
+                "reorderTaskCheckpoint" => ReorderCheckpoint(
+                    task,
+                    payload,
+                    commandId,
+                    timestamp),
                 "moveTask" => MoveTask(
                     treeService,
                     taskId,
@@ -395,6 +420,125 @@ public static class WorkspaceCommandProcessor
             ? WorkspaceCommandResult.Succeeded(commandId)
             : Fail(commandId, "mutationRejected", "Task deadline could not be updated.");
     }
+
+    private static WorkspaceCommandResult AddCheckpoints(
+        TaskItem task,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!payload.TryGetProperty("titles", out var titlesElement) ||
+            titlesElement.ValueKind != JsonValueKind.Array)
+        {
+            return Fail(commandId, "invalidPayload", "titles must be an array of step titles.");
+        }
+
+        var titles = new List<string>();
+        foreach (var element in titlesElement.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.String)
+            {
+                return Fail(commandId, "invalidPayload", "Each step title must be a string.");
+            }
+
+            titles.Add(element.GetString() ?? string.Empty);
+        }
+
+        // Blank lines from a multiline paste are skipped by the service; the
+        // command only fails when nothing at all could be added.
+        var created = CheckpointService.Add(task, titles, timestamp);
+        return created.Count > 0
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "invalidPayload", "At least one non-empty step title is required.");
+    }
+
+    private static WorkspaceCommandResult UpdateCheckpointTitle(
+        TaskItem task,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!TryReadCheckpointId(payload, out var checkpointId))
+        {
+            return Fail(commandId, "invalidCheckpointId", "A valid checkpointId is required.");
+        }
+
+        var title = ReadString(payload, "title");
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return Fail(commandId, "invalidPayload", "Step title must not be empty.");
+        }
+
+        return CheckpointService.Rename(task, checkpointId, title, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "checkpointNotFound", "The requested step does not exist.");
+    }
+
+    private static WorkspaceCommandResult ToggleCheckpoint(
+        TaskItem task,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!TryReadCheckpointId(payload, out var checkpointId))
+        {
+            return Fail(commandId, "invalidCheckpointId", "A valid checkpointId is required.");
+        }
+
+        if (!payload.TryGetProperty("done", out var done) ||
+            done.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return Fail(commandId, "invalidPayload", "done must be a boolean.");
+        }
+
+        return CheckpointService.Toggle(task, checkpointId, done.GetBoolean(), timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "checkpointNotFound", "The requested step does not exist.");
+    }
+
+    private static WorkspaceCommandResult DeleteCheckpoint(
+        TaskItem task,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!TryReadCheckpointId(payload, out var checkpointId))
+        {
+            return Fail(commandId, "invalidCheckpointId", "A valid checkpointId is required.");
+        }
+
+        return CheckpointService.Delete(task, checkpointId, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "checkpointNotFound", "The requested step does not exist.");
+    }
+
+    private static WorkspaceCommandResult ReorderCheckpoint(
+        TaskItem task,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!TryReadCheckpointId(payload, out var checkpointId))
+        {
+            return Fail(commandId, "invalidCheckpointId", "A valid checkpointId is required.");
+        }
+
+        if (!payload.TryGetProperty("targetIndex", out var indexElement) ||
+            indexElement.ValueKind != JsonValueKind.Number ||
+            !indexElement.TryGetInt32(out var targetIndex) ||
+            targetIndex < 0)
+        {
+            return Fail(commandId, "invalidPayload", "targetIndex must be a non-negative integer.");
+        }
+
+        return CheckpointService.Move(task, checkpointId, targetIndex, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "checkpointNotFound", "The requested step does not exist.");
+    }
+
+    private static bool TryReadCheckpointId(JsonElement payload, out Guid checkpointId) =>
+        Guid.TryParse(ReadString(payload, "checkpointId"), out checkpointId) &&
+        checkpointId != Guid.Empty;
 
     private static WorkspaceCommandResult CreateTask(
         AppState state,

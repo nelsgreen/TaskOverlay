@@ -54,7 +54,15 @@ public sealed record WorkspaceTaskSnapshot(
     bool ReminderActive,
     DateTimeOffset? DeadlineAtUtc,
     DateTimeOffset? PlannedStartAtUtc,
-    int? PlannedDurationMinutes);
+    int? PlannedDurationMinutes,
+    IReadOnlyList<WorkspaceCheckpointSnapshot>? Checkpoints = null);
+
+public sealed record WorkspaceCheckpointSnapshot(
+    string Id,
+    string Title,
+    bool Done,
+    int SortOrder,
+    DateTimeOffset? CompletedAtUtc);
 
 public sealed record WorkspaceActiveNowSnapshot(
     string TaskId,
@@ -254,7 +262,8 @@ public static class WorkspaceSnapshotFactory
             reminderActive,
             task.DueAtUtc,
             task.PlannedStartAtUtc,
-            task.PlannedDurationMinutes);
+            task.PlannedDurationMinutes,
+            ToCheckpointSnapshots(task.Checkpoints));
         var projectPath = group is null
             ? project.Name
             : $"{project.Name} / {group.Name}";
@@ -292,6 +301,22 @@ public static class WorkspaceSnapshotFactory
                 "Task deadline");
         }
     }
+
+    private static IReadOnlyList<WorkspaceCheckpointSnapshot> ToCheckpointSnapshots(
+        List<CheckpointItem>? checkpoints) =>
+        checkpoints is null
+            ? Array.Empty<WorkspaceCheckpointSnapshot>()
+            : checkpoints
+                .Where(checkpoint => checkpoint is not null)
+                .OrderBy(checkpoint => checkpoint.SortOrder)
+                .ThenBy(checkpoint => checkpoint.CreatedAtUtc)
+                .Select(checkpoint => new WorkspaceCheckpointSnapshot(
+                    FormatId(checkpoint.Id),
+                    checkpoint.Title,
+                    checkpoint.Done,
+                    checkpoint.SortOrder,
+                    checkpoint.CompletedAtUtc))
+                .ToList();
 
     private static ProjectItem ResolveProject(
         IReadOnlyDictionary<Guid, ProjectItem> projectById,

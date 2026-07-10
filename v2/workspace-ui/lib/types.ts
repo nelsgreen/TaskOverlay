@@ -27,6 +27,20 @@ export interface Section {
   name: string
 }
 
+/**
+ * One lightweight execution step ("Steps" in the UI). Deliberately NOT a task:
+ * no status/REMIND/DEADLINE/WAIT/pin/priority of its own. Step state is
+ * independent of the parent task's status.
+ */
+export interface TaskCheckpoint {
+  id: string
+  title: string
+  done: boolean
+  /** stable list position, 0-based */
+  order: number
+  completedAtUtc?: string | null
+}
+
 export interface Task {
   id: string
   projectId: string
@@ -63,6 +77,8 @@ export interface Task {
   plannedStartAtUtc?: string
   /** Calendar planned work block duration in minutes */
   plannedDurationMinutes?: number
+  /** lightweight execution steps; absent/empty both mean "no steps" */
+  checkpoints?: TaskCheckpoint[]
 }
 
 export type TimelineKind = "MEET" | "REMIND" | "DEADLINE"
@@ -190,6 +206,15 @@ export interface WorkspaceTaskSnapshot {
   deadlineAtUtc: string | null
   plannedStartAtUtc: string | null
   plannedDurationMinutes: number | null
+  checkpoints?: WorkspaceCheckpointSnapshot[] | null
+}
+
+export interface WorkspaceCheckpointSnapshot {
+  id: string
+  title: string
+  done: boolean
+  sortOrder: number
+  completedAtUtc: string | null
 }
 
 export interface WorkspaceActiveNowSnapshot {
@@ -229,6 +254,12 @@ export type WorkspaceTaskCommand =
   | { type: "updateTaskDeadline"; taskId: string; deadlineAtUtc: string | null }
   | { type: "moveTask"; taskId: string; sectionId: string }
   | { type: "deleteTask"; taskId: string }
+  /** Batch add — single add sends a one-item array; multiline paste sends all lines. */
+  | { type: "addTaskCheckpoints"; taskId: string; titles: string[] }
+  | { type: "updateTaskCheckpointTitle"; taskId: string; checkpointId: string; title: string }
+  | { type: "toggleTaskCheckpoint"; taskId: string; checkpointId: string; done: boolean }
+  | { type: "deleteTaskCheckpoint"; taskId: string; checkpointId: string }
+  | { type: "reorderTaskCheckpoint"; taskId: string; checkpointId: string; targetIndex: number }
 
 export type WorkspaceContextCommand = {
   type: "updateWorkspaceContext"

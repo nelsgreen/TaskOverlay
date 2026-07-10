@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Bell, ChevronDown, ChevronRight, Flag, MapPin, Pin, Repeat, Trash2, UndoDot, X } from "lucide-react"
-import type { Project, ReminderPreset, ReminderState, RepeatInterval, Section, Status, Task } from "@/lib/types"
+import { ArrowDown, ArrowUp, Bell, Check, ChevronRight, Flag, ListChecks, MapPin, Pin, Repeat, Trash2, UndoDot, X } from "lucide-react"
+import type { Project, ReminderPreset, ReminderState, RepeatInterval, Section, Status, Task, TaskCheckpoint, WorkspaceTaskCommand } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { isoFromLocalDateTime } from "@/lib/calendar-date"
 import { statusConfig } from "./status-badge"
@@ -31,6 +31,8 @@ interface Props {
     field: BridgeEditField,
     value: BridgeEditValue,
   ) => boolean
+  /** Sends a fully-shaped checkpoint ("Steps") command through the bridge when connected. */
+  onCheckpointCommand?: (command: WorkspaceTaskCommand) => boolean
   onClearBridgeError?: () => void
 }
 
@@ -98,11 +100,10 @@ function computeDeadlineIso(t: Task, withTime: boolean): string | null {
 
 const statuses: Status[] = ["TODO", "FOCUS", "WAIT", "DONE"]
 
-const quickPresets: { value: ReminderPreset; label: string }[] = [
-  { value: "30m", label: "In 30m" },
-  { value: "1h", label: "In 1h" },
-  { value: "morning", label: "Tomorrow morning" },
-]
+// UI-only: the Pin-to-panel toggle is hidden in Details for now (the feature
+// isn't currently relevant on this surface). The data model, bridge command,
+// and pinned-task/overlay semantics are untouched — flip this to re-expose it.
+const SHOW_PIN_TO_PANEL = false
 
 const advancedPresets: { value: ReminderPreset; label: string }[] = [
   { value: "30m", label: "In 30m" },
@@ -119,6 +120,33 @@ const repeatIntervals: { value: RepeatInterval; label: string }[] = [
   { value: "weekly", label: "Weekly" },
   { value: "monthly", label: "Monthly" },
 ]
+
+/** Steps in stable order; absent and empty both mean "no steps". */
+function sortedCheckpoints(t: Task): TaskCheckpoint[] {
+  return [...(t.checkpoints ?? [])].sort((a, b) => a.order - b.order)
+}
+
+function checkpointProgress(t: Task): { done: number; total: number; summary: string } {
+  const items = t.checkpoints ?? []
+  const total = items.length
+  const done = items.filter((c) => c.done).length
+  const summary = total === 0 ? "No steps" : done === total ? "All steps ready" : `${done}/${total}`
+  return { done, total, summary }
+}
+
+/** Splits pasted text into step titles: one per non-empty line. */
+function splitPastedSteps(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+/** Local id for mock/dev-mode steps (connected mode gets real ids from the snapshot). */
+function newCheckpointId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID()
+  return `step-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
 
 function deriveReminderState(t: Task): ReminderState {
   if (t.reminder === "none" && !t.reminderDate && !t.reminderTime) return "none"
@@ -190,6 +218,9 @@ function mergeTaskFields(
     deadlineAtUtc: incoming.deadlineAtUtc,
     plannedStartAtUtc: incoming.plannedStartAtUtc,
     plannedDurationMinutes: incoming.plannedDurationMinutes,
+    // Checkpoints always take the authoritative snapshot: in-progress row edits
+    // and the add-step input live in separate local buffers, never in the draft.
+    checkpoints: incoming.checkpoints,
   }
   if (activeField !== "title") next.title = incoming.title
   if (activeField !== "notes") next.notes = incoming.notes
@@ -241,17 +272,32 @@ export function DetailsPanel({
   pendingFields = new Set(),
   bridgeError,
   onBridgeEdit,
+  onCheckpointCommand,
   onClearBridgeError,
 }: Props) {
   const [draft, setDraft] = useState<Task | null>(task)
+  // Reminder/Deadline/Location cards are collapsed to one row and expand on hover
+  // (CSS) or when pinned open via click (these flags). Reminder/Deadline also
+  // track focus-within as state (*Focused) so the same "being edited" signal both
+  // reveals the editor for keyboard users and guards an in-progress custom
+  // date/time from a snapshot reconcile — see mergeTaskFields below.
   const [reminderOpen, setReminderOpen] = useState(false)
+  const [reminderFocused, setReminderFocused] = useState(false)
   const [deadlineOpen, setDeadlineOpen] = useState(false)
+  const [deadlineFocused, setDeadlineFocused] = useState(false)
+  const [locationOpen, setLocationOpen] = useState(false)
   const [deadlineWithTime, setDeadlineWithTime] = useState(false)
   // Which plain-text field the user is currently typing in (between focus and
   // blur/commit). A fresh snapshot for the same task must not stomp this field,
-  // even though it reconciles every other field. Reminder/Deadline don't need an
-  // entry here — reminderOpen/deadlineOpen already mark those as "being edited".
+  // even though it reconciles every other field. Reminder/Deadline use their
+  // *Open/*Focused flags for the same purpose.
   const [activeField, setActiveField] = useState<"title" | "notes" | "waitingFor" | null>(null)
+  // Steps editor state — all separate from the draft so snapshot reconciliation
+  // can always take the authoritative checkpoint list without stomping typing.
+  const [stepsOpen, setStepsOpen] = useState(false)
+  const [newStepText, setNewStepText] = useState("")
+  const [editingStepId, setEditingStepId] = useState<string | null>(null)
+  const [editingStepText, setEditingStepText] = useState("")
 
   // Track the snapshot at the start of the editing session for "Revert"
   const sessionBaseRef = useRef<Task | null>(task)
@@ -274,9 +320,16 @@ export function DetailsPanel({
       setDraft(task)
       sessionBaseRef.current = task
       setReminderOpen(false)
+      setReminderFocused(false)
       setDeadlineOpen(false)
+      setDeadlineFocused(false)
+      setLocationOpen(false)
       setDeadlineWithTime(task?.deadlineTime ? true : false)
       setActiveField(null)
+      setStepsOpen(false)
+      setNewStepText("")
+      setEditingStepId(null)
+      setEditingStepText("")
       return
     }
 
@@ -285,9 +338,11 @@ export function DetailsPanel({
     // fight the very state it was derived from. Reconciliation only applies to
     // the bridged (connected/read-only) snapshot flow.
     if (!task || editMode === "full") return
-    setDraft((current) => current ? mergeTaskFields(current, task, activeField, reminderOpen, deadlineOpen) : task)
+    setDraft((current) => current
+      ? mergeTaskFields(current, task, activeField, reminderOpen || reminderFocused, deadlineOpen || deadlineFocused)
+      : task)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task, reminderOpen, deadlineOpen, activeField, editMode])
+  }, [task, reminderOpen, reminderFocused, deadlineOpen, deadlineFocused, activeField, editMode])
 
   // Auto-apply: push every draft change up to parent immediately (mock mode only)
   useEffect(() => {
@@ -300,7 +355,9 @@ export function DetailsPanel({
   // (e.g. Status) can't wipe out an in-progress edit on another (e.g. Notes).
   useEffect(() => {
     if (!bridgeError || !task) return
-    setDraft((current) => current ? mergeTaskFields(current, task, activeField, reminderOpen, deadlineOpen) : task)
+    setDraft((current) => current
+      ? mergeTaskFields(current, task, activeField, reminderOpen || reminderFocused, deadlineOpen || deadlineFocused)
+      : task)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridgeError, task])
 
@@ -320,6 +377,13 @@ export function DetailsPanel({
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(sessionBaseRef.current)
   const projectSections = sections.filter((s) => s.projectId === draft.projectId)
+  const locationSummary =
+    [
+      projects.find((p) => p.id === draft.projectId)?.name,
+      sections.find((s) => s.id === draft.sectionId)?.name,
+    ]
+      .filter(Boolean)
+      .join(" / ") || "—"
   const set = <K extends keyof Task>(key: K, value: Task[K]) => setDraft((d) => d ? { ...d, [key]: value } : d)
   const hasReminder = deriveReminderState(draft) !== "none"
   const hasDeadline = !!(draft.deadlineDate || draft.deadline)
@@ -447,12 +511,92 @@ export function DetailsPanel({
     }
   }
 
+  // ── Steps (checkpoints) ──
+  // Connected: send the granular command, update the draft optimistically, and
+  // let the fresh snapshot reconcile (same pattern as Status/Pin). Mock/full:
+  // the draft mutation itself is the persistence via onApply.
+  const checkpoints = sortedCheckpoints(draft)
+  const progress = checkpointProgress(draft)
+  const checkpointsPending = pendingFields.has("checkpoints")
+
+  function sendCheckpoint(command: WorkspaceTaskCommand) {
+    if (!connected || checkpointsPending) return
+    onClearBridgeError?.()
+    onCheckpointCommand?.(command)
+  }
+
+  function setDraftCheckpoints(update: (items: TaskCheckpoint[]) => TaskCheckpoint[]) {
+    setDraft((d) => {
+      if (!d) return d
+      const next = update(sortedCheckpoints(d)).map((item, index) => ({ ...item, order: index }))
+      return { ...d, checkpoints: next }
+    })
+  }
+
+  function addSteps(titles: string[]) {
+    const clean = titles.map((t) => t.trim()).filter(Boolean)
+    if (clean.length === 0) return
+    if (connected) sendCheckpoint({ type: "addTaskCheckpoints", taskId, titles: clean })
+    // Optimistic ids are placeholders until the snapshot reconciles; while the
+    // command is pending, all step controls are disabled, so a placeholder id
+    // can never be sent back to the bridge.
+    setDraftCheckpoints((items) => [
+      ...items,
+      ...clean.map((title, index) => ({
+        id: connected ? `pending-${items.length + index}` : newCheckpointId(),
+        title,
+        done: false,
+        order: items.length + index,
+      })),
+    ])
+    setNewStepText("")
+  }
+
+  function toggleStep(checkpointId: string, done: boolean) {
+    if (connected) sendCheckpoint({ type: "toggleTaskCheckpoint", taskId, checkpointId, done })
+    setDraftCheckpoints((items) => items.map((c) => c.id === checkpointId ? { ...c, done } : c))
+  }
+
+  function commitStepEdit() {
+    const checkpointId = editingStepId
+    const title = editingStepText.trim()
+    setEditingStepId(null)
+    setEditingStepText("")
+    if (!checkpointId || !title) return
+    const current = checkpoints.find((c) => c.id === checkpointId)
+    if (!current || current.title === title) return
+    if (connected) sendCheckpoint({ type: "updateTaskCheckpointTitle", taskId, checkpointId, title })
+    setDraftCheckpoints((items) => items.map((c) => c.id === checkpointId ? { ...c, title } : c))
+  }
+
+  function deleteStep(checkpointId: string) {
+    if (connected) sendCheckpoint({ type: "deleteTaskCheckpoint", taskId, checkpointId })
+    setDraftCheckpoints((items) => items.filter((c) => c.id !== checkpointId))
+  }
+
+  function moveStep(checkpointId: string, delta: -1 | 1) {
+    const index = checkpoints.findIndex((c) => c.id === checkpointId)
+    if (index < 0) return
+    const targetIndex = Math.min(Math.max(index + delta, 0), checkpoints.length - 1)
+    if (targetIndex === index) return
+    if (connected) sendCheckpoint({ type: "reorderTaskCheckpoint", taskId, checkpointId, targetIndex })
+    setDraftCheckpoints((items) => {
+      const next = [...items]
+      const [moved] = next.splice(index, 1)
+      next.splice(targetIndex, 0, moved)
+      return next
+    })
+  }
+
   function revert() {
     setDraft(sessionBaseRef.current)
     setReminderOpen(false)
     setDeadlineOpen(false)
     setDeadlineWithTime(sessionBaseRef.current?.deadlineTime ? true : false)
     setActiveField(null)
+    setNewStepText("")
+    setEditingStepId(null)
+    setEditingStepText("")
   }
 
   return (
@@ -535,36 +679,58 @@ export function DetailsPanel({
         </div>
 
         {/* ── Waiting for — directly under status ── */}
-        {draft.status === "WAIT" && <div>
-          <label
-            className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-status-wait"
-          >
-            Waiting for
-          </label>
-          <input
-            value={draft.waitingFor ?? ""}
-            placeholder="e.g. reply from Madina"
-            onChange={(e) => set("waitingFor", e.target.value || undefined)}
-            onFocus={() => setActiveField("waitingFor")}
-            onBlur={() => {
-              const waitingFor = draft.waitingFor ?? ""
-              if (connected && waitingFor !== sourceWaitingFor) sendBridgeEdit("waitingFor", waitingFor)
-              setActiveField(null)
-            }}
-            disabled={locked || pendingFields.has("waitingFor")}
-            className="w-full rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15"
-          />
-        </div>}
+        {/* Compact like Notes but one-line collapsed: label lives inside as a
+            faint placeholder (shown only while empty, never saved). A textarea
+            (not input) so multiline paste/typing works; Enter inserts a newline
+            and never submits (there is no form). Height follows content via
+            field-sizing:content, clamped to ~1 line idle and expanded on
+            hover/focus. Save path (onBlur -> bridge) is unchanged. */}
+        {draft.status === "WAIT" && (
+          <div>
+            <textarea
+              value={draft.waitingFor ?? ""}
+              placeholder="Waiting for"
+              rows={1}
+              onChange={(e) => set("waitingFor", e.target.value || undefined)}
+              onFocus={() => setActiveField("waitingFor")}
+              onBlur={() => {
+                const waitingFor = draft.waitingFor ?? ""
+                if (connected && waitingFor !== sourceWaitingFor) sendBridgeEdit("waitingFor", waitingFor)
+                setActiveField(null)
+              }}
+              disabled={locked || pendingFields.has("waitingFor")}
+              className={cn(
+                // leading-5 pins line-height to 1.25rem so the collapsed max-height
+                // is an exact line count: py-2 (1rem) + border (2px) + 1×1.25rem.
+                // With overflow-hidden this clips cleanly at the 1st line boundary —
+                // no partial 2nd line peeking through.
+                "w-full resize-none rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none [field-sizing:content]",
+                "transition-[max-height,border-color,box-shadow] duration-150",
+                "placeholder:text-[11px] placeholder:font-semibold placeholder:uppercase placeholder:tracking-wide placeholder:text-muted-foreground/40",
+                "max-h-[calc(2.25rem_+_2px)] overflow-hidden hover:max-h-32 hover:overflow-y-auto focus:max-h-32 focus:overflow-y-auto",
+                "focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15",
+              )}
+            />
+          </div>
+        )}
 
         {/* ── REMINDER — full-width collapsible ── */}
+        {/* mt-3 is applied on the card itself, not via the parent's space-y-3:
+            the wrapping fieldset is display:contents, so a margin on it (or the
+            parent's inter-child margin) generates no box and is dropped. */}
         <fieldset disabled={locked} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
-          {/* Header — entire row is clickable */}
+        <div
+          className={cn("group/card mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}
+          onFocus={() => setReminderFocused(true)}
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setReminderFocused(false) }}
+        >
+          {/* Header — one collapsed row; the editor below reveals on hover (CSS),
+              focus-within (reminderFocused), or an explicit click (reminderOpen). */}
           <button
             type="button"
             onClick={() => setReminderOpen((o) => !o)}
             className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
-            aria-expanded={reminderOpen}
+            aria-expanded={reminderOpen || reminderFocused}
           >
             <Bell
               className={cn(
@@ -599,31 +765,22 @@ export function DetailsPanel({
               )}
             </span>
 
-            {reminderOpen
-              ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-              : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            }
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/card:rotate-90",
+                (reminderOpen || reminderFocused) && "rotate-90",
+              )}
+            />
           </button>
 
-          {/* Collapsed + no reminder: relative quick presets — computed client-side and pushed through the bridge when connected */}
-          {!reminderOpen && !hasReminder && (
-            <div className="flex gap-1.5 border-t border-border/50 px-3 pb-2.5 pt-2">
-              {quickPresets.map((r) => (
-                <button
-                  key={r.value}
-                  onClick={() => applyReminderPreset(r.value)}
-                  disabled={pendingFields.has("reminder")}
-                  className="flex-1 rounded border border-border px-1 py-1.5 text-center text-[10px] font-medium text-muted-foreground transition-colors hover:border-status-remind/40 hover:bg-status-remind/10 hover:text-status-remind disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Expanded editor */}
-          {reminderOpen && (
-            <div className="space-y-3 border-t border-border/50 px-3 pb-3 pt-3">
+          {/* Editor — hidden while collapsed so its controls stay out of the tab
+              order; revealed on hover / focus-within / click. */}
+          <div
+            className={cn(
+              "space-y-3 border-t border-border/50 px-3 pb-3 pt-3 group-hover/card:block",
+              (reminderOpen || reminderFocused) ? "block" : "hidden",
+            )}
+          >
               {/* Relative presets — computed client-side and pushed through the bridge when connected */}
               <div className="grid grid-cols-2 gap-1.5">
                 {advancedPresets.map((r, i) => {
@@ -722,19 +879,23 @@ export function DetailsPanel({
                 </div>
               )}
             </div>
-          )}
         </div>
         </fieldset>
 
         {/* ── DEADLINE — full-width collapsible ── */}
         <fieldset disabled={locked} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
-          {/* Header — entire row is clickable */}
+        <div
+          className={cn("group/card mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}
+          onFocus={() => setDeadlineFocused(true)}
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDeadlineFocused(false) }}
+        >
+          {/* Header — one collapsed row; the editor below reveals on hover (CSS),
+              focus-within (deadlineFocused), or an explicit click (deadlineOpen). */}
           <button
             type="button"
             onClick={() => setDeadlineOpen((o) => !o)}
             className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
-            aria-expanded={deadlineOpen}
+            aria-expanded={deadlineOpen || deadlineFocused}
           >
             <Flag
               className={cn(
@@ -766,15 +927,22 @@ export function DetailsPanel({
               )}
             </span>
 
-            {deadlineOpen
-              ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-              : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            }
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/card:rotate-90",
+                (deadlineOpen || deadlineFocused) && "rotate-90",
+              )}
+            />
           </button>
 
-          {/* Expanded editor */}
-          {deadlineOpen && (
-            <div className="space-y-2.5 border-t border-border/50 px-3 pb-3 pt-3">
+          {/* Editor — hidden while collapsed so its controls stay out of the tab
+              order; revealed on hover / focus-within / click. */}
+          <div
+            className={cn(
+              "space-y-2.5 border-t border-border/50 px-3 pb-3 pt-3 group-hover/card:block",
+              (deadlineOpen || deadlineFocused) ? "block" : "hidden",
+            )}
+          >
               {/* Quick presets */}
               <div className="grid grid-cols-2 gap-1.5">
                 {getDeadlinePresets().map((p) => {
@@ -855,46 +1023,67 @@ export function DetailsPanel({
                 <p className="text-[10px] text-muted-foreground">Date-only deadlines are due by end of that day.</p>
               )}
             </div>
-          )}
         </div>
         </fieldset>
 
-        {/* ── PIN TO PANEL — single compact row ── */}
-        <div className="flex items-center gap-2.5 px-1 py-1">
-          <Pin
-            className={cn(
-              "size-3.5 shrink-0",
-              draft.pinned ? "fill-current text-status-panel" : "text-muted-foreground",
-            )}
-          />
-          <span className="flex-1 text-[11px] font-bold uppercase tracking-widest text-foreground">Pin to panel</span>
-          <Switch
-            checked={draft.pinned}
-            activeColor="bg-status-panel"
-            disabled={locked || pendingFields.has("pinToPanel")}
-            onChange={() => {
-              // Same optimistic-then-reconciled pattern as Status: update the
-              // draft immediately, let the fresh snapshot confirm/correct it.
-              const next = !draft.pinned
-              if (connected) sendBridgeEdit("pinToPanel", next)
-              set("pinned", next)
-            }}
-          />
-        </div>
+        {/* ── PIN TO PANEL — single compact row (hidden for now; see SHOW_PIN_TO_PANEL) ── */}
+        {SHOW_PIN_TO_PANEL && (
+          <div className="flex items-center gap-2.5 px-1 py-1">
+            <Pin
+              className={cn(
+                "size-3.5 shrink-0",
+                draft.pinned ? "fill-current text-status-panel" : "text-muted-foreground",
+              )}
+            />
+            <span className="flex-1 text-[11px] font-bold uppercase tracking-widest text-foreground">Pin to panel</span>
+            <Switch
+              checked={draft.pinned}
+              activeColor="bg-status-panel"
+              disabled={locked || pendingFields.has("pinToPanel")}
+              onChange={() => {
+                // Same optimistic-then-reconciled pattern as Status: update the
+                // draft immediately, let the fresh snapshot confirm/correct it.
+                const next = !draft.pinned
+                if (connected) sendBridgeEdit("pinToPanel", next)
+                set("pinned", next)
+              }}
+            />
+          </div>
+        )}
 
         {/* ── LOCATION ── */}
         {/* Connected: changing project/section sends moveTask; the fresh snapshot
             reconciles the draft. Mock: updates the local draft directly.
             Changing project moves the task to that project's root by default. */}
         <fieldset disabled={locked || pendingFields.has("location")} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40 p-3", locked && "opacity-60")}>
-          <div className="mb-2 flex items-center gap-1.5">
-            <MapPin className="size-3.5 text-muted-foreground" />
-            <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-              Location
-            </span>
-          </div>
-          <div className="space-y-2">
+        <div className={cn("group/card mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
+          {/* Header — one collapsed row; selectors reveal on hover / focus-within / click */}
+          <button
+            type="button"
+            onClick={() => setLocationOpen((o) => !o)}
+            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
+            aria-expanded={locationOpen}
+          >
+            <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">Location</span>
+            <span className="flex-1 truncate text-right text-[11px] text-muted-foreground">{locationSummary}</span>
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/card:rotate-90 group-focus-within/card:rotate-90",
+                locationOpen && "rotate-90",
+              )}
+            />
+          </button>
+
+          {/* Selectors — hidden while collapsed; revealed on hover / focus-within / click.
+              A native <select> keeps focus while its dropdown is open, so focus-within
+              holds the card open through the whole selection. */}
+          <div
+            className={cn(
+              "space-y-2 border-t border-border/50 px-3 pb-3 pt-3 group-hover/card:block group-focus-within/card:block",
+              locationOpen ? "block" : "hidden",
+            )}
+          >
             <LocationRow label="Project">
               <Select
                 value={draft.projectId}
@@ -926,10 +1115,14 @@ export function DetailsPanel({
         </fieldset>
 
         {/* ── NOTES ── */}
-        <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Notes / context
-          </label>
+        {/* Label lives inside as a faint placeholder (shown only while empty and
+            never saved). Height follows content via field-sizing:content, clamped
+            to ~2 lines while idle and expanded on hover/focus for comfortable
+            editing — the save path (onBlur -> bridge) is unchanged. */}
+        {/* mt-3 gives the same gap the cards use: Tailwind v4 space-y puts the gap
+            as margin-bottom on the preceding sibling, which is lost on the
+            display:contents Location fieldset, so Notes needs its own top margin. */}
+        <div className="mt-3">
           <textarea
             value={draft.notes ?? ""}
             onChange={(e) => set("notes", e.target.value || undefined)}
@@ -940,11 +1133,234 @@ export function DetailsPanel({
               setActiveField(null)
             }}
             disabled={locked || pendingFields.has("notes")}
-            rows={3}
-            placeholder="Add context…"
-            className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
+            rows={2}
+            placeholder="NOTES / CONTEXT"
+            className={cn(
+              // leading-5 pins line-height to 1.25rem so the collapsed max-height
+              // is an exact line count: py-2 (1rem) + border (2px) + 2×1.25rem.
+              // With overflow-hidden this clips cleanly at the 2nd line boundary —
+              // no partial 3rd line peeking through.
+              "w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none [field-sizing:content]",
+              "transition-[max-height,border-color,box-shadow] duration-150",
+              "placeholder:text-[11px] placeholder:font-semibold placeholder:uppercase placeholder:tracking-wide placeholder:text-muted-foreground/40",
+              // Idle: clamp to exactly 2 lines and hide the overflow. Hover/focus:
+              // expand to a reasonable max and scroll if the note is very long.
+              "max-h-[calc(3.5rem_+_2px)] overflow-hidden hover:max-h-48 hover:overflow-y-auto focus:max-h-48 focus:overflow-y-auto",
+              "focus:border-primary/60 focus:ring-2 focus:ring-primary/20",
+            )}
           />
         </div>
+
+        {/* ── STEPS — lightweight execution checkpoints, separate from Notes ── */}
+        <fieldset disabled={locked} className="contents">
+        <div className={cn("group/card mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
+          {/* Header — one collapsed row (icon, label, summary); the editor below
+              reveals on hover (CSS), focus-within, or an explicit click (stepsOpen). */}
+          <button
+            type="button"
+            onClick={() => setStepsOpen((o) => !o)}
+            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
+            aria-expanded={stepsOpen}
+          >
+            <ListChecks
+              className={cn(
+                "size-3.5 shrink-0",
+                progress.total > 0 ? "text-primary" : "text-muted-foreground",
+              )}
+            />
+            <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">Steps</span>
+            <span className="flex flex-1 items-center justify-end gap-1.5 overflow-hidden">
+              <span
+                className={cn(
+                  "truncate text-[11px]",
+                  progress.total > 0 && progress.done === progress.total
+                    ? "text-status-done"
+                    : progress.total > 0
+                      ? "text-foreground"
+                      : "text-muted-foreground",
+                )}
+              >
+                {progress.summary}
+              </span>
+            </span>
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/card:rotate-90 group-focus-within/card:rotate-90",
+                stepsOpen && "rotate-90",
+              )}
+            />
+          </button>
+
+          {/* Editor — hidden while collapsed so its controls stay out of the tab
+              order and take no vertical space; revealed on hover / focus-within /
+              click. The progress bar lives inside so it doesn't show while collapsed. */}
+          <div
+            className={cn(
+              "space-y-2 border-t border-border/50 px-3 pb-3 pt-2.5 group-hover/card:block group-focus-within/card:block",
+              stepsOpen ? "block" : "hidden",
+            )}
+          >
+              {/* Subtle progress bar — only when there are at least 2 steps */}
+              {progress.total >= 2 && (
+                <div
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={progress.total}
+                  aria-valuenow={progress.done}
+                  aria-label={`${progress.done} of ${progress.total} steps done`}
+                  className="h-1 overflow-hidden rounded-full bg-border/60"
+                >
+                  <div
+                    className="h-full rounded-full bg-primary/60 transition-[width]"
+                    style={{ width: `${(progress.done / progress.total) * 100}%` }}
+                  />
+                </div>
+              )}
+
+              {/* Step rows — quiet by default; actions appear on hover/focus */}
+              {checkpoints.map((step, index) => (
+                <div
+                  key={step.id}
+                  className="group/step flex items-center gap-2 rounded px-1 py-0.5 focus-within:bg-accent/40 hover:bg-accent/40"
+                >
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={step.done}
+                    aria-label={step.done ? `Reopen step: ${step.title}` : `Complete step: ${step.title}`}
+                    disabled={checkpointsPending}
+                    onClick={() => toggleStep(step.id, !step.done)}
+                    className={cn(
+                      "flex size-4 shrink-0 items-center justify-center rounded border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                      step.done
+                        ? "border-status-done/60 bg-status-done/20 text-status-done"
+                        : "border-input bg-background text-transparent hover:border-primary/50",
+                    )}
+                  >
+                    <Check className="size-3" aria-hidden />
+                  </button>
+
+                  {editingStepId === step.id ? (
+                    <input
+                      autoFocus
+                      value={editingStepText}
+                      onChange={(e) => setEditingStepText(e.target.value)}
+                      onBlur={commitStepEdit}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          commitStepEdit()
+                        } else if (e.key === "Escape") {
+                          setEditingStepId(null)
+                          setEditingStepText("")
+                        }
+                      }}
+                      className="min-w-0 flex-1 rounded border border-input bg-background px-1.5 py-0.5 text-xs text-foreground outline-none focus:border-primary/60"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (checkpointsPending) return
+                        setEditingStepId(step.id)
+                        setEditingStepText(step.title)
+                      }}
+                      title="Edit step"
+                      className={cn(
+                        "min-w-0 flex-1 truncate rounded text-left text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                        step.done ? "text-muted-foreground line-through" : "text-foreground",
+                      )}
+                    >
+                      {step.title}
+                    </button>
+                  )}
+
+                  {/* Row actions — hidden until hover or keyboard focus lands in the row */}
+                  <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-focus-within/step:opacity-100 group-hover/step:opacity-100">
+                    <button
+                      type="button"
+                      aria-label="Move step up"
+                      disabled={checkpointsPending || index === 0}
+                      onClick={() => moveStep(step.id, -1)}
+                      className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ArrowUp className="size-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Move step down"
+                      disabled={checkpointsPending || index === checkpoints.length - 1}
+                      onClick={() => moveStep(step.id, 1)}
+                      className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ArrowDown className="size-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete step: ${step.title}`}
+                      disabled={checkpointsPending}
+                      onClick={() => deleteStep(step.id)}
+                      className="rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                </div>
+              ))}
+
+              {/* Add input — Enter adds one step; pasting a multiline list adds them all */}
+              <input
+                value={newStepText}
+                onChange={(e) => setNewStepText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    addSteps([newStepText])
+                  } else if (e.key === "Escape") {
+                    setNewStepText("")
+                  }
+                }}
+                onPaste={(e) => {
+                  const text = e.clipboardData.getData("text")
+                  if (!text.includes("\n")) return
+                  e.preventDefault()
+                  addSteps(splitPastedSteps(text))
+                }}
+                disabled={checkpointsPending}
+                placeholder="+ Next step… (paste a list to add several)"
+                className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60"
+              />
+
+              {/* Footer — remaining count, or the explicit complete-task action */}
+              {progress.total > 0 && progress.done === progress.total ? (
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <span className="text-[11px] font-medium text-status-done">All steps ready</span>
+                  {draft.status !== "DONE" && (
+                    <button
+                      type="button"
+                      disabled={pendingFields.has("status")}
+                      onClick={() => {
+                        // Completing the parent is always this explicit action —
+                        // finishing the last step never auto-completes the task.
+                        if (connected) sendBridgeEdit("status", "DONE")
+                        set("status", "DONE")
+                      }}
+                      className="rounded border border-status-done/40 bg-status-done/10 px-2 py-1 text-[11px] font-medium text-status-done transition-colors hover:bg-status-done/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Complete task
+                    </button>
+                  )}
+                </div>
+              ) : progress.total > 0 ? (
+                <p className="pt-0.5 text-[11px] text-muted-foreground">
+                  {progress.total - progress.done === 1
+                    ? "1 step left"
+                    : `${progress.total - progress.done} steps left`}
+                </p>
+              ) : null}
+            </div>
+        </div>
+        </fieldset>
       </div>
 
       {/* ── Bottom actions: Delete (left) + Revert (right) ── */}
