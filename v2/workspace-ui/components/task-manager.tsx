@@ -1047,7 +1047,7 @@ export function TaskManager() {
           />
           <div className="min-h-0 flex-1 overflow-y-auto">
             {tab === "tree" && (
-              <div className="flex flex-col">
+              <div className="flex min-h-full flex-col">
                 {multi && (
                   <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card/40 px-5 py-2.5">
                     <FolderTree className="size-4 shrink-0 text-muted-foreground" />

@@ -162,7 +162,7 @@ export function TreeView({
   const nothingRendered = filter === "all" ? sections.length === 0 : allEmpty
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-3" onContextMenu={openEmptyMenu}>
+    <div className="flex min-h-full flex-1 flex-col gap-4 px-4 py-3" onContextMenu={openEmptyMenu}>
       {sections.map((section) => {
         const sectionTasks = tasks.filter((t) => t.sectionId === section.id && visibleIds.has(t.id))
         // Empty sections are shown only in the full ("all") view so a freshly
