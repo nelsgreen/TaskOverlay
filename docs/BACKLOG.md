@@ -79,15 +79,17 @@ Active product scope:
   - preserve value when switching away and back.
 - Details Delete in connected mode with confirmation and no stale panel.
 - Details Location in connected mode through `moveTask`.
-- Notes textarea manual vertical resize or auto-grow to max height with
-  scrollbar.
+- Notes and Waiting for auto-size to content:
+  - compact collapsed (Notes ~2 lines, Waiting for ~1 line), expand on
+    hover/focus with scroll for long text;
+  - delivered by PR #48; revisit only if a manual resize handle is wanted.
 
 ## Timeline, Reminder, And Deadline
 
 - Reminder quick presets + Repeat in connected Workspace:
-  - connect to bridge/AppState;
-  - no mock-only gate;
-  - support calculated `remindAtUtc` and `remindEveryMinutes`.
+  - connected to bridge/AppState via `updateTaskReminder` with calculated
+    `remindAtUtc` and `remindEveryMinutes`; done in PR #47;
+  - Monthly repeat intentionally not connected (see DECISIONS).
 - Timeline click `DetailEmphasis`:
   - REMIND opens Task Details with Reminder expanded;
   - DEADLINE opens Task Details with Deadline expanded.
@@ -96,13 +98,13 @@ Active product scope:
 - Timeline should not show DONE/completed tasks as active attention items:
   - default hide completed or make completed distinction explicit.
 - Reminder block:
-  - compact/collapsible;
-  - Clear/Off accessible without scrolling;
-  - whole header clickable.
+  - compact/collapsible with hover/focus/click expand;
+  - Clear/Off accessible from the collapsed header;
+  - done in PR #48.
 - Deadline block:
-  - compact/collapsible;
+  - compact/collapsible with hover/focus/click expand;
   - supports date-only and date+time;
-  - whole header clickable.
+  - done in PR #48.
 
 ## Overlay And Attention
 
@@ -360,9 +362,13 @@ Active product scope:
   - no effect on Working.
 - One-click Priority toggle in Tree/Status rows and later overlay cards.
 - Priority filters/sorting.
-- Checklist inside task:
-  - checklist item has only text/isDone;
-  - no status/reminder/wait/pin/priority.
+- Checklist inside task (Steps):
+  - delivered by PR #48 as the connected checkpoints MVP;
+  - item has only title/done/order — no status/reminder/wait/pin/priority;
+  - connected through five bridge commands (add batch, update title, toggle,
+    delete, reorder) and exposed in the Workspace snapshot;
+  - remaining: promote a Step to a real child task, Step templates, step-level
+    reminders/deadlines, AI step breakdown, and overlay parent progress.
 - Attachments:
   - images/documents attached to a task;
   - connected through AppState/state.json/fresh snapshot;
@@ -381,7 +387,9 @@ Active product scope:
   - needs reliable `CompletedAtUtc`;
   - group by project;
   - include title, section/path, completed datetime, optional notes.
-- Chunking/break task into 3-7 small steps and next physical step.
+- Chunking/break task into 3-7 small steps and next physical step. The Steps
+  block (PR #48) provides the manual substrate; assisted/auto-chunking is not
+  implemented.
 - Templates/routines:
   - morning start;
   - meeting prep;
@@ -485,6 +493,15 @@ Active product scope:
   context menus, subtask operations, `deleteTask`, `moveTask`, Details Location,
   Active-only, and DONE cleanup; verify behavior in main before marking any
   remaining follow-up complete.
+- PR #47 connected the Workspace Reminder editor presets and repeat intervals to
+  the bridge (`updateTaskReminder` with `remindEveryMinutes`); Monthly repeat is
+  intentionally not connected.
+- PR #48 Workspace Task Checkpoints (Steps) MVP is merged: `CheckpointItem` in
+  state, `CheckpointService`, five connected bridge commands, snapshot exposure,
+  the Details Steps block, a Tree row progress badge, and a compact/collapsible
+  Task Details pass (Waiting for, Reminder, Deadline, Location, Steps, plus a
+  hidden Pin row). Verify behavior in main before treating follow-ups as
+  complete.
 - Long Go v1 history in prompts is obsolete for WPF v2 planning.
 
 ## Needs Clarification
@@ -494,7 +511,6 @@ Active product scope:
 - Empty-area Create task target.
 - Move between projects behavior.
 - Workstream fields on `GroupItem` vs a separate Workstream model.
-- Notes behavior and Enter in Notes.
 - Priority icon/color/naming/model/sorting.
 - Overlay WAIT group scope and chip count scope.
 - Backup retention defaults.

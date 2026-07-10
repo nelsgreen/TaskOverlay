@@ -64,6 +64,27 @@ item.
   primary.
 - Quick Add and Settings stay WPF/native for now.
 
+## Task Details And Steps
+
+- Task Details is the primary Workspace editing surface; every field persists
+  through the connected bridge path.
+- Steps (checkpoints) are lightweight execution items, separate from Notes.
+  Notes are free-text description/context; Steps are actionable items.
+- A Step is not a task: it has only title/done/order — no status, REMIND,
+  DEADLINE, WAIT, pin, or priority. Internally the model is `CheckpointItem`.
+- Step state is independent of the parent task status. Marking the parent DONE
+  does not mutate Step states, and reopening the parent preserves them.
+- Completing all Steps does not auto-complete the task; it surfaces an explicit
+  "All steps ready -> Complete task" action that uses the normal status path.
+- Promotion of a Step to a real child task, Step templates, step-level
+  reminders/deadlines, and AI step breakdown are out of scope for the MVP.
+- Reminder, Deadline, Location, and Steps are compact collapsible cards that
+  expand on hover, focus-within, or click; they are never permanently expanded.
+- Waiting for and Notes are compact auto-sizing fields with the label shown as a
+  faint in-field placeholder; collapsed height is clamped to whole lines.
+- Pin to panel is hidden in Task Details for now; the field, bridge command, and
+  pinned/overlay semantics are unchanged.
+
 ## Scheduling And Planning
 
 - Timeline and Calendar have different jobs:
@@ -73,6 +94,9 @@ item.
 - Direct meeting service integrations are not MVP.
 - AI suggests tasks; the user confirms selected tasks.
 - No embedded ChatGPT window inside the app.
+- Reminder repeat is a flat minute interval (`remindEveryMinutes`). Monthly
+  repeat is not connected: it stays mock/dev-only until a calendar-aware
+  recurrence model exists.
 
 ## Sync And Platform
 
