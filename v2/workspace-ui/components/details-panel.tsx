@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { ArrowDown, ArrowUp, Bell, Check, ChevronDown, ChevronRight, Flag, ListChecks, MapPin, Pin, Repeat, Trash2, UndoDot, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bell, Check, ChevronRight, Flag, ListChecks, MapPin, Pin, Repeat, Trash2, UndoDot, X } from "lucide-react"
 import type { Project, ReminderPreset, ReminderState, RepeatInterval, Section, Status, Task, TaskCheckpoint, WorkspaceTaskCommand } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { isoFromLocalDateTime } from "@/lib/calendar-date"
@@ -1115,7 +1115,10 @@ export function DetailsPanel({
             never saved). Height follows content via field-sizing:content, clamped
             to ~2 lines while idle and expanded on hover/focus for comfortable
             editing — the save path (onBlur -> bridge) is unchanged. */}
-        <div>
+        {/* mt-3 gives the same gap the cards use: Tailwind v4 space-y puts the gap
+            as margin-bottom on the preceding sibling, which is lost on the
+            display:contents Location fieldset, so Notes needs its own top margin. */}
+        <div className="mt-3">
           <textarea
             value={draft.notes ?? ""}
             onChange={(e) => set("notes", e.target.value || undefined)}
@@ -1142,8 +1145,9 @@ export function DetailsPanel({
 
         {/* ── STEPS — lightweight execution checkpoints, separate from Notes ── */}
         <fieldset disabled={locked} className="contents">
-        <div className={cn("mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
-          {/* Header — entire row is clickable */}
+        <div className={cn("group/card mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
+          {/* Header — one collapsed row (icon, label, summary); the editor below
+              reveals on hover (CSS), focus-within, or an explicit click (stepsOpen). */}
           <button
             type="button"
             onClick={() => setStepsOpen((o) => !o)}
@@ -1171,34 +1175,40 @@ export function DetailsPanel({
                 {progress.summary}
               </span>
             </span>
-            {stepsOpen
-              ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-              : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            }
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/card:rotate-90 group-focus-within/card:rotate-90",
+                stepsOpen && "rotate-90",
+              )}
+            />
           </button>
 
-          {/* Subtle progress bar — only when there are at least 2 steps */}
-          {progress.total >= 2 && (
-            <div className="px-3 pb-2">
-              <div
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={progress.total}
-                aria-valuenow={progress.done}
-                aria-label={`${progress.done} of ${progress.total} steps done`}
-                className="h-1 overflow-hidden rounded-full bg-border/60"
-              >
+          {/* Editor — hidden while collapsed so its controls stay out of the tab
+              order and take no vertical space; revealed on hover / focus-within /
+              click. The progress bar lives inside so it doesn't show while collapsed. */}
+          <div
+            className={cn(
+              "space-y-2 border-t border-border/50 px-3 pb-3 pt-2.5 group-hover/card:block group-focus-within/card:block",
+              stepsOpen ? "block" : "hidden",
+            )}
+          >
+              {/* Subtle progress bar — only when there are at least 2 steps */}
+              {progress.total >= 2 && (
                 <div
-                  className="h-full rounded-full bg-primary/60 transition-[width]"
-                  style={{ width: `${(progress.done / progress.total) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={progress.total}
+                  aria-valuenow={progress.done}
+                  aria-label={`${progress.done} of ${progress.total} steps done`}
+                  className="h-1 overflow-hidden rounded-full bg-border/60"
+                >
+                  <div
+                    className="h-full rounded-full bg-primary/60 transition-[width]"
+                    style={{ width: `${(progress.done / progress.total) * 100}%` }}
+                  />
+                </div>
+              )}
 
-          {/* Expanded editor */}
-          {stepsOpen && (
-            <div className="space-y-2 border-t border-border/50 px-3 pb-3 pt-2.5">
               {/* Step rows — quiet by default; actions appear on hover/focus */}
               {checkpoints.map((step, index) => (
                 <div
@@ -1341,7 +1351,6 @@ export function DetailsPanel({
                 </p>
               ) : null}
             </div>
-          )}
         </div>
         </fieldset>
       </div>
