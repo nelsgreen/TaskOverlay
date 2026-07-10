@@ -105,12 +105,6 @@ const statuses: Status[] = ["TODO", "FOCUS", "WAIT", "DONE"]
 // and pinned-task/overlay semantics are untouched — flip this to re-expose it.
 const SHOW_PIN_TO_PANEL = false
 
-const quickPresets: { value: ReminderPreset; label: string }[] = [
-  { value: "30m", label: "In 30m" },
-  { value: "1h", label: "In 1h" },
-  { value: "morning", label: "Tomorrow morning" },
-]
-
 const advancedPresets: { value: ReminderPreset; label: string }[] = [
   { value: "30m", label: "In 30m" },
   { value: "1h", label: "In 1h" },
@@ -282,13 +276,21 @@ export function DetailsPanel({
   onClearBridgeError,
 }: Props) {
   const [draft, setDraft] = useState<Task | null>(task)
+  // Reminder/Deadline/Location cards are collapsed to one row and expand on hover
+  // (CSS) or when pinned open via click (these flags). Reminder/Deadline also
+  // track focus-within as state (*Focused) so the same "being edited" signal both
+  // reveals the editor for keyboard users and guards an in-progress custom
+  // date/time from a snapshot reconcile — see mergeTaskFields below.
   const [reminderOpen, setReminderOpen] = useState(false)
+  const [reminderFocused, setReminderFocused] = useState(false)
   const [deadlineOpen, setDeadlineOpen] = useState(false)
+  const [deadlineFocused, setDeadlineFocused] = useState(false)
+  const [locationOpen, setLocationOpen] = useState(false)
   const [deadlineWithTime, setDeadlineWithTime] = useState(false)
   // Which plain-text field the user is currently typing in (between focus and
   // blur/commit). A fresh snapshot for the same task must not stomp this field,
-  // even though it reconciles every other field. Reminder/Deadline don't need an
-  // entry here — reminderOpen/deadlineOpen already mark those as "being edited".
+  // even though it reconciles every other field. Reminder/Deadline use their
+  // *Open/*Focused flags for the same purpose.
   const [activeField, setActiveField] = useState<"title" | "notes" | "waitingFor" | null>(null)
   // Steps editor state — all separate from the draft so snapshot reconciliation
   // can always take the authoritative checkpoint list without stomping typing.
@@ -318,7 +320,10 @@ export function DetailsPanel({
       setDraft(task)
       sessionBaseRef.current = task
       setReminderOpen(false)
+      setReminderFocused(false)
       setDeadlineOpen(false)
+      setDeadlineFocused(false)
+      setLocationOpen(false)
       setDeadlineWithTime(task?.deadlineTime ? true : false)
       setActiveField(null)
       setStepsOpen(false)
@@ -333,9 +338,11 @@ export function DetailsPanel({
     // fight the very state it was derived from. Reconciliation only applies to
     // the bridged (connected/read-only) snapshot flow.
     if (!task || editMode === "full") return
-    setDraft((current) => current ? mergeTaskFields(current, task, activeField, reminderOpen, deadlineOpen) : task)
+    setDraft((current) => current
+      ? mergeTaskFields(current, task, activeField, reminderOpen || reminderFocused, deadlineOpen || deadlineFocused)
+      : task)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task, reminderOpen, deadlineOpen, activeField, editMode])
+  }, [task, reminderOpen, reminderFocused, deadlineOpen, deadlineFocused, activeField, editMode])
 
   // Auto-apply: push every draft change up to parent immediately (mock mode only)
   useEffect(() => {
@@ -348,7 +355,9 @@ export function DetailsPanel({
   // (e.g. Status) can't wipe out an in-progress edit on another (e.g. Notes).
   useEffect(() => {
     if (!bridgeError || !task) return
-    setDraft((current) => current ? mergeTaskFields(current, task, activeField, reminderOpen, deadlineOpen) : task)
+    setDraft((current) => current
+      ? mergeTaskFields(current, task, activeField, reminderOpen || reminderFocused, deadlineOpen || deadlineFocused)
+      : task)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridgeError, task])
 
@@ -368,6 +377,13 @@ export function DetailsPanel({
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(sessionBaseRef.current)
   const projectSections = sections.filter((s) => s.projectId === draft.projectId)
+  const locationSummary =
+    [
+      projects.find((p) => p.id === draft.projectId)?.name,
+      sections.find((s) => s.id === draft.sectionId)?.name,
+    ]
+      .filter(Boolean)
+      .join(" / ") || "—"
   const set = <K extends keyof Task>(key: K, value: Task[K]) => setDraft((d) => d ? { ...d, [key]: value } : d)
   const hasReminder = deriveReminderState(draft) !== "none"
   const hasDeadline = !!(draft.deadlineDate || draft.deadline)
@@ -663,39 +679,54 @@ export function DetailsPanel({
         </div>
 
         {/* ── Waiting for — directly under status ── */}
-        {draft.status === "WAIT" && <div>
-          <label
-            className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-status-wait"
-          >
-            Waiting for
-          </label>
-          <input
-            value={draft.waitingFor ?? ""}
-            placeholder="e.g. reply from Madina"
-            onChange={(e) => set("waitingFor", e.target.value || undefined)}
-            onFocus={() => setActiveField("waitingFor")}
-            onBlur={() => {
-              const waitingFor = draft.waitingFor ?? ""
-              if (connected && waitingFor !== sourceWaitingFor) sendBridgeEdit("waitingFor", waitingFor)
-              setActiveField(null)
-            }}
-            disabled={locked || pendingFields.has("waitingFor")}
-            className="w-full rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15"
-          />
-        </div>}
+        {/* Compact like Notes but one-line collapsed: label lives inside as a
+            faint placeholder (shown only while empty, never saved). A textarea
+            (not input) so multiline paste/typing works; Enter inserts a newline
+            and never submits (there is no form). Height follows content via
+            field-sizing:content, clamped to ~1 line idle and expanded on
+            hover/focus. Save path (onBlur -> bridge) is unchanged. */}
+        {draft.status === "WAIT" && (
+          <div>
+            <textarea
+              value={draft.waitingFor ?? ""}
+              placeholder="Waiting for"
+              rows={1}
+              onChange={(e) => set("waitingFor", e.target.value || undefined)}
+              onFocus={() => setActiveField("waitingFor")}
+              onBlur={() => {
+                const waitingFor = draft.waitingFor ?? ""
+                if (connected && waitingFor !== sourceWaitingFor) sendBridgeEdit("waitingFor", waitingFor)
+                setActiveField(null)
+              }}
+              disabled={locked || pendingFields.has("waitingFor")}
+              className={cn(
+                "w-full resize-none rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm text-foreground outline-none [field-sizing:content]",
+                "transition-[max-height,border-color,box-shadow] duration-150",
+                "placeholder:text-[11px] placeholder:font-semibold placeholder:uppercase placeholder:tracking-wide placeholder:text-muted-foreground/40",
+                "max-h-[2.5rem] overflow-hidden hover:max-h-32 hover:overflow-y-auto focus:max-h-32 focus:overflow-y-auto",
+                "focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15",
+              )}
+            />
+          </div>
+        )}
 
         {/* ── REMINDER — full-width collapsible ── */}
         {/* mt-3 is applied on the card itself, not via the parent's space-y-3:
             the wrapping fieldset is display:contents, so a margin on it (or the
             parent's inter-child margin) generates no box and is dropped. */}
         <fieldset disabled={locked} className="contents">
-        <div className={cn("mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
-          {/* Header — entire row is clickable */}
+        <div
+          className={cn("group/card mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}
+          onFocus={() => setReminderFocused(true)}
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setReminderFocused(false) }}
+        >
+          {/* Header — one collapsed row; the editor below reveals on hover (CSS),
+              focus-within (reminderFocused), or an explicit click (reminderOpen). */}
           <button
             type="button"
             onClick={() => setReminderOpen((o) => !o)}
             className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
-            aria-expanded={reminderOpen}
+            aria-expanded={reminderOpen || reminderFocused}
           >
             <Bell
               className={cn(
@@ -730,31 +761,22 @@ export function DetailsPanel({
               )}
             </span>
 
-            {reminderOpen
-              ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-              : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            }
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/card:rotate-90",
+                (reminderOpen || reminderFocused) && "rotate-90",
+              )}
+            />
           </button>
 
-          {/* Collapsed + no reminder: relative quick presets — computed client-side and pushed through the bridge when connected */}
-          {!reminderOpen && !hasReminder && (
-            <div className="flex gap-1.5 border-t border-border/50 px-3 pb-2.5 pt-2">
-              {quickPresets.map((r) => (
-                <button
-                  key={r.value}
-                  onClick={() => applyReminderPreset(r.value)}
-                  disabled={pendingFields.has("reminder")}
-                  className="flex-1 rounded border border-border px-1 py-1.5 text-center text-[10px] font-medium text-muted-foreground transition-colors hover:border-status-remind/40 hover:bg-status-remind/10 hover:text-status-remind disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Expanded editor */}
-          {reminderOpen && (
-            <div className="space-y-3 border-t border-border/50 px-3 pb-3 pt-3">
+          {/* Editor — hidden while collapsed so its controls stay out of the tab
+              order; revealed on hover / focus-within / click. */}
+          <div
+            className={cn(
+              "space-y-3 border-t border-border/50 px-3 pb-3 pt-3 group-hover/card:block",
+              (reminderOpen || reminderFocused) ? "block" : "hidden",
+            )}
+          >
               {/* Relative presets — computed client-side and pushed through the bridge when connected */}
               <div className="grid grid-cols-2 gap-1.5">
                 {advancedPresets.map((r, i) => {
@@ -853,19 +875,23 @@ export function DetailsPanel({
                 </div>
               )}
             </div>
-          )}
         </div>
         </fieldset>
 
         {/* ── DEADLINE — full-width collapsible ── */}
         <fieldset disabled={locked} className="contents">
-        <div className={cn("mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
-          {/* Header — entire row is clickable */}
+        <div
+          className={cn("group/card mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}
+          onFocus={() => setDeadlineFocused(true)}
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDeadlineFocused(false) }}
+        >
+          {/* Header — one collapsed row; the editor below reveals on hover (CSS),
+              focus-within (deadlineFocused), or an explicit click (deadlineOpen). */}
           <button
             type="button"
             onClick={() => setDeadlineOpen((o) => !o)}
             className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
-            aria-expanded={deadlineOpen}
+            aria-expanded={deadlineOpen || deadlineFocused}
           >
             <Flag
               className={cn(
@@ -897,15 +923,22 @@ export function DetailsPanel({
               )}
             </span>
 
-            {deadlineOpen
-              ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-              : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            }
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/card:rotate-90",
+                (deadlineOpen || deadlineFocused) && "rotate-90",
+              )}
+            />
           </button>
 
-          {/* Expanded editor */}
-          {deadlineOpen && (
-            <div className="space-y-2.5 border-t border-border/50 px-3 pb-3 pt-3">
+          {/* Editor — hidden while collapsed so its controls stay out of the tab
+              order; revealed on hover / focus-within / click. */}
+          <div
+            className={cn(
+              "space-y-2.5 border-t border-border/50 px-3 pb-3 pt-3 group-hover/card:block",
+              (deadlineOpen || deadlineFocused) ? "block" : "hidden",
+            )}
+          >
               {/* Quick presets */}
               <div className="grid grid-cols-2 gap-1.5">
                 {getDeadlinePresets().map((p) => {
@@ -986,7 +1019,6 @@ export function DetailsPanel({
                 <p className="text-[10px] text-muted-foreground">Date-only deadlines are due by end of that day.</p>
               )}
             </div>
-          )}
         </div>
         </fieldset>
 
@@ -1020,14 +1052,34 @@ export function DetailsPanel({
             reconciles the draft. Mock: updates the local draft directly.
             Changing project moves the task to that project's root by default. */}
         <fieldset disabled={locked || pendingFields.has("location")} className="contents">
-        <div className={cn("mt-3 rounded-lg border border-border bg-card/40 p-3", locked && "opacity-60")}>
-          <div className="mb-2 flex items-center gap-1.5">
-            <MapPin className="size-3.5 text-muted-foreground" />
-            <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-              Location
-            </span>
-          </div>
-          <div className="space-y-2">
+        <div className={cn("group/card mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
+          {/* Header — one collapsed row; selectors reveal on hover / focus-within / click */}
+          <button
+            type="button"
+            onClick={() => setLocationOpen((o) => !o)}
+            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
+            aria-expanded={locationOpen}
+          >
+            <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">Location</span>
+            <span className="flex-1 truncate text-right text-[11px] text-muted-foreground">{locationSummary}</span>
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform group-hover/card:rotate-90 group-focus-within/card:rotate-90",
+                locationOpen && "rotate-90",
+              )}
+            />
+          </button>
+
+          {/* Selectors — hidden while collapsed; revealed on hover / focus-within / click.
+              A native <select> keeps focus while its dropdown is open, so focus-within
+              holds the card open through the whole selection. */}
+          <div
+            className={cn(
+              "space-y-2 border-t border-border/50 px-3 pb-3 pt-3 group-hover/card:block group-focus-within/card:block",
+              locationOpen ? "block" : "hidden",
+            )}
+          >
             <LocationRow label="Project">
               <Select
                 value={draft.projectId}
