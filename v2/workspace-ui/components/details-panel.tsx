@@ -100,6 +100,11 @@ function computeDeadlineIso(t: Task, withTime: boolean): string | null {
 
 const statuses: Status[] = ["TODO", "FOCUS", "WAIT", "DONE"]
 
+// UI-only: the Pin-to-panel toggle is hidden in Details for now (the feature
+// isn't currently relevant on this surface). The data model, bridge command,
+// and pinned-task/overlay semantics are untouched — flip this to re-expose it.
+const SHOW_PIN_TO_PANEL = false
+
 const quickPresets: { value: ReminderPreset; label: string }[] = [
   { value: "30m", label: "In 30m" },
   { value: "1h", label: "In 1h" },
@@ -680,8 +685,11 @@ export function DetailsPanel({
         </div>}
 
         {/* ── REMINDER — full-width collapsible ── */}
+        {/* mt-3 is applied on the card itself, not via the parent's space-y-3:
+            the wrapping fieldset is display:contents, so a margin on it (or the
+            parent's inter-child margin) generates no box and is dropped. */}
         <fieldset disabled={locked} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
+        <div className={cn("mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
           {/* Header — entire row is clickable */}
           <button
             type="button"
@@ -851,7 +859,7 @@ export function DetailsPanel({
 
         {/* ── DEADLINE — full-width collapsible ── */}
         <fieldset disabled={locked} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
+        <div className={cn("mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
           {/* Header — entire row is clickable */}
           <button
             type="button"
@@ -982,35 +990,37 @@ export function DetailsPanel({
         </div>
         </fieldset>
 
-        {/* ── PIN TO PANEL — single compact row ── */}
-        <div className="flex items-center gap-2.5 px-1 py-1">
-          <Pin
-            className={cn(
-              "size-3.5 shrink-0",
-              draft.pinned ? "fill-current text-status-panel" : "text-muted-foreground",
-            )}
-          />
-          <span className="flex-1 text-[11px] font-bold uppercase tracking-widest text-foreground">Pin to panel</span>
-          <Switch
-            checked={draft.pinned}
-            activeColor="bg-status-panel"
-            disabled={locked || pendingFields.has("pinToPanel")}
-            onChange={() => {
-              // Same optimistic-then-reconciled pattern as Status: update the
-              // draft immediately, let the fresh snapshot confirm/correct it.
-              const next = !draft.pinned
-              if (connected) sendBridgeEdit("pinToPanel", next)
-              set("pinned", next)
-            }}
-          />
-        </div>
+        {/* ── PIN TO PANEL — single compact row (hidden for now; see SHOW_PIN_TO_PANEL) ── */}
+        {SHOW_PIN_TO_PANEL && (
+          <div className="flex items-center gap-2.5 px-1 py-1">
+            <Pin
+              className={cn(
+                "size-3.5 shrink-0",
+                draft.pinned ? "fill-current text-status-panel" : "text-muted-foreground",
+              )}
+            />
+            <span className="flex-1 text-[11px] font-bold uppercase tracking-widest text-foreground">Pin to panel</span>
+            <Switch
+              checked={draft.pinned}
+              activeColor="bg-status-panel"
+              disabled={locked || pendingFields.has("pinToPanel")}
+              onChange={() => {
+                // Same optimistic-then-reconciled pattern as Status: update the
+                // draft immediately, let the fresh snapshot confirm/correct it.
+                const next = !draft.pinned
+                if (connected) sendBridgeEdit("pinToPanel", next)
+                set("pinned", next)
+              }}
+            />
+          </div>
+        )}
 
         {/* ── LOCATION ── */}
         {/* Connected: changing project/section sends moveTask; the fresh snapshot
             reconciles the draft. Mock: updates the local draft directly.
             Changing project moves the task to that project's root by default. */}
         <fieldset disabled={locked || pendingFields.has("location")} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40 p-3", locked && "opacity-60")}>
+        <div className={cn("mt-3 rounded-lg border border-border bg-card/40 p-3", locked && "opacity-60")}>
           <div className="mb-2 flex items-center gap-1.5">
             <MapPin className="size-3.5 text-muted-foreground" />
             <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -1049,10 +1059,11 @@ export function DetailsPanel({
         </fieldset>
 
         {/* ── NOTES ── */}
+        {/* Label lives inside as a faint placeholder (shown only while empty and
+            never saved). Height follows content via field-sizing:content, clamped
+            to ~2 lines while idle and expanded on hover/focus for comfortable
+            editing — the save path (onBlur -> bridge) is unchanged. */}
         <div>
-          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Notes / context
-          </label>
           <textarea
             value={draft.notes ?? ""}
             onChange={(e) => set("notes", e.target.value || undefined)}
@@ -1063,15 +1074,23 @@ export function DetailsPanel({
               setActiveField(null)
             }}
             disabled={locked || pendingFields.has("notes")}
-            rows={3}
-            placeholder="Add context…"
-            className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
+            rows={2}
+            placeholder="NOTES / CONTEXT"
+            className={cn(
+              "w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none [field-sizing:content]",
+              "transition-[max-height,border-color,box-shadow] duration-150",
+              "placeholder:text-[11px] placeholder:font-semibold placeholder:uppercase placeholder:tracking-wide placeholder:text-muted-foreground/40",
+              // Idle: clamp to ~2 lines and hide the overflow. Hover/focus: expand
+              // to a reasonable max and scroll if the note is very long.
+              "max-h-[3.75rem] overflow-hidden hover:max-h-48 hover:overflow-y-auto focus:max-h-48 focus:overflow-y-auto",
+              "focus:border-primary/60 focus:ring-2 focus:ring-primary/20",
+            )}
           />
         </div>
 
         {/* ── STEPS — lightweight execution checkpoints, separate from Notes ── */}
         <fieldset disabled={locked} className="contents">
-        <div className={cn("rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
+        <div className={cn("mt-3 rounded-lg border border-border bg-card/40", locked && "opacity-60")}>
           {/* Header — entire row is clickable */}
           <button
             type="button"
