@@ -25,6 +25,7 @@ export interface Section {
   id: string
   projectId: string
   name: string
+  isProjectRoot?: boolean
 }
 
 /**
@@ -261,6 +262,10 @@ export type WorkspaceTaskCommand =
   | { type: "deleteTaskCheckpoint"; taskId: string; checkpointId: string }
   | { type: "reorderTaskCheckpoint"; taskId: string; checkpointId: string; targetIndex: number }
 
+export type WorkspaceSectionCommand =
+  | { type: "renameSection"; sectionId: string; title: string }
+  | { type: "deleteSection"; sectionId: string }
+
 export type WorkspaceContextCommand = {
   type: "updateWorkspaceContext"
   activeTab: TabKey
@@ -275,6 +280,8 @@ export type WorkspaceContextCommand = {
 export type WorkspaceCreateTaskCommand = {
   type: "createTask"
   title: string
+  /** Explicit connected draft: permits an empty title until Details commits a real one. */
+  draft?: boolean
   projectId?: string
   sectionId?: string | null
   /** When set, the new task becomes a subtask of this task and inherits its project/section. */
@@ -290,6 +297,7 @@ export type WorkspaceCreateSectionCommand = {
 
 export type WorkspaceCommand =
   | WorkspaceTaskCommand
+  | WorkspaceSectionCommand
   | WorkspaceContextCommand
   | WorkspaceCreateTaskCommand
   | WorkspaceCreateSectionCommand

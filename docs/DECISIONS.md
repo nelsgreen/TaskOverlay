@@ -55,6 +55,23 @@ item.
 ## Workspace And Structure
 
 - Sections/folders are the same model for now.
+- Steps/Checkpoints are lightweight execution checkpoints inside a task.
+- A Step has title, done state, and order only. It is not a separate task and
+  has no status, REMIND, DEADLINE, WAIT, PinToPanel, or Priority.
+- Completing all Steps does not auto-complete the parent task. Completing or
+  reopening the parent does not mutate Step states.
+- Completing all Steps surfaces an explicit "Complete task" action that uses the
+  normal task status path.
+- Steps persist through `AppState` / `state.json` using the same connected
+  WebView2 command -> save -> fresh snapshot path as other Workspace mutations.
+- Overlay may summarize Step progress but does not render Steps as task rows.
+- Promotion of a Step to a real child task, Step templates, step-level
+  reminders/deadlines, and AI step breakdown are out of scope for the MVP.
+- Reminder, Deadline, Location, and Steps are compact collapsible Task Details
+  cards that expand on hover, focus-within, or click.
+- Waiting for and Notes are compact auto-sizing fields.
+- Pin to panel is hidden in Task Details for now; the field, bridge command,
+  and pinned/overlay semantics are unchanged.
 - Workstream = top-level section/group is the MVP simplification.
 - Cross-sectional Workstream is deferred.
 - No permanent left Projects sidebar in Workspace; use the horizontal Project
@@ -73,6 +90,8 @@ item.
 - Direct meeting service integrations are not MVP.
 - AI suggests tasks; the user confirms selected tasks.
 - No embedded ChatGPT window inside the app.
+- Reminder repeat is a flat minute interval (`remindEveryMinutes`). Monthly
+  repeat is not connected until a calendar-aware recurrence model exists.
 
 ## Sync And Platform
 

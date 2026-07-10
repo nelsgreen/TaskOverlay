@@ -23,6 +23,8 @@ interface Props {
   onDelete: (id: string) => void
   /** Move the task to a snapshot section id (group:{id} or project:{id}:root). */
   onMoveTask?: (taskId: string, sectionId: string) => void
+  focusTitle?: boolean
+  onTitleFocused?: () => void
   editMode?: "full" | "connected" | "readonly"
   pendingFields?: Set<string>
   bridgeError?: string | null
@@ -268,6 +270,8 @@ export function DetailsPanel({
   onApply,
   onDelete,
   onMoveTask,
+  focusTitle,
+  onTitleFocused,
   editMode = "full",
   pendingFields = new Set(),
   bridgeError,
@@ -301,6 +305,8 @@ export function DetailsPanel({
 
   // Track the snapshot at the start of the editing session for "Revert"
   const sessionBaseRef = useRef<Task | null>(task)
+  const titleInputRef = useRef<HTMLInputElement>(null)
+  const notesInputRef = useRef<HTMLTextAreaElement>(null)
   // Last task id this panel rendered for — distinguishes "selection changed"
   // (full reset) from "same task, fresh snapshot" (merge) below.
   const lastTaskIdRef = useRef<string | null>(task?.id ?? null)
@@ -343,6 +349,16 @@ export function DetailsPanel({
       : task)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task, reminderOpen, reminderFocused, deadlineOpen, deadlineFocused, activeField, editMode])
+
+  useEffect(() => {
+    if (!focusTitle || !task || task.id !== draft?.id) return
+    const frame = requestAnimationFrame(() => {
+      titleInputRef.current?.focus()
+      titleInputRef.current?.select()
+      onTitleFocused?.()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [focusTitle, task, draft?.id, onTitleFocused])
 
   // Auto-apply: push every draft change up to parent immediately (mock mode only)
   useEffect(() => {
@@ -630,8 +646,16 @@ export function DetailsPanel({
             Task title
           </label>
           <input
+            ref={titleInputRef}
             value={draft.title}
+            placeholder="Task title"
             onChange={(e) => set("title", e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Tab" && !e.shiftKey) {
+                e.preventDefault()
+                notesInputRef.current?.focus()
+              }
+            }}
             onFocus={() => setActiveField("title")}
             onBlur={() => {
               if (connected && draft.title !== sourceTitle) sendBridgeEdit("title", draft.title)
@@ -1090,7 +1114,9 @@ export function DetailsPanel({
                 onChange={(v) => {
                   if (v === draft.projectId) return
                   if (connected) {
-                    onMoveTask?.(draft.id, `project:${v}:root`)
+                    const rootSectionId = `project:${v}:root`
+                    setDraft((d) => d ? { ...d, projectId: v, sectionId: rootSectionId, parentId: null } : d)
+                    onMoveTask?.(draft.id, rootSectionId)
                   } else {
                     const first = sections.find((s) => s.projectId === v)
                     setDraft((d) => d ? { ...d, projectId: v, sectionId: first ? first.id : d.sectionId, parentId: null } : d)
@@ -1104,7 +1130,16 @@ export function DetailsPanel({
                 value={draft.sectionId}
                 onChange={(v) => {
                   if (v === draft.sectionId) return
-                  if (connected) onMoveTask?.(draft.id, v)
+                  if (connected) {
+                    const target = sections.find((s) => s.id === v)
+                    setDraft((d) => d ? {
+                      ...d,
+                      sectionId: v,
+                      projectId: target?.projectId ?? d.projectId,
+                      parentId: null,
+                    } : d)
+                    onMoveTask?.(draft.id, v)
+                  }
                   else set("sectionId", v)
                 }}
                 options={projectSections.map((s) => ({ value: s.id, label: s.name }))}
@@ -1124,6 +1159,7 @@ export function DetailsPanel({
             display:contents Location fieldset, so Notes needs its own top margin. */}
         <div className="mt-3">
           <textarea
+            ref={notesInputRef}
             value={draft.notes ?? ""}
             onChange={(e) => set("notes", e.target.value || undefined)}
             onFocus={() => setActiveField("notes")}

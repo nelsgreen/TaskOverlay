@@ -15,6 +15,7 @@ import type {
   WorkspaceContextSnapshot,
   WorkspaceCreateSectionCommand,
   WorkspaceCreateTaskCommand,
+  WorkspaceSectionCommand,
   WorkspaceSnapshotContract,
   WorkspaceTaskCommand,
 } from "@/lib/types"
@@ -60,6 +61,7 @@ export interface WorkspaceBridgeState {
   /** Id of the most recently created section/workstream once the bridge confirms it, until cleared. */
   lastCreatedSectionId: string | null
   sendCommand(command: WorkspaceTaskCommand): boolean
+  sendSectionCommand(command: WorkspaceSectionCommand): boolean
   sendCreateTask(input: Omit<WorkspaceCreateTaskCommand, "type">): boolean
   sendCreateSection(input: Omit<WorkspaceCreateSectionCommand, "type">): boolean
   sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
@@ -151,6 +153,9 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     return false
   }, [postCommand])
 
+  const sendSectionCommand = useCallback((command: WorkspaceSectionCommand): boolean =>
+    postCommand(command), [postCommand])
+
   const sendCreateTask = useCallback((
     input: Omit<WorkspaceCreateTaskCommand, "type">,
   ): boolean => postCommand({ type: "createTask", ...input }), [postCommand])
@@ -173,6 +178,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     lastCreatedTaskId,
     lastCreatedSectionId,
     sendCommand,
+    sendSectionCommand,
     sendCreateTask,
     sendCreateSection,
     sendWorkspaceContext,
@@ -245,6 +251,7 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     id: section.id,
     projectId: section.projectId,
     name: section.name,
+    isProjectRoot: section.isProjectRoot,
   }))
   const tasks = snapshot.tasks.map(adaptTask)
   const timelineItems = snapshot.timelineItems.map(adaptTimelineItem)

@@ -5,18 +5,22 @@ the backlog into a full release plan.
 
 ## Immediate
 
-1. Verify current main after recent merges, especially PR #45 Tree Operations
-   MVP.
-2. Create and merge the docs-only backlog/decisions/roadmap PR.
-3. Do not start drag/drop or major features until docs are reconciled.
+1. PR #48 Steps/Checkpoints MVP is merged; treat the lightweight connected
+   Steps model as implemented and verify UX details when touching it.
+2. Continue connected Tree productivity slices: section actions, fast task and
+   subtask capture, safe delete, and Details Location moves.
+3. Do not start drag/drop or major features until connected Tree operations are
+   stable.
 
 ## Near-Term Reliability / Polish
 
 1. Backup dialog polish and retention settings.
-2. Reminder quick presets + Repeat connected to the Workspace bridge/AppState.
+2. Reminder quick presets + Repeat connected to the Workspace bridge/AppState —
+   done in PR #47 (Monthly repeat deferred).
 3. Timeline `DetailEmphasis`.
 4. Timeline DONE/completed handling and overdue sorting.
-5. Notes resize/auto-grow.
+5. Notes resize/auto-grow — done via compact auto-sizing Notes/Waiting for in
+   PR #48.
 6. Window shell cleanup.
 7. Workspace lifecycle/loading/stale selection polish if not already covered by
    merged work.
@@ -66,11 +70,13 @@ the backlog into a full release plan.
 ## Task Quality
 
 1. Priority.
-2. Checklist.
+2. Checklist / Steps — checkpoints MVP done in PR #48; follow-ups: promote a
+   Step to a child task, Step templates, step-level reminders/deadlines, AI
+   step breakdown, and overlay parent progress.
 3. Attachments.
 4. Undo/archive/draft recovery.
 5. Templates/routines.
-6. Chunking helper.
+6. Chunking helper beyond the implemented lightweight Steps MVP.
 7. Focus mode.
 8. Low-stimulus/reduced motion.
 

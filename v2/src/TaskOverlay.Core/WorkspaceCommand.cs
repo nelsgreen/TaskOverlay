@@ -118,6 +118,16 @@ public static class WorkspaceCommandProcessor
                 return CreateSection(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
             }
 
+            if (type == "renameSection")
+            {
+                return RenameSection(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
+            }
+
+            if (type == "deleteSection")
+            {
+                return DeleteSection(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
+            }
+
             var taskIdText = ReadString(payload, "taskId");
             if (!Guid.TryParse(taskIdText, out var taskId))
             {
@@ -547,9 +557,17 @@ public static class WorkspaceCommandProcessor
         DateTimeOffset timestamp)
     {
         var title = ReadString(payload, "title");
-        if (string.IsNullOrWhiteSpace(title) || title.Length > MaximumTitleLength)
+        var isDraft = payload.TryGetProperty("draft", out var draftElement) &&
+                      draftElement.ValueKind == JsonValueKind.True;
+        if ((!isDraft && string.IsNullOrWhiteSpace(title)) ||
+            (title?.Length ?? 0) > MaximumTitleLength)
         {
             return Fail(commandId, "invalidPayload", "Task title is required and must not be too long.");
+        }
+
+        if (isDraft && !string.IsNullOrWhiteSpace(title))
+        {
+            return Fail(commandId, "invalidPayload", "A draft task must start with an empty title.");
         }
 
         // A subtask is a task created under another task: parentTaskId wins over
@@ -577,7 +595,9 @@ public static class WorkspaceCommandProcessor
         }
 
         var treeService = new TreeStateService(state);
-        var created = treeService.CreateTask(parentId, title, timestamp);
+        var created = isDraft
+            ? treeService.CreateDraftTask(parentId, timestamp)
+            : treeService.CreateTask(parentId, title, timestamp);
         return created is not null
             ? WorkspaceCommandResult.Succeeded(commandId, created.Id.ToString("N"))
             : Fail(commandId, "mutationRejected", "Task could not be created in the given location.");
@@ -641,6 +661,57 @@ public static class WorkspaceCommandProcessor
                 commandId,
                 createdSectionId: $"group:{created.Id.ToString("N")}")
             : Fail(commandId, "mutationRejected", "Section could not be created in the given project.");
+    }
+
+    private static WorkspaceCommandResult RenameSection(
+        AppState state,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        var title = ReadString(payload, "title");
+        if (string.IsNullOrWhiteSpace(title) || title.Length > MaximumTitleLength)
+        {
+            return Fail(commandId, "invalidPayload", "Section title is required and must not be too long.");
+        }
+
+        if (!TryResolveGroupSection(payload, out var groupId))
+        {
+            return Fail(commandId, "invalidPayload", "A valid editable sectionId is required.");
+        }
+
+        var treeService = new TreeStateService(state);
+        return treeService.RenameNode(groupId, title, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "mutationRejected", "Section could not be renamed.");
+    }
+
+    private static WorkspaceCommandResult DeleteSection(
+        AppState state,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!TryResolveGroupSection(payload, out var groupId))
+        {
+            return Fail(commandId, "invalidPayload", "A valid editable sectionId is required.");
+        }
+
+        var treeService = new TreeStateService(state);
+        return treeService.DeleteNode(groupId, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "mutationRejected", "Section could not be deleted.");
+    }
+
+    private static bool TryResolveGroupSection(JsonElement payload, out Guid groupId)
+    {
+        groupId = Guid.Empty;
+        var sectionId = ReadString(payload, "sectionId");
+        const string groupPrefix = "group:";
+        return sectionId is not null &&
+               sectionId.StartsWith(groupPrefix, StringComparison.Ordinal) &&
+               Guid.TryParse(sectionId[groupPrefix.Length..], out groupId) &&
+               groupId != Guid.Empty;
     }
 
     private static bool TryResolveSectionParent(JsonElement payload, out Guid parentId)

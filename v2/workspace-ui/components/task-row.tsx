@@ -85,7 +85,7 @@ export function TaskRow({
           isDone ? "text-muted-foreground line-through" : "text-foreground",
         )}
       >
-        {task.title}
+        {task.title || <span className="italic text-muted-foreground">Untitled task</span>}
       </span>
 
       {/* inline metadata */}

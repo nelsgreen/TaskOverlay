@@ -91,6 +91,30 @@ public sealed class TreeStateService
         return ToNode(new NodeEntry(TreeNodeKind.Task, task));
     }
 
+    public TreeNode? CreateDraftTask(
+        Guid parentId,
+        DateTimeOffset? now = null)
+    {
+        var parent = FindNode(parentId);
+        if (parent is null)
+        {
+            return null;
+        }
+
+        var timestamp = now ?? DateTimeOffset.UtcNow;
+        var task = TaskItem.Create(string.Empty, timestamp);
+        task.IsDraft = true;
+        if (!AssignTaskParent(task, parent.Value))
+        {
+            return null;
+        }
+
+        task.SortOrder = NextSortOrder(parentId);
+        task.UpdatedAtUtc = timestamp;
+        _state.Tasks.Add(task);
+        return ToNode(new NodeEntry(TreeNodeKind.Task, task));
+    }
+
     public bool RenameNode(Guid nodeId, string? title, DateTimeOffset? now = null)
     {
         var normalizedTitle = NormalizeTitle(title);
@@ -869,6 +893,7 @@ public sealed class TreeStateService
     private static bool RenameTask(TaskItem task, string title)
     {
         task.Title = title;
+        task.IsDraft = false;
         return true;
     }
 
