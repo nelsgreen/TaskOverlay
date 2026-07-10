@@ -700,10 +700,14 @@ export function DetailsPanel({
               }}
               disabled={locked || pendingFields.has("waitingFor")}
               className={cn(
-                "w-full resize-none rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm text-foreground outline-none [field-sizing:content]",
+                // leading-5 pins line-height to 1.25rem so the collapsed max-height
+                // is an exact line count: py-2 (1rem) + border (2px) + 1×1.25rem.
+                // With overflow-hidden this clips cleanly at the 1st line boundary —
+                // no partial 2nd line peeking through.
+                "w-full resize-none rounded-lg border border-status-wait/40 bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none [field-sizing:content]",
                 "transition-[max-height,border-color,box-shadow] duration-150",
                 "placeholder:text-[11px] placeholder:font-semibold placeholder:uppercase placeholder:tracking-wide placeholder:text-muted-foreground/40",
-                "max-h-[2.5rem] overflow-hidden hover:max-h-32 hover:overflow-y-auto focus:max-h-32 focus:overflow-y-auto",
+                "max-h-[calc(2.25rem_+_2px)] overflow-hidden hover:max-h-32 hover:overflow-y-auto focus:max-h-32 focus:overflow-y-auto",
                 "focus:border-status-wait/60 focus:ring-2 focus:ring-status-wait/15",
               )}
             />
@@ -1132,12 +1136,16 @@ export function DetailsPanel({
             rows={2}
             placeholder="NOTES / CONTEXT"
             className={cn(
-              "w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none [field-sizing:content]",
+              // leading-5 pins line-height to 1.25rem so the collapsed max-height
+              // is an exact line count: py-2 (1rem) + border (2px) + 2×1.25rem.
+              // With overflow-hidden this clips cleanly at the 2nd line boundary —
+              // no partial 3rd line peeking through.
+              "w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none [field-sizing:content]",
               "transition-[max-height,border-color,box-shadow] duration-150",
               "placeholder:text-[11px] placeholder:font-semibold placeholder:uppercase placeholder:tracking-wide placeholder:text-muted-foreground/40",
-              // Idle: clamp to ~2 lines and hide the overflow. Hover/focus: expand
-              // to a reasonable max and scroll if the note is very long.
-              "max-h-[3.75rem] overflow-hidden hover:max-h-48 hover:overflow-y-auto focus:max-h-48 focus:overflow-y-auto",
+              // Idle: clamp to exactly 2 lines and hide the overflow. Hover/focus:
+              // expand to a reasonable max and scroll if the note is very long.
+              "max-h-[calc(3.5rem_+_2px)] overflow-hidden hover:max-h-48 hover:overflow-y-auto focus:max-h-48 focus:overflow-y-auto",
               "focus:border-primary/60 focus:ring-2 focus:ring-primary/20",
             )}
           />
