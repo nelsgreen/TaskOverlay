@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Folder, FolderTree } from "lucide-react"
+import { Folder, FolderTree, Video } from "lucide-react"
 import type { MeetItem, Section, Status, StatusFilterKey, TabKey, Task, TimelineItem, TreeFilter, WorkspaceTaskCommand, WorkstreamFilter } from "@/lib/types"
 import {
   initialMeetItems,
@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
 import { matchesStatusFilter } from "@/lib/status-filter"
-import { addDaysKey, todayKey } from "@/lib/calendar-date"
+import { addDaysKey, isoFromLocalDateTime, todayKey } from "@/lib/calendar-date"
 import { WorkspaceHeader } from "./workspace-header"
 import { ProjectScopeBar } from "./project-scope-bar"
 import { TreeView } from "./tree-view"
@@ -30,10 +30,43 @@ type WorkspaceSelection =
   | { kind: "meet"; id: string }
   | null
 
+const MEETING_DRAFT_ID = "meeting-draft"
+
+function createMeetingDraft(projectId: string): MeetItem {
+  const now = new Date()
+  now.setMinutes(Math.ceil(now.getMinutes() / 30) * 30, 0, 0)
+  const pad = (value: number) => String(value).padStart(2, "0")
+  return {
+    id: MEETING_DRAFT_ID,
+    projectId,
+    title: "",
+    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    startTime: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
+    duration: "30m",
+  }
+}
+
+function meetStartIso(meeting: MeetItem): string {
+  const [hour, minute] = meeting.startTime.split(":").map(Number)
+  return isoFromLocalDateTime(meeting.date, hour || 0, minute || 0)
+}
+
+function meetDurationMinutes(meeting: MeetItem): number {
+  const presets: Record<MeetItem["duration"], number> = {
+    "15m": 15, "30m": 30, "45m": 45, "1h": 60, "90m": 90, "2h": 120, custom: 30,
+  }
+  if (!meeting.endTime) return presets[meeting.duration]
+  const [startHour, startMinute] = meeting.startTime.split(":").map(Number)
+  const [endHour, endMinute] = meeting.endTime.split(":").map(Number)
+  const difference = (endHour * 60 + endMinute) - (startHour * 60 + startMinute)
+  return difference > 0 ? difference : presets[meeting.duration]
+}
+
 export function TaskManager() {
   const bridge = useWorkspaceBridge()
   const [mockTasks, setMockTasks] = useState<Task[]>(initialTasks)
   const [mockMeetItems, setMockMeetItems] = useState<MeetItem[]>(initialMeetItems)
+  const [meetingDraft, setMeetingDraft] = useState<MeetItem | null>(null)
   // Sections need local state in mock mode so "Add workstream" stays usable for
   // orientation; connected mode always uses the authoritative snapshot sections.
   const [mockSectionList, setMockSectionList] = useState<Section[]>(mockSections)
@@ -67,6 +100,7 @@ export function TaskManager() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
   const [contextReady, setContextReady] = useState(false)
+  const [activeNowCollapsed, setActiveNowCollapsed] = useState(false)
   const contextHydrated = useRef(false)
   const lastPersistedContext = useRef<string | null>(null)
   const pendingSectionPurpose = useRef<"tree" | "workstream" | null>(null)
@@ -150,7 +184,11 @@ export function TaskManager() {
             : contextTask && restoredProjectIds.includes(contextTask.projectId)
               ? contextTask.id
               : bridgedData.tasks.find((task) => restoredProjectIds.includes(task.projectId))?.id ?? null
-      const restoredTimelineItem = context.activeTab === "timeline" && restoredTask
+      const restoredMeet = context.activeTab === "timeline" && restoredTimeline?.linkedMeetId &&
+        bridgedData.meetItems.some((meeting) => meeting.id === restoredTimeline.linkedMeetId)
+        ? restoredTimeline.linkedMeetId
+        : null
+      const restoredTimelineItem = context.activeTab === "timeline" && (restoredTask || restoredMeet)
         ? restoredTimeline?.id ?? null
         : null
       // A persisted workstream id may reference a since-deleted section.
@@ -160,11 +198,14 @@ export function TaskManager() {
         : null
 
       setSelectedProjectIds(restoredProjectIds)
-      setSelection(restoredTask ? { kind: "task", id: restoredTask } : null)
+      setSelection(restoredMeet
+        ? { kind: "meet", id: restoredMeet }
+        : restoredTask ? { kind: "task", id: restoredTask } : null)
       setSelectedTimelineItemId(restoredTimelineItem)
       setSelectedWorkstreamId(restoredWorkstream)
       setTab(context.activeTab)
       setFilter(context.filter)
+      setActiveNowCollapsed(context.activeNowCollapsed)
       lastPersistedContext.current = JSON.stringify({
         activeTab: context.activeTab,
         selectedProjectIds: restoredProjectIds,
@@ -172,6 +213,7 @@ export function TaskManager() {
         selectedTimelineItemId: restoredTimelineItem,
         selectedWorkstreamId: restoredWorkstream,
         filter: context.filter,
+        activeNowCollapsed: context.activeNowCollapsed,
       })
       contextHydrated.current = true
       setContextReady(true)
@@ -244,6 +286,7 @@ export function TaskManager() {
       selectedTimelineItemId,
       selectedWorkstreamId,
       filter,
+      activeNowCollapsed,
     }
     const serialized = JSON.stringify(context)
     if (serialized === lastPersistedContext.current) return
@@ -259,6 +302,7 @@ export function TaskManager() {
     selectedTimelineItemId,
     selectedWorkstreamId,
     filter,
+    activeNowCollapsed,
     bridge.sendWorkspaceContext,
   ])
 
@@ -909,11 +953,58 @@ export function TaskManager() {
   }
 
   const handleApplyMeet = (updated: MeetItem) => {
+    if (updated.id === MEETING_DRAFT_ID) {
+      if (connected) {
+        bridge.sendMeetingCommand({
+          type: "createMeeting",
+          projectId: updated.projectId,
+          title: updated.title,
+          startsAtUtc: meetStartIso(updated),
+          durationMinutes: meetDurationMinutes(updated),
+          notes: updated.notes ?? null,
+          location: updated.location ?? null,
+          link: updated.link ?? null,
+          linkedTaskId: updated.linkedTaskId ?? null,
+        })
+      } else if (!bridged) {
+        const created = { ...updated, id: crypto.randomUUID() }
+        setMockMeetItems((items) => [...items, created])
+        setSelection({ kind: "meet", id: created.id })
+        setMeetingDraft(null)
+      }
+      return
+    }
+    if (connected) {
+      bridge.sendMeetingCommand({
+        type: "updateMeeting",
+        meetingId: updated.id,
+        projectId: updated.projectId,
+        title: updated.title,
+        startsAtUtc: meetStartIso(updated),
+        durationMinutes: meetDurationMinutes(updated),
+        notes: updated.notes ?? null,
+        location: updated.location ?? null,
+        link: updated.link ?? null,
+        linkedTaskId: updated.linkedTaskId ?? null,
+      })
+      return
+    }
     if (bridged) return
     setMockMeetItems((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
   }
 
   const handleDeleteMeet = (id: string) => {
+    if (id === MEETING_DRAFT_ID) {
+      setMeetingDraft(null)
+      setSelection(null)
+      return
+    }
+    if (connected) {
+      bridge.sendMeetingCommand({ type: "deleteMeeting", meetingId: id })
+      setSelection(null)
+      setSelectedTimelineItemId(null)
+      return
+    }
     if (bridged) return
     setMockMeetItems((prev) => prev.filter((m) => m.id !== id))
     if (selection?.kind === "meet" && selection.id === id) {
@@ -922,8 +1013,28 @@ export function TaskManager() {
     }
   }
 
+  const handleCreateMeeting = () => {
+    const projectId = selectedProjectIds[0] ?? projects[0]?.id
+    if (!projectId) return
+    const draft = createMeetingDraft(projectId)
+    if (readOnly) return
+    setMeetingDraft(draft)
+    setSelection({ kind: "meet", id: draft.id })
+  }
+
+  useEffect(() => {
+    const id = bridge.lastCreatedMeetingId
+    if (!id || !meetItems.some((meeting) => meeting.id === id)) return
+    setSelection({ kind: "meet", id })
+    setSelectedTimelineItemId(`meet:${id}`)
+    setMeetingDraft(null)
+    bridge.clearLastCreatedMeetingId()
+  }, [bridge.lastCreatedMeetingId, meetItems, bridge.clearLastCreatedMeetingId])
+
   // The currently selected MeetItem comes from the timeline data source.
-  const selectedMeet = meetItems.find((m) => m.id === selectedMeetId) ?? null
+  const selectedMeet = meetingDraft?.id === selectedMeetId
+    ? meetingDraft
+    : meetItems.find((m) => m.id === selectedMeetId) ?? null
   const sendTaskEdit = (
     taskId: string,
     field: "title" | "status" | "pinToPanel" | "notes" | "waitingFor" | "reminder" | "deadline",
@@ -1162,15 +1273,30 @@ export function TaskManager() {
               />
             )}
             {tab === "timeline" && (
-              <TimelineView
-                projectIds={selectedProjectIds}
-                projects={projects}
-                items={timelineItems}
-                selectedTimelineItemId={selectedTimelineItemId}
-                onSelectMeet={selectTimelineMeet}
-                onSelectTask={selectTimelineTask}
-                search={search}
-              />
+              <div className="flex h-full min-h-0 flex-col">
+                {!readOnly && (
+                  <div className="flex shrink-0 justify-end border-b border-border bg-card/20 px-5 py-2">
+                    <button
+                      type="button"
+                      onClick={handleCreateMeeting}
+                      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-status-meet/30 bg-status-meet/10 px-2.5 text-[11px] font-semibold text-status-meet transition-colors hover:bg-status-meet/20"
+                    >
+                      <Video className="size-3" /> New MEET
+                    </button>
+                  </div>
+                )}
+                <div className="min-h-0 flex-1">
+                  <TimelineView
+                    projectIds={selectedProjectIds}
+                    projects={projects}
+                    items={timelineItems}
+                    selectedTimelineItemId={selectedTimelineItemId}
+                    onSelectMeet={selectTimelineMeet}
+                    onSelectTask={selectTimelineTask}
+                    search={search}
+                  />
+                </div>
+              </div>
             )}
             {tab === "calendar" && (
               <CalendarView
@@ -1228,6 +1354,7 @@ export function TaskManager() {
               tasks={tasks}
               onApply={handleApplyMeet}
               onDelete={handleDeleteMeet}
+              readOnly={readOnly}
             />
           ) : tab === "workstreams" && !selectedTask && selectedWorkstreamSection && selectedWorkstreamProject ? (
             <WorkstreamDetailPanel
@@ -1267,6 +1394,8 @@ export function TaskManager() {
         selectedTaskId={selectedTaskId}
         onSelectTask={selectTask}
         taskIds={activeNowTaskIds}
+        collapsed={activeNowCollapsed}
+        onCollapsedChange={setActiveNowCollapsed}
       />
 
       {pendingDeleteTask && (

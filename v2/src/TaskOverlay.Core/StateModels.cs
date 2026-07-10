@@ -12,6 +12,7 @@ public sealed class AppState
     public List<TaskItem> Tasks { get; set; } = new();
     public List<ProjectItem> Projects { get; set; } = new();
     public List<GroupItem> Groups { get; set; } = new();
+    public List<MeetingItem> Meetings { get; set; } = new();
     public OverlaySettings OverlaySettings { get; set; } = new();
     public WindowPlacement WindowPlacement { get; set; } = new();
     public TreeManagerSettings TreeManagerSettings { get; set; } = new();
@@ -82,6 +83,23 @@ public sealed class GroupItem
     public Guid ProjectId { get; set; }
     public string Name { get; set; } = string.Empty;
     public int SortOrder { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class MeetingItem
+{
+    public const int DefaultDurationMinutes = 30;
+
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProjectId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public DateTimeOffset StartsAtUtc { get; set; }
+    public int DurationMinutes { get; set; } = DefaultDurationMinutes;
+    public string Location { get; set; } = string.Empty;
+    public string Link { get; set; } = string.Empty;
+    public Guid? LinkedTaskId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
@@ -390,6 +408,7 @@ public sealed class WorkspaceSettings
     public string? SelectedTimelineItemId { get; set; }
     public string? SelectedWorkstreamId { get; set; }
     public WorkspaceFilter Filter { get; set; } = WorkspaceFilter.All;
+    public bool ActiveNowCollapsed { get; set; }
 }
 
 public enum WorkspaceTab

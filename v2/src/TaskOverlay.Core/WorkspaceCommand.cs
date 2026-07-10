@@ -14,7 +14,8 @@ public sealed record WorkspaceCommandResult(
     string? ErrorCode,
     string? ErrorMessage,
     string? CreatedTaskId = null,
-    string? CreatedSectionId = null)
+    string? CreatedSectionId = null,
+    string? CreatedMeetingId = null)
 {
     public const int CurrentSchemaVersion = 1;
     public const string CurrentMessageType = "commandResult";
@@ -22,7 +23,8 @@ public sealed record WorkspaceCommandResult(
     public static WorkspaceCommandResult Succeeded(
         string commandId,
         string? createdTaskId = null,
-        string? createdSectionId = null) =>
+        string? createdSectionId = null,
+        string? createdMeetingId = null) =>
         new(
             CurrentSchemaVersion,
             CurrentMessageType,
@@ -31,7 +33,8 @@ public sealed record WorkspaceCommandResult(
             ErrorCode: null,
             ErrorMessage: null,
             createdTaskId,
-            createdSectionId);
+            createdSectionId,
+            createdMeetingId);
 
     public static WorkspaceCommandResult Failed(
         string commandId,
@@ -116,6 +119,21 @@ public static class WorkspaceCommandProcessor
             if (type == "createSection")
             {
                 return CreateSection(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
+            }
+
+            if (type == "createMeeting")
+            {
+                return CreateMeeting(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
+            }
+
+            if (type == "updateMeeting")
+            {
+                return UpdateMeeting(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
+            }
+
+            if (type == "deleteMeeting")
+            {
+                return DeleteMeeting(state, payload, commandId);
             }
 
             if (type == "renameSection")
@@ -802,6 +820,17 @@ public static class WorkspaceCommandProcessor
             return Fail(commandId, "invalidPayload", "Workspace context payload is invalid.");
         }
 
+        var activeNowCollapsed = state.WorkspaceSettings?.ActiveNowCollapsed ?? false;
+        if (payload.TryGetProperty("activeNowCollapsed", out var collapsedElement))
+        {
+            if (collapsedElement.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+            {
+                return Fail(commandId, "invalidPayload", "Workspace context payload is invalid.");
+            }
+
+            activeNowCollapsed = collapsedElement.GetBoolean();
+        }
+
         state.WorkspaceSettings = new WorkspaceSettings
         {
             ActiveTab = activeTab.Value,
@@ -809,10 +838,193 @@ public static class WorkspaceCommandProcessor
             SelectedTaskId = selectedTaskId,
             SelectedTimelineItemId = selectedTimelineItemId,
             SelectedWorkstreamId = selectedWorkstreamId,
-            Filter = filter.Value
+            Filter = filter.Value,
+            ActiveNowCollapsed = activeNowCollapsed
         };
         WorkspaceStatePolicy.Normalize(state);
         return WorkspaceCommandResult.Succeeded(commandId);
+    }
+
+    private static WorkspaceCommandResult CreateMeeting(
+        AppState state,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!TryReadMeetingInput(payload, existing: null, out var input))
+        {
+            return Fail(commandId, "invalidPayload", "Meeting payload is invalid.");
+        }
+
+        var created = new MeetingService(state).Create(input, timestamp);
+        return created is null
+            ? Fail(commandId, "invalidMeeting", "Meeting project, linked task, or fields are invalid.")
+            : WorkspaceCommandResult.Succeeded(
+                commandId,
+                createdMeetingId: created.Id.ToString("N"));
+    }
+
+    private static WorkspaceCommandResult UpdateMeeting(
+        AppState state,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!Guid.TryParse(ReadString(payload, "meetingId"), out var meetingId))
+        {
+            return Fail(commandId, "invalidMeetingId", "A valid meetingId is required.");
+        }
+
+        var meeting = state.Meetings?.FirstOrDefault(item => item.Id == meetingId);
+        if (meeting is null)
+        {
+            return Fail(commandId, "meetingNotFound", "The requested meeting does not exist.");
+        }
+
+        if (!TryReadMeetingInput(payload, meeting, out var input))
+        {
+            return Fail(commandId, "invalidPayload", "Meeting patch is invalid.");
+        }
+
+        return new MeetingService(state).Update(meetingId, input, timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "invalidMeeting", "Meeting project, linked task, or fields are invalid.");
+    }
+
+    private static WorkspaceCommandResult DeleteMeeting(
+        AppState state,
+        JsonElement payload,
+        string commandId)
+    {
+        if (!Guid.TryParse(ReadString(payload, "meetingId"), out var meetingId))
+        {
+            return Fail(commandId, "invalidMeetingId", "A valid meetingId is required.");
+        }
+
+        return new MeetingService(state).Delete(meetingId)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "meetingNotFound", "The requested meeting does not exist.");
+    }
+
+    private static bool TryReadMeetingInput(
+        JsonElement payload,
+        MeetingItem? existing,
+        out MeetingUpdate input)
+    {
+        input = default!;
+        var projectId = existing?.ProjectId ?? Guid.Empty;
+        if (payload.TryGetProperty("projectId", out var projectElement) &&
+            (projectElement.ValueKind != JsonValueKind.String ||
+             !Guid.TryParse(projectElement.GetString(), out projectId)))
+        {
+            return false;
+        }
+
+        var title = existing?.Title;
+        if (payload.TryGetProperty("title", out var titleElement))
+        {
+            if (titleElement.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            title = titleElement.GetString();
+        }
+
+        var startsAtUtc = existing?.StartsAtUtc ?? default;
+        if (payload.TryGetProperty("startsAtUtc", out var startsElement) &&
+            (startsElement.ValueKind != JsonValueKind.String ||
+             !DateTimeOffset.TryParse(
+                 startsElement.GetString(),
+                 CultureInfo.InvariantCulture,
+                 DateTimeStyles.RoundtripKind,
+                 out startsAtUtc)))
+        {
+            return false;
+        }
+
+        var durationMinutes = existing?.DurationMinutes ?? MeetingItem.DefaultDurationMinutes;
+        if (payload.TryGetProperty("durationMinutes", out var durationElement) &&
+            (durationElement.ValueKind != JsonValueKind.Number ||
+             !durationElement.TryGetInt32(out durationMinutes)))
+        {
+            return false;
+        }
+
+        if (!TryReadPatchString(payload, "notes", existing?.Notes, out var notes) ||
+            !TryReadPatchString(payload, "location", existing?.Location, out var location) ||
+            !TryReadPatchString(payload, "link", existing?.Link, out var link) ||
+            !TryReadPatchGuid(payload, "linkedTaskId", existing?.LinkedTaskId, out var linkedTaskId) ||
+            projectId == Guid.Empty || string.IsNullOrWhiteSpace(title) || startsAtUtc == default)
+        {
+            return false;
+        }
+
+        input = new MeetingUpdate(
+            projectId,
+            title,
+            notes,
+            startsAtUtc,
+            durationMinutes,
+            location,
+            link,
+            linkedTaskId);
+        return true;
+    }
+
+    private static bool TryReadPatchString(
+        JsonElement payload,
+        string propertyName,
+        string? existing,
+        out string? value)
+    {
+        value = existing;
+        if (!payload.TryGetProperty(propertyName, out var element))
+        {
+            return true;
+        }
+
+        if (element.ValueKind == JsonValueKind.Null)
+        {
+            value = null;
+            return true;
+        }
+
+        if (element.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = element.GetString();
+        return true;
+    }
+
+    private static bool TryReadPatchGuid(
+        JsonElement payload,
+        string propertyName,
+        Guid? existing,
+        out Guid? value)
+    {
+        value = existing;
+        if (!payload.TryGetProperty(propertyName, out var element))
+        {
+            return true;
+        }
+
+        if (element.ValueKind == JsonValueKind.Null)
+        {
+            value = null;
+            return true;
+        }
+
+        if (element.ValueKind != JsonValueKind.String ||
+            !Guid.TryParse(element.GetString(), out var parsed))
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
     }
 
     private static bool TryReadGuidArray(

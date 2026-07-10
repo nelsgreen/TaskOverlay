@@ -209,6 +209,8 @@ public sealed class TreeStateService
                     return false;
                 }
 
+                new MeetingService(_state).ClearLinkedTask(task.Id, timestamp);
+
                 break;
             }
             default:

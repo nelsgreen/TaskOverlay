@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { CalendarDays, Clock, ExternalLink, MapPin, Trash2, UndoDot, Video } from "lucide-react"
+import { CalendarDays, Clock, ExternalLink, MapPin, Save, Trash2, UndoDot, Video } from "lucide-react"
 import type { MeetDuration, MeetItem, Project, Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -12,6 +12,7 @@ interface Props {
   /** Called on every draft change — auto-apply */
   onApply: (meet: MeetItem) => void
   onDelete: (id: string) => void
+  readOnly?: boolean
 }
 
 const durationOptions: { value: MeetDuration; label: string }[] = [
@@ -66,20 +67,14 @@ function computeEndTime(start: string, dur: MeetDuration): string {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`
 }
 
-export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete }: Props) {
+export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete, readOnly = false }: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
   const sessionBaseRef = useRef<MeetItem | null>(meet)
 
   useEffect(() => {
     setDraft(meet)
     sessionBaseRef.current = meet
-  }, [meet?.id])
-
-  // Auto-apply every draft change
-  useEffect(() => {
-    if (!draft) return
-    onApply(draft)
-  }, [draft])
+  }, [meet])
 
   if (!draft) {
     return (
@@ -114,7 +109,7 @@ export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete }: P
         </span>
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <fieldset disabled={readOnly} className="flex-1 space-y-3 overflow-y-auto px-4 py-4 disabled:opacity-70">
 
         {/* ── Title ── */}
         <div>
@@ -305,30 +300,45 @@ export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete }: P
           MEET is a calendar-like item — not a task. It has no TODO / FOCUS / WAIT / DONE status.
         </p>
 
-      </div>
+      </fieldset>
 
       {/* Bottom actions */}
       <div className="flex items-center justify-between border-t border-border px-4 py-3">
         <button
-          onClick={() => onDelete(draft.id)}
+          disabled={readOnly}
+          onClick={() => {
+            if (window.confirm(`Delete meeting "${draft.title || "Untitled"}"?`)) {
+              onDelete(draft.id)
+            }
+          }}
           className="flex items-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-1.5 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
         >
           <Trash2 className="size-4" />
           Delete meeting
         </button>
-        <button
-          disabled={!dirty}
-          onClick={() => setDraft(sessionBaseRef.current)}
-          className={cn(
-            "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-            dirty
-              ? "border-border text-foreground hover:bg-accent"
-              : "border-border/40 text-muted-foreground/40 cursor-not-allowed",
-          )}
-        >
-          <UndoDot className="size-4" />
-          Revert
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            disabled={!dirty || readOnly}
+            onClick={() => setDraft(sessionBaseRef.current)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+              dirty && !readOnly
+                ? "border-border text-foreground hover:bg-accent"
+                : "cursor-not-allowed border-border/40 text-muted-foreground/40",
+            )}
+          >
+            <UndoDot className="size-4" />
+            Revert
+          </button>
+          <button
+            disabled={!dirty || !draft.title.trim() || readOnly}
+            onClick={() => onApply(draft)}
+            className="flex items-center gap-1.5 rounded-lg bg-status-meet px-3 py-1.5 text-sm font-semibold text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Save className="size-4" />
+            Save
+          </button>
+        </div>
       </div>
     </aside>
   )

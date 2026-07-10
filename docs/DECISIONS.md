@@ -48,6 +48,9 @@ item.
 - REMIND is not Deadline.
 - Deadline is not REMIND and does not trigger a popup by itself in MVP.
 - MEET is a separate entity, not a task/status/REMIND/Deadline.
+- MEET is persisted in `AppState` with project, title, notes, start time,
+  duration, location, link, and an optional linked task. Its default duration
+  is 30 minutes.
 - Handle is a functional surface, not branding.
 - Handle anchor is the source of truth and must not be derived from panel
   position.
@@ -88,6 +91,9 @@ item.
   - Calendar = time allocation.
 - Workstreams are context recovery, not a Kanban/status board/Calendar.
 - Direct meeting service integrations are not MVP.
+- Basic MEET CRUD is connected through the WebView2 bridge. Recording,
+  transcription, AI analysis, recurrence, calendar sync, and provider APIs are
+  explicitly later features.
 - AI suggests tasks; the user confirms selected tasks.
 - No embedded ChatGPT window inside the app.
 - Reminder repeat is a flat minute interval (`remindEveryMinutes`). Monthly

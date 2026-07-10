@@ -13,6 +13,7 @@ public static class StateMigrator
 
         state.Projects ??= new List<ProjectItem>();
         state.Groups ??= new List<GroupItem>();
+        state.Meetings ??= new List<MeetingItem>();
         state.WorkspaceSettings ??= new WorkspaceSettings();
 
         if (state.SchemaVersion == AppState.CurrentSchemaVersion)
@@ -73,6 +74,12 @@ public static class StateMigrator
         if (state.Tasks is null)
         {
             state.Tasks = new List<TaskItem>();
+            changed = true;
+        }
+
+        if (state.Meetings is null)
+        {
+            state.Meetings = new List<MeetingItem>();
             changed = true;
         }
 
@@ -192,6 +199,69 @@ public static class StateMigrator
 
             if (CheckpointService.Normalize(task))
             {
+                changed = true;
+            }
+        }
+
+        var meetingIds = new HashSet<Guid>();
+        foreach (var meeting in state.Meetings.ToList())
+        {
+            if (string.IsNullOrWhiteSpace(meeting.Title) || meeting.StartsAtUtc == default)
+            {
+                state.Meetings.Remove(meeting);
+                changed = true;
+                continue;
+            }
+
+            if (meeting.Id == Guid.Empty || !meetingIds.Add(meeting.Id))
+            {
+                meeting.Id = Guid.NewGuid();
+                meetingIds.Add(meeting.Id);
+                changed = true;
+            }
+
+            if (!projectIds.Contains(meeting.ProjectId))
+            {
+                meeting.ProjectId = defaultProject.Id;
+                changed = true;
+            }
+
+            var title = meeting.Title.Trim();
+            var notes = meeting.Notes?.Trim() ?? string.Empty;
+            var location = meeting.Location?.Trim() ?? string.Empty;
+            var link = meeting.Link?.Trim() ?? string.Empty;
+            if (meeting.Title != title || meeting.Notes != notes ||
+                meeting.Location != location || meeting.Link != link)
+            {
+                meeting.Title = title;
+                meeting.Notes = notes;
+                meeting.Location = location;
+                meeting.Link = link;
+                changed = true;
+            }
+
+            if (meeting.DurationMinutes <= 0 ||
+                meeting.DurationMinutes > MeetingService.MaximumDurationMinutes)
+            {
+                meeting.DurationMinutes = MeetingItem.DefaultDurationMinutes;
+                changed = true;
+            }
+
+            if (meeting.LinkedTaskId is Guid linkedTaskId && !tasksById.ContainsKey(linkedTaskId))
+            {
+                meeting.LinkedTaskId = null;
+                changed = true;
+            }
+
+            if (meeting.CreatedAtUtc == default)
+            {
+                meeting.CreatedAtUtc = meeting.StartsAtUtc;
+                changed = true;
+            }
+
+            if (meeting.UpdatedAtUtc == default)
+            {
+                meeting.UpdatedAtUtc = meeting.CreatedAtUtc;
                 changed = true;
             }
         }

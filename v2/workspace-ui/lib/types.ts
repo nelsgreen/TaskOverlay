@@ -159,6 +159,7 @@ export interface WorkspaceSnapshotContract {
   projects: WorkspaceProjectSnapshot[]
   sections: WorkspaceSectionSnapshot[]
   tasks: WorkspaceTaskSnapshot[]
+  meetings: WorkspaceMeetingSnapshot[]
   activeNow: WorkspaceActiveNowSnapshot[]
   timelineItems: WorkspaceTimelineSnapshot[]
   context: WorkspaceContextSnapshot
@@ -171,6 +172,7 @@ export interface WorkspaceContextSnapshot {
   selectedTimelineItemId: string | null
   selectedWorkstreamId: string | null
   filter: TreeFilter
+  activeNowCollapsed: boolean
 }
 
 export interface WorkspaceProjectSnapshot {
@@ -223,13 +225,28 @@ export interface WorkspaceActiveNowSnapshot {
   kind: "FOCUS" | "REMIND"
 }
 
+export interface WorkspaceMeetingSnapshot {
+  id: string
+  projectId: string
+  title: string
+  notes: string
+  startsAtUtc: string
+  durationMinutes: number
+  location: string
+  link: string
+  linkedTaskId: string | null
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
 export interface WorkspaceTimelineSnapshot {
   id: string
-  kind: "REMIND" | "DEADLINE"
+  kind: "MEET" | "REMIND" | "DEADLINE"
   title: string
   projectId: string
   projectPath: string
-  linkedTaskId: string
+  linkedTaskId: string | null
+  linkedMeetingId: string | null
   occursAtUtc: string
   meta: string | null
 }
@@ -274,7 +291,34 @@ export type WorkspaceContextCommand = {
   selectedTimelineItemId: string | null
   selectedWorkstreamId: string | null
   filter: TreeFilter
+  activeNowCollapsed: boolean
 }
+
+export type WorkspaceMeetingCommand =
+  | {
+      type: "createMeeting"
+      projectId: string
+      title: string
+      startsAtUtc: string
+      durationMinutes: number
+      notes?: string | null
+      location?: string | null
+      link?: string | null
+      linkedTaskId?: string | null
+    }
+  | {
+      type: "updateMeeting"
+      meetingId: string
+      projectId?: string
+      title?: string
+      startsAtUtc?: string
+      durationMinutes?: number
+      notes?: string | null
+      location?: string | null
+      link?: string | null
+      linkedTaskId?: string | null
+    }
+  | { type: "deleteMeeting"; meetingId: string }
 
 /** Creates a task directly from Workspace. No taskId yet — the bridge returns one. */
 export type WorkspaceCreateTaskCommand = {
@@ -301,6 +345,7 @@ export type WorkspaceCommand =
   | WorkspaceContextCommand
   | WorkspaceCreateTaskCommand
   | WorkspaceCreateSectionCommand
+  | WorkspaceMeetingCommand
 
 export type WorkspaceCommandPayload = WorkspaceCommand extends infer Command
   ? Command extends { type: string }
@@ -324,6 +369,7 @@ export interface WorkspaceCommandResult {
   errorMessage: string | null
   createdTaskId?: string | null
   createdSectionId?: string | null
+  createdMeetingId?: string | null
 }
 
 export interface PendingWorkspaceCommand {

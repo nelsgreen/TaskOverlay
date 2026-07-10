@@ -235,6 +235,8 @@ Active product scope:
   - bottom Active Now strip;
   - resize handles;
   - smart layout redistribution.
+- Active Now collapsed/expanded state persists through `WorkspaceSettings` and
+  the connected Workspace context command; no `localStorage`.
 - Right Details panel sizing:
   - min around 280;
   - preferred 340-380;
@@ -306,7 +308,7 @@ Active product scope:
 
 ## MEET
 
-- MEET base model:
+- Basic connected MEET MVP is implemented:
   - project;
   - title;
   - notes/agenda/context;
@@ -316,12 +318,14 @@ Active product scope:
   - location;
   - link;
   - optional linked task.
-- MEET Timeline interaction:
+- MEET persists in `AppState` / `state.json`; Workspace CRUD uses the WebView2
+  command -> C# service -> save -> fresh snapshot path.
+- MEET Timeline interaction is implemented:
   - click MEET row -> MEET Details;
   - New MEET action in Timeline.
-- MEET persistence:
-  - `MeetItem` in state;
-  - bridge commands create/update/delete.
+- Default meeting duration is 30 minutes.
+- Recording, transcription, AI analysis, recurrence, calendar sync, and direct
+  provider APIs remain later work.
 - Handle next MEET countdown.
 - Local MEET recording MVP:
   - Start/Stop from MEET;

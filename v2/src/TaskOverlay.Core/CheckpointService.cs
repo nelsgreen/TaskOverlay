@@ -255,13 +255,9 @@ public static class CheckpointService
 
     private static void Renumber(List<CheckpointItem> checkpoints)
     {
-        var ordered = Ordered(checkpoints);
-        for (var index = 0; index < ordered.Count; index++)
+        for (var index = 0; index < checkpoints.Count; index++)
         {
-            ordered[index].SortOrder = index;
+            checkpoints[index].SortOrder = index;
         }
-
-        checkpoints.Clear();
-        checkpoints.AddRange(ordered);
     }
 }

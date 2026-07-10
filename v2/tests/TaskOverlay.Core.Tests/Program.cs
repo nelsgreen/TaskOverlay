@@ -133,6 +133,11 @@ internal static class Program
             ("workspace command reminder persistence", WorkspaceCommandReminderPersistence),
             ("workspace command reminder validation", WorkspaceCommandReminderValidation),
             ("workspace command deadline persistence", WorkspaceCommandDeadlinePersistence),
+            ("workspace legacy state without meetings", WorkspaceLegacyStateWithoutMeetings),
+            ("workspace meeting command persistence", WorkspaceMeetingCommandPersistence),
+            ("workspace meeting validation and repair", WorkspaceMeetingValidationAndRepair),
+            ("workspace meeting snapshot and linked task cleanup", WorkspaceMeetingSnapshotAndLinkedTaskCleanup),
+            ("workspace active now collapsed persistence", WorkspaceActiveNowCollapsedPersistence),
             ("workspace command create section persistence", WorkspaceCommandCreateSectionPersistence),
             ("workspace command create section validation", WorkspaceCommandCreateSectionValidation),
             ("workspace command rename section persistence", WorkspaceCommandRenameSectionPersistence),
@@ -5163,6 +5168,172 @@ internal static class Program
             // Reminder must remain a separate field from Deadline.
             Assert(store.Load().Tasks.Single(t => t.Id == task.Id).RemindAtUtc is null,
                 "Setting/clearing Deadline must not affect RemindAtUtc.");
+        });
+    }
+
+    private static void WorkspaceLegacyStateWithoutMeetings()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-11T08:00:00Z"));
+            var store = new AppStateStore(directory);
+            store.Save(state);
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            root.Remove("meetings");
+            File.WriteAllText(store.StatePath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+            var loaded = store.Load();
+            Assert(loaded.Meetings is { Count: 0 },
+                "Legacy state without meetings must load as an empty meeting list.");
+        });
+    }
+
+    private static void WorkspaceMeetingCommandPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-11T09:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var create = dispatcher.Dispatch(WorkspaceCommandJson(
+                "meet-create", "createMeeting", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    title = "  Project sync  ",
+                    startsAtUtc = "2026-07-12T10:30:00Z",
+                    durationMinutes = 30,
+                    notes = "Agenda",
+                    location = "Room 4",
+                    link = "https://example.test/meet",
+                    linkedTaskId = task.Id.ToString("N")
+                }), now);
+            Assert(create.Success && Guid.TryParse(create.CreatedMeetingId, out _),
+                "createMeeting should return the created meeting id.");
+            var meetingId = Guid.Parse(create.CreatedMeetingId!);
+            var created = store.Load().Meetings.Single(meeting => meeting.Id == meetingId);
+            Assert(created.Title == "Project sync" && created.DurationMinutes == 30 &&
+                   created.LinkedTaskId == task.Id,
+                "createMeeting should normalize and persist meeting fields.");
+
+            var update = dispatcher.Dispatch(WorkspaceCommandJson(
+                "meet-update", "updateMeeting", new
+                {
+                    meetingId = meetingId.ToString("N"),
+                    title = "Updated sync",
+                    startsAtUtc = "2026-07-13T11:00:00Z",
+                    durationMinutes = 60,
+                    notes = "Updated agenda",
+                    location = "Online",
+                    link = (string?)null,
+                    linkedTaskId = (string?)null
+                }), now.AddMinutes(1));
+            Assert(update.Success, "updateMeeting should accept an allowed partial patch.");
+            var updated = store.Load().Meetings.Single(meeting => meeting.Id == meetingId);
+            Assert(updated.Title == "Updated sync" && updated.DurationMinutes == 60 &&
+                   updated.ProjectId == project.Id && updated.LinkedTaskId is null && updated.Link == string.Empty,
+                "updateMeeting should preserve omitted fields and persist patched fields.");
+
+            var delete = dispatcher.Dispatch(WorkspaceCommandJson(
+                "meet-delete", "deleteMeeting", new { meetingId = meetingId.ToString("N") }), now.AddMinutes(2));
+            Assert(delete.Success && store.Load().Meetings.Count == 0,
+                "deleteMeeting should persist removal.");
+        });
+    }
+
+    private static void WorkspaceMeetingValidationAndRepair()
+    {
+        var now = DateTimeOffset.Parse("2026-07-11T10:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var initialCount = state.Meetings.Count;
+        var invalidProject = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "meet-bad-project", "createMeeting", new
+            {
+                projectId = Guid.NewGuid().ToString("N"),
+                title = "Invalid",
+                startsAtUtc = "2026-07-12T10:00:00Z",
+                durationMinutes = 30
+            }), now);
+        var invalidTask = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "meet-bad-task", "createMeeting", new
+            {
+                projectId = state.Projects[0].Id.ToString("N"),
+                title = "Invalid link",
+                startsAtUtc = "2026-07-12T10:00:00Z",
+                durationMinutes = 30,
+                linkedTaskId = Guid.NewGuid().ToString("N")
+            }), now);
+        Assert(!invalidProject.Success && !invalidTask.Success && state.Meetings.Count == initialCount,
+            "Invalid project/task references must not create meetings.");
+
+        state.Meetings.Add(new MeetingItem
+        {
+            ProjectId = Guid.NewGuid(),
+            Title = "  Repair me  ",
+            StartsAtUtc = now,
+            DurationMinutes = -5,
+            LinkedTaskId = Guid.NewGuid()
+        });
+        state.Meetings.Add(new MeetingItem { Title = "   ", StartsAtUtc = now });
+        Assert(StateMigrator.RepairCurrentState(state), "Corrupt meetings should be repaired.");
+        Assert(state.Meetings.Count == 1 &&
+               state.Meetings[0].ProjectId == state.Projects[0].Id &&
+               state.Meetings[0].Title == "Repair me" &&
+               state.Meetings[0].DurationMinutes == MeetingItem.DefaultDurationMinutes &&
+               state.Meetings[0].LinkedTaskId is null,
+            "Repair should remove invalid drafts and normalize safe meeting fields.");
+    }
+
+    private static void WorkspaceMeetingSnapshotAndLinkedTaskCleanup()
+    {
+        var now = DateTimeOffset.Parse("2026-07-11T11:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var task = state.Tasks[0];
+        var service = new MeetingService(state);
+        var later = service.Create(new MeetingUpdate(
+            project.Id, "Later", null, now.AddHours(2), 60, "Online", null, null), now)!;
+        var earlier = service.Create(new MeetingUpdate(
+            project.Id, "Earlier", "Agenda", now.AddHours(1), 30, "Room", null, task.Id), now)!;
+
+        var snapshot = WorkspaceSnapshotFactory.Create(state, now, WorkspaceSnapshotFactory.ConnectedMode);
+        Assert(snapshot.Meetings.Select(meeting => meeting.Id).SequenceEqual(
+                new[] { earlier.Id.ToString("N"), later.Id.ToString("N") }) &&
+               snapshot.TimelineItems.Any(item =>
+                   item.Kind == "MEET" && item.LinkedMeetingId == earlier.Id.ToString("N")),
+            "Snapshot should include ordered meetings and linked MEET timeline rows.");
+
+        Assert(new TreeStateService(state).DeleteNode(task.Id, now.AddMinutes(1)),
+            "Linked task deletion should succeed.");
+        Assert(earlier.LinkedTaskId is null,
+            "Deleting a linked task should clear the meeting link without deleting the meeting.");
+    }
+
+    private static void WorkspaceActiveNowCollapsedPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-11T12:00:00Z"));
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+            var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                "active-now-collapse", "updateWorkspaceContext", new
+                {
+                    activeTab = "tree",
+                    selectedProjectIds = new[] { state.Projects[0].Id.ToString("N") },
+                    selectedTaskId = (string?)null,
+                    selectedTimelineItemId = (string?)null,
+                    selectedWorkstreamId = (string?)null,
+                    filter = "all",
+                    activeNowCollapsed = true
+                }));
+            Assert(result.Success && store.Load().WorkspaceSettings.ActiveNowCollapsed,
+                "Active Now collapsed state should persist through Workspace context.");
+            Assert(WorkspaceSnapshotFactory.Create(store.Load()).Context.ActiveNowCollapsed,
+                "Workspace snapshot should restore Active Now collapsed state.");
         });
     }
 

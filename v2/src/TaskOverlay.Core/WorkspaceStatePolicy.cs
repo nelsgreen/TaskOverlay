@@ -117,8 +117,17 @@ public static class WorkspaceStatePolicy
     {
         var separatorIndex = value.IndexOf(':');
         if (separatorIndex <= 0 ||
-            !Guid.TryParse(value[(separatorIndex + 1)..], out var taskId) ||
-            state.Tasks.FirstOrDefault(task => task.Id == taskId) is not { } task)
+            !Guid.TryParse(value[(separatorIndex + 1)..], out var itemId))
+        {
+            return false;
+        }
+
+        if (value[..separatorIndex] == "meet")
+        {
+            return state.Meetings?.Any(meeting => meeting.Id == itemId) == true;
+        }
+
+        if (state.Tasks.FirstOrDefault(task => task.Id == itemId) is not { } task)
         {
             return false;
         }

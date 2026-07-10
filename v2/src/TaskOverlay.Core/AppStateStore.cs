@@ -222,6 +222,7 @@ public sealed class AppStateStore
         if (state.Tasks is null ||
             state.Projects is null ||
             state.Groups is null ||
+            state.Meetings is null ||
             state.OverlaySettings is null ||
             state.WindowPlacement is null ||
             state.TreeManagerSettings is null ||
@@ -244,9 +245,11 @@ public sealed class AppStateStore
         var projectIds = state.Projects.Select(project => project.Id).ToHashSet();
         var groupIds = state.Groups.Select(group => group.Id).ToHashSet();
         var taskIds = state.Tasks.Select(task => task.Id).ToHashSet();
+        var meetingIds = state.Meetings.Select(meeting => meeting.Id).ToHashSet();
         if (projectIds.Count != state.Projects.Count ||
             groupIds.Count != state.Groups.Count ||
-            taskIds.Count != state.Tasks.Count)
+            taskIds.Count != state.Tasks.Count ||
+            meetingIds.Count != state.Meetings.Count)
         {
             throw new InvalidDataException("State file contains duplicate node IDs.");
         }
@@ -281,6 +284,20 @@ public sealed class AppStateStore
                  (!taskIds.Contains(task.ParentTaskId.Value) || task.ParentTaskId == task.Id)))
             {
                 throw new InvalidDataException("State file contains an invalid task.");
+            }
+        }
+
+        foreach (var meeting in state.Meetings)
+        {
+            if (meeting.Id == Guid.Empty ||
+                !projectIds.Contains(meeting.ProjectId) ||
+                string.IsNullOrWhiteSpace(meeting.Title) ||
+                meeting.StartsAtUtc == default ||
+                meeting.DurationMinutes <= 0 ||
+                meeting.DurationMinutes > MeetingService.MaximumDurationMinutes ||
+                meeting.LinkedTaskId is Guid linkedTaskId && !taskIds.Contains(linkedTaskId))
+            {
+                throw new InvalidDataException("State file contains an invalid meeting.");
             }
         }
     }

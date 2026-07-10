@@ -15,6 +15,7 @@ import type {
   WorkspaceContextSnapshot,
   WorkspaceCreateSectionCommand,
   WorkspaceCreateTaskCommand,
+  WorkspaceMeetingCommand,
   WorkspaceSectionCommand,
   WorkspaceSnapshotContract,
   WorkspaceTaskCommand,
@@ -60,14 +61,17 @@ export interface WorkspaceBridgeState {
   lastCreatedTaskId: string | null
   /** Id of the most recently created section/workstream once the bridge confirms it, until cleared. */
   lastCreatedSectionId: string | null
+  lastCreatedMeetingId: string | null
   sendCommand(command: WorkspaceTaskCommand): boolean
   sendSectionCommand(command: WorkspaceSectionCommand): boolean
   sendCreateTask(input: Omit<WorkspaceCreateTaskCommand, "type">): boolean
   sendCreateSection(input: Omit<WorkspaceCreateSectionCommand, "type">): boolean
   sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
+  sendMeetingCommand(command: WorkspaceMeetingCommand): boolean
   clearError(): void
   clearLastCreatedTaskId(): void
   clearLastCreatedSectionId(): void
+  clearLastCreatedMeetingId(): void
 }
 
 export function useWorkspaceBridge(): WorkspaceBridgeState {
@@ -77,6 +81,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const [error, setError] = useState<string | null>(null)
   const [lastCreatedTaskId, setLastCreatedTaskId] = useState<string | null>(null)
   const [lastCreatedSectionId, setLastCreatedSectionId] = useState<string | null>(null)
+  const [lastCreatedMeetingId, setLastCreatedMeetingId] = useState<string | null>(null)
 
   useEffect(() => {
     const webview = window.chrome?.webview
@@ -101,6 +106,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
         } else {
           if (result.createdTaskId) setLastCreatedTaskId(result.createdTaskId)
           if (result.createdSectionId) setLastCreatedSectionId(result.createdSectionId)
+          if (result.createdMeetingId) setLastCreatedMeetingId(result.createdMeetingId)
         }
       }
     }
@@ -168,23 +174,30 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     context: Omit<WorkspaceContextCommand, "type">,
   ): boolean => postCommand({ type: "updateWorkspaceContext", ...context }), [postCommand])
 
+  const sendMeetingCommand = useCallback((command: WorkspaceMeetingCommand): boolean =>
+    postCommand(command), [postCommand])
+
   const clearError = useCallback(() => setError(null), [])
   const clearLastCreatedTaskId = useCallback(() => setLastCreatedTaskId(null), [])
   const clearLastCreatedSectionId = useCallback(() => setLastCreatedSectionId(null), [])
+  const clearLastCreatedMeetingId = useCallback(() => setLastCreatedMeetingId(null), [])
 
   const shared = {
     pendingCommands,
     error,
     lastCreatedTaskId,
     lastCreatedSectionId,
+    lastCreatedMeetingId,
     sendCommand,
     sendSectionCommand,
     sendCreateTask,
     sendCreateSection,
     sendWorkspaceContext,
+    sendMeetingCommand,
     clearError,
     clearLastCreatedTaskId,
     clearLastCreatedSectionId,
+    clearLastCreatedMeetingId,
   }
 
   if (data) {
@@ -210,6 +223,7 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
     Array.isArray(candidate.projects) &&
     Array.isArray(candidate.sections) &&
     Array.isArray(candidate.tasks) &&
+    Array.isArray(candidate.meetings) &&
     Array.isArray(candidate.activeNow) &&
     Array.isArray(candidate.timelineItems) &&
     isWorkspaceContext(candidate.context)
@@ -224,6 +238,7 @@ function isWorkspaceContext(value: unknown): value is WorkspaceContextSnapshot {
     (candidate.selectedTaskId === null || typeof candidate.selectedTaskId === "string") &&
     (candidate.selectedTimelineItemId === null || typeof candidate.selectedTimelineItemId === "string") &&
     (candidate.selectedWorkstreamId === null || typeof candidate.selectedWorkstreamId === "string") &&
+    typeof candidate.activeNowCollapsed === "boolean" &&
     ["all", "active", "active-path"].includes(candidate.filter ?? "")
 }
 
@@ -255,6 +270,7 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
   }))
   const tasks = snapshot.tasks.map(adaptTask)
   const timelineItems = snapshot.timelineItems.map(adaptTimelineItem)
+  const meetItems = snapshot.meetings.map(adaptMeeting)
 
   return {
     projects,
@@ -262,8 +278,36 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     tasks,
     activeNowTaskIds: snapshot.activeNow.map((item) => item.taskId),
     timelineItems,
-    meetItems: [],
+    meetItems,
     context: snapshot.context,
+  }
+}
+
+function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): MeetItem {
+  const local = toLocalDateTime(source.startsAtUtc)
+  return {
+    id: source.id,
+    projectId: source.projectId,
+    title: source.title,
+    notes: source.notes || undefined,
+    date: local.date,
+    startTime: local.time,
+    duration: durationLabel(source.durationMinutes),
+    location: source.location || undefined,
+    link: source.link || undefined,
+    linkedTaskId: source.linkedTaskId ?? undefined,
+  }
+}
+
+function durationLabel(minutes: number): MeetItem["duration"] {
+  switch (minutes) {
+    case 15: return "15m"
+    case 30: return "30m"
+    case 45: return "45m"
+    case 60: return "1h"
+    case 90: return "90m"
+    case 120: return "2h"
+    default: return "custom"
   }
 }
 
@@ -329,7 +373,8 @@ function adaptTimelineItem(source: WorkspaceSnapshotContract["timelineItems"][nu
     projectPath: source.projectPath,
     meta: source.meta ?? undefined,
     projectId: source.projectId,
-    linkedTaskId: source.linkedTaskId,
+    linkedTaskId: source.linkedTaskId ?? undefined,
+    linkedMeetId: source.linkedMeetingId ?? undefined,
     time: formatTimelineTime(occurrence),
     bucket: timelineBucket(occurrence),
     dateKey: dateKeyFromIso(source.occursAtUtc) ?? undefined,
