@@ -79,15 +79,17 @@ Active product scope:
   - preserve value when switching away and back.
 - Details Delete in connected mode with confirmation and no stale panel.
 - Details Location in connected mode through `moveTask`.
-- Notes textarea manual vertical resize or auto-grow to max height with
-  scrollbar.
+- Notes and Waiting for auto-size to content:
+  - compact collapsed (Notes ~2 lines, Waiting for ~1 line), expand on
+    hover/focus with scroll for long text;
+  - delivered by PR #48; revisit only if a manual resize handle is wanted.
 
 ## Timeline, Reminder, And Deadline
 
 - Reminder quick presets + Repeat in connected Workspace:
-  - connect to bridge/AppState;
-  - no mock-only gate;
-  - support calculated `remindAtUtc` and `remindEveryMinutes`.
+  - connected to bridge/AppState via `updateTaskReminder` with calculated
+    `remindAtUtc` and `remindEveryMinutes`; done in PR #47;
+  - Monthly repeat intentionally not connected (see DECISIONS).
 - Timeline click `DetailEmphasis`:
   - REMIND opens Task Details with Reminder expanded;
   - DEADLINE opens Task Details with Deadline expanded.
@@ -96,13 +98,13 @@ Active product scope:
 - Timeline should not show DONE/completed tasks as active attention items:
   - default hide completed or make completed distinction explicit.
 - Reminder block:
-  - compact/collapsible;
-  - Clear/Off accessible without scrolling;
-  - whole header clickable.
+  - compact/collapsible with hover/focus/click expand;
+  - Clear/Off accessible from the collapsed header;
+  - done in PR #48.
 - Deadline block:
-  - compact/collapsible;
+  - compact/collapsible with hover/focus/click expand;
   - supports date-only and date+time;
-  - whole header clickable.
+  - done in PR #48.
 
 ## Overlay And Attention
 
@@ -360,6 +362,17 @@ Active product scope:
   - no effect on Working.
 - One-click Priority toggle in Tree/Status rows and later overlay cards.
 - Priority filters/sorting.
+- Checklist inside task (Steps):
+  - delivered by PR #48 as the connected checkpoints MVP;
+  - item has only title/done/order — no status, REMIND, DEADLINE, WAIT, pin,
+    or priority;
+  - connected through five bridge commands (add batch, update title, toggle,
+    delete, reorder) and exposed in the Workspace snapshot;
+  - parent DONE/reopen does not mutate Step states;
+  - all Steps done surfaces an explicit Complete task action, not
+    auto-complete;
+  - remaining: promote a Step to a real child task, Step templates, step-level
+    reminders/deadlines, AI step breakdown, and overlay parent progress.
 - Attachments:
   - images/documents attached to a task;
   - connected through AppState/state.json/fresh snapshot;
@@ -482,6 +495,9 @@ Active product scope:
   context menus, subtask operations, `deleteTask`, `moveTask`, Details Location,
   Active-only, and DONE cleanup; verify behavior in main before marking any
   remaining follow-up complete.
+- PR #47 connected the Workspace Reminder editor presets and repeat intervals to
+  the bridge (`updateTaskReminder` with `remindEveryMinutes`); Monthly repeat is
+  intentionally not connected.
 - PR #48 Steps/Checkpoints MVP is merged into main:
   - Steps are lightweight ordered checkpoints inside a task, with title + done
     state only;
@@ -491,7 +507,10 @@ Active product scope:
   - completing or reopening the parent task does not mutate Step states;
   - Steps persist through `AppState` / `state.json` via the WebView2 bridge and
     fresh snapshot;
-  - Overlay does not render Steps as separate rows.
+  - Overlay does not render Steps as separate rows;
+  - Task Details uses compact/collapsible Reminder, Deadline, Location, and
+    Steps cards, compact auto-sizing Waiting for and Notes, and keeps Pin to
+    panel hidden from Details while preserving the command/semantics.
 - Long Go v1 history in prompts is obsolete for WPF v2 planning.
 
 ## Needs Clarification

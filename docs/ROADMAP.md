@@ -15,10 +15,12 @@ the backlog into a full release plan.
 ## Near-Term Reliability / Polish
 
 1. Backup dialog polish and retention settings.
-2. Reminder quick presets + Repeat connected to the Workspace bridge/AppState.
+2. Reminder quick presets + Repeat connected to the Workspace bridge/AppState —
+   done in PR #47 (Monthly repeat deferred).
 3. Timeline `DetailEmphasis`.
 4. Timeline DONE/completed handling and overdue sorting.
-5. Notes resize/auto-grow.
+5. Notes resize/auto-grow — done via compact auto-sizing Notes/Waiting for in
+   PR #48.
 6. Window shell cleanup.
 7. Workspace lifecycle/loading/stale selection polish if not already covered by
    merged work.
@@ -68,12 +70,15 @@ the backlog into a full release plan.
 ## Task Quality
 
 1. Priority.
-2. Attachments.
-3. Undo/archive/draft recovery.
-4. Templates/routines.
-5. Chunking helper beyond the implemented lightweight Steps MVP.
-6. Focus mode.
-7. Low-stimulus/reduced motion.
+2. Checklist / Steps — checkpoints MVP done in PR #48; follow-ups: promote a
+   Step to a child task, Step templates, step-level reminders/deadlines, AI
+   step breakdown, and overlay parent progress.
+3. Attachments.
+4. Undo/archive/draft recovery.
+5. Templates/routines.
+6. Chunking helper beyond the implemented lightweight Steps MVP.
+7. Focus mode.
+8. Low-stimulus/reduced motion.
 
 ## Reporting / Analytics
 
