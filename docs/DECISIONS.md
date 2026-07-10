@@ -55,6 +55,14 @@ item.
 ## Workspace And Structure
 
 - Sections/folders are the same model for now.
+- Steps/Checkpoints are lightweight execution checkpoints inside a task.
+- A Step has title, done state, and order only. It is not a separate task and
+  has no status, REMIND, DEADLINE, WAIT, PinToPanel, or Priority.
+- Completing all Steps does not auto-complete the parent task. Completing or
+  reopening the parent does not mutate Step states.
+- Steps persist through `AppState` / `state.json` using the same connected
+  WebView2 command -> save -> fresh snapshot path as other Workspace mutations.
+- Overlay may summarize Step progress but does not render Steps as task rows.
 - Workstream = top-level section/group is the MVP simplification.
 - Cross-sectional Workstream is deferred.
 - No permanent left Projects sidebar in Workspace; use the horizontal Project

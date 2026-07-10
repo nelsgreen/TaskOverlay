@@ -360,9 +360,6 @@ Active product scope:
   - no effect on Working.
 - One-click Priority toggle in Tree/Status rows and later overlay cards.
 - Priority filters/sorting.
-- Checklist inside task:
-  - checklist item has only text/isDone;
-  - no status/reminder/wait/pin/priority.
 - Attachments:
   - images/documents attached to a task;
   - connected through AppState/state.json/fresh snapshot;
@@ -485,6 +482,16 @@ Active product scope:
   context menus, subtask operations, `deleteTask`, `moveTask`, Details Location,
   Active-only, and DONE cleanup; verify behavior in main before marking any
   remaining follow-up complete.
+- PR #48 Steps/Checkpoints MVP is merged into main:
+  - Steps are lightweight ordered checkpoints inside a task, with title + done
+    state only;
+  - Steps are not separate tasks and have no status, REMIND, DEADLINE, WAIT,
+    PinToPanel, or Priority;
+  - completing all Steps does not complete the parent task;
+  - completing or reopening the parent task does not mutate Step states;
+  - Steps persist through `AppState` / `state.json` via the WebView2 bridge and
+    fresh snapshot;
+  - Overlay does not render Steps as separate rows.
 - Long Go v1 history in prompts is obsolete for WPF v2 planning.
 
 ## Needs Clarification

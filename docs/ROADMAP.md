@@ -5,10 +5,12 @@ the backlog into a full release plan.
 
 ## Immediate
 
-1. Verify current main after recent merges, especially PR #45 Tree Operations
-   MVP.
-2. Create and merge the docs-only backlog/decisions/roadmap PR.
-3. Do not start drag/drop or major features until docs are reconciled.
+1. PR #48 Steps/Checkpoints MVP is merged; treat the lightweight connected
+   Steps model as implemented and verify UX details when touching it.
+2. Continue connected Tree productivity slices: section actions, fast task and
+   subtask capture, safe delete, and Details Location moves.
+3. Do not start drag/drop or major features until connected Tree operations are
+   stable.
 
 ## Near-Term Reliability / Polish
 
@@ -66,13 +68,12 @@ the backlog into a full release plan.
 ## Task Quality
 
 1. Priority.
-2. Checklist.
-3. Attachments.
-4. Undo/archive/draft recovery.
-5. Templates/routines.
-6. Chunking helper.
-7. Focus mode.
-8. Low-stimulus/reduced motion.
+2. Attachments.
+3. Undo/archive/draft recovery.
+4. Templates/routines.
+5. Chunking helper beyond the implemented lightweight Steps MVP.
+6. Focus mode.
+7. Low-stimulus/reduced motion.
 
 ## Reporting / Analytics
 

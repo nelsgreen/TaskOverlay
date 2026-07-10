@@ -138,6 +138,9 @@ public sealed class TaskItem
     public Guid? ProjectId { get; set; }
     public Guid? GroupId { get; set; }
     public Guid? ParentTaskId { get; set; }
+    // Connected Workspace task creation may persist an empty title briefly while
+    // Details owns keyboard focus. Ordinary tasks still require a non-empty title.
+    public bool IsDraft { get; set; }
     public int SortOrder { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 

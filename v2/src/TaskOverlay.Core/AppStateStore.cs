@@ -273,7 +273,7 @@ public sealed class AppStateStore
         foreach (var task in state.Tasks)
         {
             if (task.Id == Guid.Empty ||
-                string.IsNullOrWhiteSpace(task.Title) ||
+                (string.IsNullOrWhiteSpace(task.Title) && !task.IsDraft) ||
                 !task.ProjectId.HasValue ||
                 !projectIds.Contains(task.ProjectId.Value) ||
                 (task.GroupId.HasValue && !groupIds.Contains(task.GroupId.Value)) ||

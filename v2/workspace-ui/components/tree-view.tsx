@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { ChevronDown, Folder, Plus, Trash2 } from "lucide-react"
+import { ChevronDown, Folder, Pencil, Plus, Trash2 } from "lucide-react"
 import type { Section, Task, TreeFilter } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { TaskRow } from "./task-row"
@@ -13,7 +13,9 @@ interface Props {
   selectedTaskId: string | null
   collapsedSections: Set<string>
   collapsedTasks: Set<string>
+  selectedSectionId?: string | null
   onSelectTask: (id: string) => void
+  onSelectSection?: (id: string) => void
   onToggleSection: (id: string) => void
   onToggleTask: (id: string) => void
   onTogglePin: (id: string) => void
@@ -21,8 +23,10 @@ interface Props {
   readOnly?: boolean
   /** Enables right-click context menus and their actions (connected or mock). */
   canEdit?: boolean
-  onCreateTaskHere?: () => void
+  onCreateTaskHere?: (sectionId?: string) => void
   onCreateSection?: () => void
+  onRenameSection?: (sectionId: string) => void
+  onDeleteSection?: (sectionId: string) => void
   onAddSubtask?: (taskId: string) => void
   onDeleteTask?: (taskId: string) => void
 }
@@ -35,6 +39,7 @@ const isVisibleActive = (t: Task) => t.status !== "DONE"
 
 type TreeMenu =
   | { kind: "empty"; x: number; y: number }
+  | { kind: "section"; x: number; y: number; sectionId: string; isProjectRoot: boolean }
   | { kind: "task"; x: number; y: number; taskId: string }
   | null
 
@@ -45,7 +50,9 @@ export function TreeView({
   selectedTaskId,
   collapsedSections,
   collapsedTasks,
+  selectedSectionId,
   onSelectTask,
+  onSelectSection,
   onToggleSection,
   onToggleTask,
   onTogglePin,
@@ -53,6 +60,8 @@ export function TreeView({
   canEdit,
   onCreateTaskHere,
   onCreateSection,
+  onRenameSection,
+  onDeleteSection,
   onAddSubtask,
   onDeleteTask,
 }: Props) {
@@ -82,6 +91,20 @@ export function TreeView({
     e.preventDefault()
     e.stopPropagation()
     setMenu({ kind: "task", x: e.clientX, y: e.clientY, taskId })
+  }
+
+  const openSectionMenu = (e: React.MouseEvent, section: Section) => {
+    if (!canEdit) return
+    e.preventDefault()
+    e.stopPropagation()
+    onSelectSection?.(section.id)
+    setMenu({
+      kind: "section",
+      x: e.clientX,
+      y: e.clientY,
+      sectionId: section.id,
+      isProjectRoot: !!section.isProjectRoot,
+    })
   }
 
   // Determine which tasks pass the filter (keeping ancestors when needed)
@@ -149,10 +172,16 @@ export function TreeView({
         const collapsed = collapsedSections.has(section.id)
 
         return (
-          <section key={section.id}>
+          <section key={section.id} onContextMenu={(e) => openSectionMenu(e, section)}>
             <button
-              onClick={() => onToggleSection(section.id)}
-              className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent/40"
+              onClick={() => {
+                onSelectSection?.(section.id)
+                onToggleSection(section.id)
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent/40",
+                selectedSectionId === section.id && "bg-row-selected",
+              )}
             >
               <ChevronDown
                 className={cn("size-4 text-muted-foreground transition-transform", collapsed && "-rotate-90")}
@@ -200,6 +229,8 @@ export function TreeView({
           menu={menu}
           onCreateTask={onCreateTaskHere}
           onCreateSection={onCreateSection}
+          onRenameSection={onRenameSection}
+          onDeleteSection={onDeleteSection}
           onAddSubtask={onAddSubtask}
           onDeleteTask={onDeleteTask}
           onClose={() => setMenu(null)}
@@ -213,13 +244,17 @@ function TreeContextMenu({
   menu,
   onCreateTask,
   onCreateSection,
+  onRenameSection,
+  onDeleteSection,
   onAddSubtask,
   onDeleteTask,
   onClose,
 }: {
   menu: NonNullable<TreeMenu>
-  onCreateTask?: () => void
+  onCreateTask?: (sectionId?: string) => void
   onCreateSection?: () => void
+  onRenameSection?: (sectionId: string) => void
+  onDeleteSection?: (sectionId: string) => void
   onAddSubtask?: (taskId: string) => void
   onDeleteTask?: (taskId: string) => void
   onClose: () => void
@@ -253,8 +288,31 @@ function TreeContextMenu({
     >
       {menu.kind === "empty" ? (
         <>
-          <MenuItem icon={Plus} label="Create task" onClick={() => run(onCreateTask)} />
+          <MenuItem icon={Plus} label="Create task" onClick={() => run(() => onCreateTask?.())} />
           <MenuItem icon={Folder} label="Create section / folder" onClick={() => run(onCreateSection)} />
+        </>
+      ) : menu.kind === "section" ? (
+        <>
+          <MenuItem
+            icon={Plus}
+            label="Create task in this section"
+            onClick={() => run(() => onCreateTask?.(menu.sectionId))}
+          />
+          {!menu.isProjectRoot && (
+            <>
+              <MenuItem
+                icon={Pencil}
+                label="Rename section"
+                onClick={() => run(() => onRenameSection?.(menu.sectionId))}
+              />
+              <MenuItem
+                icon={Trash2}
+                label="Delete section"
+                destructive
+                onClick={() => run(() => onDeleteSection?.(menu.sectionId))}
+              />
+            </>
+          )}
         </>
       ) : (
         <>

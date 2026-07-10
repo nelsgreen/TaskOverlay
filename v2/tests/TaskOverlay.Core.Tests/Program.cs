@@ -135,10 +135,13 @@ internal static class Program
             ("workspace command deadline persistence", WorkspaceCommandDeadlinePersistence),
             ("workspace command create section persistence", WorkspaceCommandCreateSectionPersistence),
             ("workspace command create section validation", WorkspaceCommandCreateSectionValidation),
+            ("workspace command rename section persistence", WorkspaceCommandRenameSectionPersistence),
+            ("workspace command delete section reparents tasks", WorkspaceCommandDeleteSectionReparentsTasks),
             ("workspace command create task in created section", WorkspaceCommandCreateTaskInCreatedSection),
             ("workspace snapshot includes created section", WorkspaceSnapshotIncludesCreatedSection),
             ("workspace command create subtask persistence", WorkspaceCommandCreateSubtaskPersistence),
             ("workspace command create subtask validation", WorkspaceCommandCreateSubtaskValidation),
+            ("workspace command create draft task persistence", WorkspaceCommandCreateDraftTaskPersistence),
             ("workspace command delete task persistence", WorkspaceCommandDeleteTaskPersistence),
             ("workspace command delete task reparents subtasks", WorkspaceCommandDeleteTaskReparentsSubtasks),
             ("workspace command move task to section", WorkspaceCommandMoveTaskToSectionPersistence),
@@ -4342,6 +4345,74 @@ internal static class Program
         Assert(state.Groups.Count == 0, "Rejected createSection commands must not add groups.");
     }
 
+    private static void WorkspaceCommandRenameSectionPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-08T08:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var group = new GroupItem
+            {
+                ProjectId = project.Id,
+                Name = "Old section",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.Groups.Add(group);
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                "rename-section", "renameSection",
+                new { sectionId = $"group:{group.Id:N}", title = "  Renamed section  " }), now);
+
+            Assert(result.Success, "renameSection should succeed for an editable group section.");
+            Assert(store.Load().Groups.Single(g => g.Id == group.Id).Name == "Renamed section",
+                "Renamed section should persist through state.json.");
+
+            var rootResult = dispatcher.Dispatch(WorkspaceCommandJson(
+                "rename-root", "renameSection",
+                new { sectionId = $"project:{project.Id:N}:root", title = "Not allowed" }), now);
+            Assert(!rootResult.Success && rootResult.ErrorCode == "invalidPayload",
+                "Synthetic project root must not be renameable.");
+        });
+    }
+
+    private static void WorkspaceCommandDeleteSectionReparentsTasks()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-08T08:15:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var group = new GroupItem
+            {
+                ProjectId = project.Id,
+                Name = "Temporary section",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.Groups.Add(group);
+            var task = TaskItem.Create("Keep me", now, project.Id);
+            task.GroupId = group.Id;
+            state.Tasks.Add(task);
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                "delete-section", "deleteSection",
+                new { sectionId = $"group:{group.Id:N}" }), now);
+
+            Assert(result.Success, "deleteSection should succeed for an editable group section.");
+            var loaded = store.Load();
+            Assert(loaded.Groups.All(g => g.Id != group.Id), "Deleted section should stay deleted after reload.");
+            var keptTask = loaded.Tasks.Single(t => t.Id == task.Id);
+            Assert(keptTask.ProjectId == project.Id && keptTask.GroupId is null,
+                "Tasks from a deleted section should move safely to the project root.");
+        });
+    }
+
     private static void WorkspaceCommandCreateTaskInCreatedSection()
     {
         WithTemporaryDirectory(directory =>
@@ -4470,6 +4541,36 @@ internal static class Program
             "Unknown parentTaskId should be rejected as a mutation error.");
 
         Assert(state.Tasks.Count == initialCount, "Rejected subtask commands must not add tasks.");
+    }
+
+    private static void WorkspaceCommandCreateDraftTaskPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-08T09:10:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var created = dispatcher.Dispatch(WorkspaceCommandJson(
+                "draft-create", "createTask",
+                new { title = "", draft = true, projectId = project.Id.ToString("N") }), now);
+            Assert(created.Success, "Explicit draft task creation should accept an empty title.");
+
+            var taskId = Guid.Parse(created.CreatedTaskId!);
+            var persistedDraft = store.Load().Tasks.Single(t => t.Id == taskId);
+            Assert(persistedDraft.Title == string.Empty && persistedDraft.IsDraft,
+                "An empty Workspace draft should persist only while marked as a draft.");
+
+            var renamed = dispatcher.Dispatch(WorkspaceCommandJson(
+                "draft-title", "updateTaskTitle",
+                new { taskId = taskId.ToString("N"), title = "Captured task" }), now);
+            Assert(renamed.Success, "Giving a draft a real title should succeed.");
+            var persistedTask = store.Load().Tasks.Single(t => t.Id == taskId);
+            Assert(persistedTask.Title == "Captured task" && !persistedTask.IsDraft,
+                "Saving a non-empty title should promote the draft to a normal task.");
+        });
     }
 
     private static void WorkspaceCommandDeleteTaskPersistence()
