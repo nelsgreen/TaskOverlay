@@ -184,11 +184,11 @@ export function TaskManager() {
             : contextTask && restoredProjectIds.includes(contextTask.projectId)
               ? contextTask.id
               : bridgedData.tasks.find((task) => restoredProjectIds.includes(task.projectId))?.id ?? null
-      const restoredMeet = context.activeTab === "timeline" && restoredTimeline?.linkedMeetId &&
+      const restoredMeet = restoredTimeline?.linkedMeetId &&
         bridgedData.meetItems.some((meeting) => meeting.id === restoredTimeline.linkedMeetId)
         ? restoredTimeline.linkedMeetId
         : null
-      const restoredTimelineItem = context.activeTab === "timeline" && (restoredTask || restoredMeet)
+      const restoredTimelineItem = restoredTask || restoredMeet
         ? restoredTimeline?.id ?? null
         : null
       // A persisted workstream id may reference a since-deleted section.
@@ -265,11 +265,18 @@ export function TaskManager() {
       const fallbackTaskId = candidates[0]?.id
       return fallbackTaskId ? { kind: "task", id: fallbackTaskId } : null
     })
-    setSelectedTimelineItemId((selected) =>
-      tab === "timeline" && selected && bridgedData.timelineItems.some((item) =>
-        item.id === selected && (!item.projectId || repairedProjectIds.includes(item.projectId)))
-        ? selected
-        : null)
+    setSelectedTimelineItemId((selected) => {
+      if (!selected) return null
+      if (tab === "timeline" && bridgedData.timelineItems.some((item) =>
+        item.id === selected && (!item.projectId || repairedProjectIds.includes(item.projectId)))) {
+        return selected
+      }
+      if (selection?.kind === "meet" && selected === `meet:${selection.id}`) {
+        const meeting = bridgedData.meetItems.find((meet) => meet.id === selection.id)
+        return meeting && repairedProjectIds.includes(meeting.projectId) ? selected : null
+      }
+      return null
+    })
     setSelectedWorkstreamId((selected) =>
       selected && bridgedData.sections.some((section) => section.id === selected)
         ? selected
@@ -335,6 +342,14 @@ export function TaskManager() {
       setSelectedProjectIds([meet.projectId])
     }
     setSelectedTimelineItemId(timelineItemId)
+    setSelection({ kind: "meet", id: meetId })
+  }
+  const selectMeet = (meetId: string) => {
+    const meet = meetItems.find((candidate) => candidate.id === meetId)
+    if (meet && !selectedProjectIds.includes(meet.projectId)) {
+      setSelectedProjectIds([meet.projectId])
+    }
+    setSelectedTimelineItemId(`meet:${meetId}`)
     setSelection({ kind: "meet", id: meetId })
   }
   // The single project used for the Tree tab (Tree is single-project by design)
@@ -1034,8 +1049,7 @@ export function TaskManager() {
           }
         : m))
     }
-    setSelection({ kind: "meet", id: meetId })
-    setSelectedTimelineItemId(null)
+    selectMeet(meetId)
   }
 
   const handleCreateMeeting = (dateKey?: string) => {
@@ -1329,10 +1343,7 @@ export function TaskManager() {
                 showDone={calendarShowDone}
                 canSchedule={connected || !bridged}
                 onSelectTask={selectTask}
-                onSelectMeet={(meetId) => {
-                  setSelection({ kind: "meet", id: meetId })
-                  setSelectedTimelineItemId(null)
-                }}
+                onSelectMeet={selectMeet}
                 onPickDay={handleCalendarPickDay}
                 onPlanTask={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
                 onMoveMeet={handleMoveMeet}
@@ -1375,6 +1386,7 @@ export function TaskManager() {
               tasks={tasks}
               onApply={handleApplyMeet}
               onDelete={handleDeleteMeet}
+              onOpenLinkedTask={selectTask}
               readOnly={readOnly}
             />
           ) : tab === "workstreams" && !selectedTask && selectedWorkstreamSection && selectedWorkstreamProject ? (

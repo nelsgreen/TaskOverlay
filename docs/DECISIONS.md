@@ -91,6 +91,8 @@ item.
   - Calendar = time allocation.
 - Timeline can display MEET as an upcoming event, but Calendar is the MEET
   planning/creation/rescheduling surface.
+- A MEET linked task is metadata/navigation only. Selecting a MEET selects the
+  MEET; opening the linked task must be an explicit action from MEET Details.
 - Workstreams are context recovery, not a Kanban/status board/Calendar.
 - Direct meeting service integrations are not MVP.
 - Basic MEET CRUD is connected through the WebView2 bridge. Recording,

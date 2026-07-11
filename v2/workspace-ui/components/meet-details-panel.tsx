@@ -12,6 +12,7 @@ interface Props {
   /** Called on every draft change — auto-apply */
   onApply: (meet: MeetItem) => void
   onDelete: (id: string) => void
+  onOpenLinkedTask?: (taskId: string) => void
   readOnly?: boolean
 }
 
@@ -67,7 +68,7 @@ function computeEndTime(start: string, dur: MeetDuration): string {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`
 }
 
-export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete, readOnly = false }: Props) {
+export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete, onOpenLinkedTask, readOnly = false }: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
   const sessionBaseRef = useRef<MeetItem | null>(meet)
 
@@ -97,6 +98,8 @@ export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete, rea
   const datePresets = getDatePresets()
   const endTime = draft.endTime || (draft.duration !== "custom" ? computeEndTime(draft.startTime, draft.duration) : "")
   const linkedTask = draft.linkedTaskId ? tasks.find((t) => t.id === draft.linkedTaskId) : null
+  const linkedProject = linkedTask ? projects.find((p) => p.id === linkedTask.projectId) : null
+  const hasMissingLinkedTask = !!draft.linkedTaskId && !linkedTask
 
   return (
     <aside className="flex h-full w-full flex-col border-l border-border bg-sidebar">
@@ -288,9 +291,28 @@ export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete, rea
               <option key={t.id} value={t.id}>{t.title}</option>
             ))}
           </select>
-          {linkedTask && (
-            <p className="mt-1 truncate text-[11px] text-muted-foreground">
-              Linked: {linkedTask.title}
+          {linkedTask ? (
+            <div className="mt-2 rounded-lg border border-border bg-card/40 p-2">
+              <div className="min-w-0">
+                <p className="truncate text-[12px] font-medium text-foreground">{linkedTask.title}</p>
+                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {linkedProject?.name ?? "Unknown project"}
+                </p>
+              </div>
+              {onOpenLinkedTask && (
+                <button
+                  type="button"
+                  onClick={() => onOpenLinkedTask(linkedTask.id)}
+                  className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <ExternalLink className="size-3" />
+                  Open task
+                </button>
+              )}
+            </div>
+          ) : hasMissingLinkedTask && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Linked task is no longer available.
             </p>
           )}
         </div>
