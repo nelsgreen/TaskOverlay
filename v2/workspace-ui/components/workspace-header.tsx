@@ -132,22 +132,52 @@ export function WorkspaceHeader({
 
   return (
     <header className="shrink-0 border-b border-border">
-      <div className="flex h-14 items-center gap-4 px-5">
-        <div className="flex min-w-0 items-center gap-2.5">
+      <div className="flex h-12 items-stretch gap-4 px-4">
+        <div className="flex shrink-0 items-center gap-2.5">
           <img
             src="./taskoverlay-mark-32.png"
             alt=""
             aria-hidden="true"
-            className="size-7 shrink-0 object-contain"
+            className="size-6 shrink-0 object-contain"
           />
-          <div className="min-w-0">
+          <div className="min-w-0 leading-tight">
             <h1 className="text-[14px] font-semibold leading-tight text-foreground">Workspace</h1>
-            <p className="truncate text-[11px] text-muted-foreground">
+            <p className="max-w-44 truncate text-[10px] text-muted-foreground">
               Main task organization surface
             </p>
           </div>
         </div>
-        <div className="relative ml-auto w-64 max-w-[40vw]">
+
+        <nav className="flex min-w-0 flex-1 items-stretch overflow-x-auto" aria-label="Workspace views">
+          {tabs.map((item) => {
+            const Icon = item.icon
+            const active = tab === item.key
+            return (
+              <button
+                type="button"
+                key={item.key}
+                onClick={() => onTabChange(item.key)}
+                className={cn(
+                  "flex h-full shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-[12px] font-medium transition-colors",
+                  active
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                  item.later && !active && "opacity-65",
+                )}
+              >
+                <Icon className="size-3.5" />
+                {item.label}
+                {item.later && (
+                  <span className="rounded bg-accent px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Later
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </nav>
+
+        <div className="relative my-auto w-56 shrink-0 max-w-[28vw]">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
@@ -159,36 +189,7 @@ export function WorkspaceHeader({
         </div>
       </div>
 
-      <nav className="flex h-10 items-end gap-0 border-t border-border/40 px-4" aria-label="Workspace views">
-        {tabs.map((item) => {
-          const Icon = item.icon
-          const active = tab === item.key
-          return (
-            <button
-              type="button"
-              key={item.key}
-              onClick={() => onTabChange(item.key)}
-              className={cn(
-                "flex h-full items-center gap-1.5 whitespace-nowrap border-b-2 px-3 text-[12px] font-medium transition-colors",
-                active
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-                item.later && !active && "opacity-65",
-              )}
-            >
-              <Icon className="size-3.5" />
-              {item.label}
-              {item.later && (
-                <span className="rounded bg-accent px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Later
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </nav>
-
-      <div className="flex h-10 items-center gap-2 border-t border-border/40 px-4">
+      <div className="flex h-9 items-center gap-2 border-t border-border/40 px-4">
         {tab === "tree" && (
           <TreeToolbar
             filter={filter}
