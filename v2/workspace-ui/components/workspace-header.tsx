@@ -45,6 +45,8 @@ interface Props {
   onCalendarStep: (dir: number) => void
   onCalendarShowDoneChange: (showDone: boolean) => void
   onCalendarViewModeChange: (mode: "day" | "week") => void
+  onCalendarAddMeeting: () => void
+  calendarAddMeetingDisabled?: boolean
   wsFilter: WorkstreamFilter
   onWsFilterChange: (filter: WorkstreamFilter) => void
   wsSummary: Record<string, number>
@@ -117,6 +119,8 @@ export function WorkspaceHeader({
   onCalendarStep,
   onCalendarShowDoneChange,
   onCalendarViewModeChange,
+  onCalendarAddMeeting,
+  calendarAddMeetingDisabled = false,
   wsFilter,
   onWsFilterChange,
   wsSummary,
@@ -217,6 +221,8 @@ export function WorkspaceHeader({
             onStep={onCalendarStep}
             onShowDoneChange={onCalendarShowDoneChange}
             onViewModeChange={onCalendarViewModeChange}
+            onAddMeeting={onCalendarAddMeeting}
+            addMeetingDisabled={calendarAddMeetingDisabled}
           />
         )}
         {tab === "workstreams" && (
@@ -404,6 +410,8 @@ function CalendarToolbar({
   onStep,
   onShowDoneChange,
   onViewModeChange,
+  onAddMeeting,
+  addMeetingDisabled,
 }: {
   selectedDate: string
   viewMode: "day" | "week"
@@ -413,6 +421,8 @@ function CalendarToolbar({
   onStep: (dir: number) => void
   onShowDoneChange: (showDone: boolean) => void
   onViewModeChange: (mode: "day" | "week") => void
+  onAddMeeting: () => void
+  addMeetingDisabled?: boolean
 }) {
   const today = todayKey()
   const isToday = selectedDate === today && viewMode === "day"
@@ -469,7 +479,7 @@ function CalendarToolbar({
         </button>
       </div>
 
-      {/* Right: Show done toggle + reserved MEET token */}
+      {/* Right: Show done toggle + MEET planning entry */}
       <div className="ml-auto flex items-center gap-3">
         <label className="flex cursor-pointer items-center gap-1.5 select-none">
           <span className="text-[11px] text-muted-foreground">Show done</span>
@@ -491,14 +501,16 @@ function CalendarToolbar({
             />
           </button>
         </label>
-        <span
-          title="MEET scheduling is not available in this build yet"
-          className="flex h-6 cursor-not-allowed items-center gap-1.5 rounded-md border border-border bg-card/50 px-2.5 text-[11px] font-medium text-muted-foreground/60"
+        <button
+          type="button"
+          onClick={onAddMeeting}
+          disabled={addMeetingDisabled}
+          title={addMeetingDisabled ? "Read-only: connect to create meetings" : "Create meeting on selected calendar date"}
+          className="flex h-6 items-center gap-1.5 rounded-md border border-status-meet/35 bg-status-meet/10 px-2.5 text-[11px] font-semibold text-status-meet transition-colors hover:bg-status-meet/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus className="size-3.5" />
           Meeting
-          <span className="rounded bg-accent px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide">Later</span>
-        </span>
+        </button>
       </div>
     </>
   )

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Folder, FolderTree, Video } from "lucide-react"
+import { Folder, FolderTree } from "lucide-react"
 import type { MeetItem, Section, Status, StatusFilterKey, TabKey, Task, TimelineItem, TreeFilter, WorkspaceTaskCommand, WorkstreamFilter } from "@/lib/types"
 import {
   initialMeetItems,
@@ -32,7 +32,7 @@ type WorkspaceSelection =
 
 const MEETING_DRAFT_ID = "meeting-draft"
 
-function createMeetingDraft(projectId: string): MeetItem {
+function createMeetingDraft(projectId: string, dateKey?: string): MeetItem {
   const now = new Date()
   now.setMinutes(Math.ceil(now.getMinutes() / 30) * 30, 0, 0)
   const pad = (value: number) => String(value).padStart(2, "0")
@@ -40,7 +40,7 @@ function createMeetingDraft(projectId: string): MeetItem {
     id: MEETING_DRAFT_ID,
     projectId,
     title: "",
-    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    date: dateKey ?? `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
     startTime: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
     duration: "30m",
   }
@@ -1013,13 +1013,14 @@ export function TaskManager() {
     }
   }
 
-  const handleCreateMeeting = () => {
+  const handleCreateMeeting = (dateKey?: string) => {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId) return
-    const draft = createMeetingDraft(projectId)
+    const draft = createMeetingDraft(projectId, dateKey)
     if (readOnly) return
     setMeetingDraft(draft)
     setSelection({ kind: "meet", id: draft.id })
+    setSelectedTimelineItemId(null)
   }
 
   useEffect(() => {
@@ -1141,6 +1142,8 @@ export function TaskManager() {
             onCalendarStep={handleCalendarStep}
             onCalendarShowDoneChange={setCalendarShowDone}
             onCalendarViewModeChange={setCalendarViewMode}
+            onCalendarAddMeeting={() => handleCreateMeeting(calendarSelectedDate)}
+            calendarAddMeetingDisabled={readOnly}
             wsFilter={wsFilter}
             onWsFilterChange={setWsFilter}
             wsSummary={wsSummary}
@@ -1274,17 +1277,6 @@ export function TaskManager() {
             )}
             {tab === "timeline" && (
               <div className="flex h-full min-h-0 flex-col">
-                {!readOnly && (
-                  <div className="flex shrink-0 justify-end border-b border-border bg-card/20 px-5 py-2">
-                    <button
-                      type="button"
-                      onClick={handleCreateMeeting}
-                      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-status-meet/30 bg-status-meet/10 px-2.5 text-[11px] font-semibold text-status-meet transition-colors hover:bg-status-meet/20"
-                    >
-                      <Video className="size-3" /> New MEET
-                    </button>
-                  </div>
-                )}
                 <div className="min-h-0 flex-1">
                   <TimelineView
                     projectIds={selectedProjectIds}
@@ -1312,7 +1304,10 @@ export function TaskManager() {
                 showDone={calendarShowDone}
                 canSchedule={connected || !bridged}
                 onSelectTask={selectTask}
-                onSelectMeet={(meetId) => setSelection({ kind: "meet", id: meetId })}
+                onSelectMeet={(meetId) => {
+                  setSelection({ kind: "meet", id: meetId })
+                  setSelectedTimelineItemId(null)
+                }}
                 onPickDay={handleCalendarPickDay}
                 onPlanTask={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
                 onClearPlanned={(taskId) => handlePlannedWork(taskId, null, null)}

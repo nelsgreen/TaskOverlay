@@ -66,7 +66,9 @@ public sealed class AppStateStore
                 TrySave(state, "Normalized state save failed.");
             }
 
-            Report($"State load succeeded with {state.Tasks.Count} tasks.");
+            Report(
+                $"State load succeeded with {state.Tasks.Count} tasks and " +
+                $"{state.Meetings.Count} meetings.");
             return state;
         }
         catch (Exception ex) when (
@@ -127,7 +129,9 @@ public sealed class AppStateStore
                 File.Move(temporaryPath, StatePath);
             }
 
-            Report($"State save succeeded with {state.Tasks.Count} tasks.");
+            Report(
+                $"State save succeeded with {state.Tasks.Count} tasks and " +
+                $"{state.Meetings.Count} meetings.");
         }
         finally
         {

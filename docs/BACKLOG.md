@@ -321,8 +321,10 @@ Active product scope:
 - MEET persists in `AppState` / `state.json`; Workspace CRUD uses the WebView2
   command -> C# service -> save -> fresh snapshot path.
 - MEET Timeline interaction is implemented:
+  - Timeline is a visual upcoming-events / attention horizon;
   - click MEET row -> MEET Details;
-  - New MEET action in Timeline.
+  - Timeline displays MEET but does not own MEET creation.
+- Calendar is the MEET planning/creation surface.
 - Default meeting duration is 30 minutes.
 - Recording, transcription, AI analysis, recurrence, calendar sync, and direct
   provider APIs remain later work.

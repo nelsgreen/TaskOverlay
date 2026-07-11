@@ -5218,6 +5218,12 @@ internal static class Program
             Assert(created.Title == "Project sync" && created.DurationMinutes == 30 &&
                    created.LinkedTaskId == task.Id,
                 "createMeeting should normalize and persist meeting fields.");
+            var createdSnapshot = WorkspaceSnapshotFactory.Create(
+                store.Load(), now, WorkspaceSnapshotFactory.ConnectedMode);
+            Assert(createdSnapshot.Meetings.Any(meeting => meeting.Id == meetingId.ToString("N")) &&
+                   createdSnapshot.TimelineItems.Any(item =>
+                       item.Kind == "MEET" && item.LinkedMeetingId == meetingId.ToString("N")),
+                "A reloaded meeting should be present in the Workspace snapshot and timeline.");
 
             var update = dispatcher.Dispatch(WorkspaceCommandJson(
                 "meet-update", "updateMeeting", new
@@ -5236,10 +5242,20 @@ internal static class Program
             Assert(updated.Title == "Updated sync" && updated.DurationMinutes == 60 &&
                    updated.ProjectId == project.Id && updated.LinkedTaskId is null && updated.Link == string.Empty,
                 "updateMeeting should preserve omitted fields and persist patched fields.");
+            var updatedSnapshot = WorkspaceSnapshotFactory.Create(
+                store.Load(), now.AddMinutes(1), WorkspaceSnapshotFactory.ConnectedMode);
+            Assert(updatedSnapshot.Meetings.Single(meeting => meeting.Id == meetingId.ToString("N")).Title ==
+                   "Updated sync",
+                "A meeting update should remain visible after reload and snapshot reconstruction.");
 
             var delete = dispatcher.Dispatch(WorkspaceCommandJson(
                 "meet-delete", "deleteMeeting", new { meetingId = meetingId.ToString("N") }), now.AddMinutes(2));
-            Assert(delete.Success && store.Load().Meetings.Count == 0,
+            var reloadedAfterDelete = store.Load();
+            var deletedSnapshot = WorkspaceSnapshotFactory.Create(
+                reloadedAfterDelete, now.AddMinutes(2), WorkspaceSnapshotFactory.ConnectedMode);
+            Assert(delete.Success && reloadedAfterDelete.Meetings.Count == 0 &&
+                   deletedSnapshot.Meetings.Count == 0 &&
+                   deletedSnapshot.TimelineItems.All(item => item.LinkedMeetingId != meetingId.ToString("N")),
                 "deleteMeeting should persist removal.");
         });
     }
@@ -5247,6 +5263,20 @@ internal static class Program
     private static void WorkspaceMeetingValidationAndRepair()
     {
         var now = DateTimeOffset.Parse("2026-07-11T10:00:00Z");
+        var validState = AppState.CreateDefault(now);
+        var validMeeting = new MeetingService(validState).Create(new MeetingUpdate(
+            validState.Projects[0].Id,
+            "Valid meeting",
+            "Agenda",
+            now.AddHours(1),
+            MeetingItem.DefaultDurationMinutes,
+            "Room 4",
+            "https://example.test/valid",
+            validState.Tasks[0].Id), now)!;
+        Assert(!StateMigrator.RepairCurrentState(validState) &&
+               validState.Meetings.Single().Id == validMeeting.Id,
+            "Repair must not remove or rewrite a valid meeting.");
+
         var state = AppState.CreateDefault(now);
         var initialCount = state.Meetings.Count;
         var invalidProject = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
