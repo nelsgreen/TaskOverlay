@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import { Bell, ChevronDown, Pin, Zap } from "lucide-react"
 import type { Project, Section, Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -13,12 +12,11 @@ interface Props {
   selectedTaskId: string | null
   onSelectTask: (id: string) => void
   taskIds?: string[]
+  collapsed: boolean
+  onCollapsedChange: (collapsed: boolean) => void
 }
 
-export function ActiveNowStrip({ tasks, projects, sections, selectedTaskId, onSelectTask, taskIds }: Props) {
-  // Session-only collapsed state (no localStorage). Persists across tab switches while mounted.
-  const [collapsed, setCollapsed] = useState(false)
-
+export function ActiveNowStrip({ tasks, projects, sections, selectedTaskId, onSelectTask, taskIds, collapsed, onCollapsedChange }: Props) {
   const bridgedIds = taskIds ? new Set(taskIds) : null
   const active = tasks.filter((t) => bridgedIds
     ? bridgedIds.has(t.id)
@@ -39,7 +37,7 @@ export function ActiveNowStrip({ tasks, projects, sections, selectedTaskId, onSe
   const Label = (
     <button
       type="button"
-      onClick={() => setCollapsed((c) => !c)}
+      onClick={() => onCollapsedChange(!collapsed)}
       aria-expanded={!collapsed}
       className="flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors hover:bg-accent/50"
     >

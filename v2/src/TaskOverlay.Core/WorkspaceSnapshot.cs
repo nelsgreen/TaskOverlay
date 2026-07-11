@@ -11,6 +11,7 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceProjectSnapshot> Projects,
     IReadOnlyList<WorkspaceSectionSnapshot> Sections,
     IReadOnlyList<WorkspaceTaskSnapshot> Tasks,
+    IReadOnlyList<WorkspaceMeetingSnapshot> Meetings,
     IReadOnlyList<WorkspaceActiveNowSnapshot> ActiveNow,
     IReadOnlyList<WorkspaceTimelineItemSnapshot> TimelineItems,
     WorkspaceContextSnapshot Context);
@@ -21,7 +22,8 @@ public sealed record WorkspaceContextSnapshot(
     string? SelectedTaskId,
     string? SelectedTimelineItemId,
     string? SelectedWorkstreamId,
-    string Filter);
+    string Filter,
+    bool ActiveNowCollapsed);
 
 public sealed record WorkspaceProjectSnapshot(
     string Id,
@@ -64,6 +66,19 @@ public sealed record WorkspaceCheckpointSnapshot(
     int SortOrder,
     DateTimeOffset? CompletedAtUtc);
 
+public sealed record WorkspaceMeetingSnapshot(
+    string Id,
+    string ProjectId,
+    string Title,
+    string Notes,
+    DateTimeOffset StartsAtUtc,
+    int DurationMinutes,
+    string Location,
+    string Link,
+    string? LinkedTaskId,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);
+
 public sealed record WorkspaceActiveNowSnapshot(
     string TaskId,
     string Kind);
@@ -74,7 +89,8 @@ public sealed record WorkspaceTimelineItemSnapshot(
     string Title,
     string ProjectId,
     string ProjectPath,
-    string LinkedTaskId,
+    string? LinkedTaskId,
+    string? LinkedMeetingId,
     DateTimeOffset OccursAtUtc,
     string? Meta);
 
@@ -95,6 +111,7 @@ public static class WorkspaceSnapshotFactory
         var sourceProjects = state.Projects ?? new List<ProjectItem>();
         var sourceGroups = state.Groups ?? new List<GroupItem>();
         var sourceTasks = state.Tasks ?? new List<TaskItem>();
+        var sourceMeetings = state.Meetings ?? new List<MeetingItem>();
         var projects = sourceProjects
             .OrderBy(project => project.SortOrder)
             .ThenBy(project => project.CreatedAtUtc)
@@ -169,6 +186,26 @@ public static class WorkspaceSnapshotFactory
             .ThenBy(context => context.Snapshot.CreatedAtUtc)
             .ToList();
         var tasks = taskContexts.Select(context => context.Snapshot).ToList();
+        var meetings = sourceMeetings
+            .Where(meeting => projectById.ContainsKey(meeting.ProjectId))
+            .OrderBy(meeting => meeting.StartsAtUtc)
+            .ThenBy(meeting => meeting.CreatedAtUtc)
+            .ThenBy(meeting => meeting.Id)
+            .Select(meeting => new WorkspaceMeetingSnapshot(
+                FormatId(meeting.Id),
+                FormatId(meeting.ProjectId),
+                meeting.Title,
+                meeting.Notes,
+                meeting.StartsAtUtc,
+                meeting.DurationMinutes,
+                meeting.Location,
+                meeting.Link,
+                meeting.LinkedTaskId is Guid linkedTaskId && taskIds.Contains(linkedTaskId)
+                    ? FormatId(linkedTaskId)
+                    : null,
+                meeting.CreatedAtUtc,
+                meeting.UpdatedAtUtc))
+            .ToList();
 
         var activeNow = taskContexts
             .Where(context =>
@@ -181,6 +218,18 @@ public static class WorkspaceSnapshotFactory
 
         var timelineItems = taskContexts
             .SelectMany(CreateTimelineItems)
+            .Concat(meetings.Select(meeting => new WorkspaceTimelineItemSnapshot(
+                $"meet:{meeting.Id}",
+                "MEET",
+                meeting.Title,
+                meeting.ProjectId,
+                projectById.TryGetValue(Guid.Parse(meeting.ProjectId), out var meetingProject)
+                    ? meetingProject.Name
+                    : ProjectItem.DefaultName,
+                meeting.LinkedTaskId,
+                meeting.Id,
+                meeting.StartsAtUtc,
+                FormatMeetingMeta(meeting))))
             .OrderBy(item => item.OccursAtUtc)
             .ThenBy(item => item.Id, StringComparer.Ordinal)
             .ToList();
@@ -195,7 +244,8 @@ public static class WorkspaceSnapshotFactory
                 : null,
             settings.SelectedTimelineItemId,
             settings.SelectedWorkstreamId,
-            ToWorkspaceFilter(settings.Filter));
+            ToWorkspaceFilter(settings.Filter),
+            settings.ActiveNowCollapsed);
 
         return new WorkspaceSnapshot(
             CurrentSchemaVersion,
@@ -204,6 +254,7 @@ public static class WorkspaceSnapshotFactory
             projects,
             sections,
             tasks,
+            meetings,
             activeNow,
             timelineItems,
             context);
@@ -282,6 +333,7 @@ public static class WorkspaceSnapshotFactory
                 context.Snapshot.ProjectId,
                 context.ProjectPath,
                 context.Snapshot.Id,
+                null,
                 reminderAt,
                 context.Snapshot.ReminderEveryMinutes is > 0
                     ? $"Repeats every {context.Snapshot.ReminderEveryMinutes}m"
@@ -297,9 +349,20 @@ public static class WorkspaceSnapshotFactory
                 context.Snapshot.ProjectId,
                 context.ProjectPath,
                 context.Snapshot.Id,
+                null,
                 deadlineAt,
                 "Task deadline");
         }
+    }
+
+    private static string FormatMeetingMeta(WorkspaceMeetingSnapshot meeting)
+    {
+        var duration = meeting.DurationMinutes % 60 == 0
+            ? $"{meeting.DurationMinutes / 60}h"
+            : $"{meeting.DurationMinutes}m";
+        return string.IsNullOrWhiteSpace(meeting.Location)
+            ? duration
+            : $"{duration} · {meeting.Location}";
     }
 
     private static IReadOnlyList<WorkspaceCheckpointSnapshot> ToCheckpointSnapshots(

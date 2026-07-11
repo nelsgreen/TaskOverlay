@@ -57,15 +57,18 @@ the backlog into a full release plan.
 
 ## MEET
 
-1. MEET persistence and Details.
-2. MEET Timeline interaction.
-3. New MEET action.
+1. MEET persistence and connected Details - implemented in the Basic MEET MVP.
+2. MEET Timeline display/navigation - implemented.
+3. MEET creation and drag/drop rescheduling from Calendar - implemented.
 4. Handle next MEET countdown.
 5. Local recording.
 6. Emergency recording.
 7. Post-meeting transcription.
 8. AI meeting analysis.
 9. Suggested tasks review/create selected.
+
+Recording, transcription, AI analysis, recurrence, calendar sync, and external
+meeting-provider APIs remain intentionally outside the Basic MEET MVP.
 
 ## Task Quality
 

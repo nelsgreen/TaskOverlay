@@ -890,7 +890,7 @@ public partial class App : System.Windows.Application
         {
             _workspaceWindow = new WorkspaceWindow(
                 _state,
-                PersistState,
+                PersistWorkspaceState,
                 RefreshTaskPresentations);
             _workspaceWindow.Closed += WorkspaceWindow_OnClosed;
         }
@@ -1429,6 +1429,26 @@ public partial class App : System.Windows.Application
     private void PersistState()
     {
         PersistState(allowDuringShutdown: false);
+    }
+
+    private void PersistWorkspaceState()
+    {
+        if (_stateWritesSuppressed || _isShuttingDown ||
+            _stateStore is null || _state is null)
+        {
+            throw new InvalidOperationException(
+                "Workspace state cannot be saved while persistence is unavailable.");
+        }
+
+        try
+        {
+            _stateStore.Save(_state);
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("Workspace state save failed.", ex);
+            throw;
+        }
     }
 
     private void PersistState(bool allowDuringShutdown)
