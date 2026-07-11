@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
 import { matchesStatusFilter } from "@/lib/status-filter"
-import { addDaysKey, isoFromLocalDateTime, todayKey } from "@/lib/calendar-date"
+import { addDaysKey, isoFromLocalDateTime, localSlotFromIso, todayKey } from "@/lib/calendar-date"
 import { WorkspaceHeader } from "./workspace-header"
 import { ProjectScopeBar } from "./project-scope-bar"
 import { TreeView } from "./tree-view"
@@ -1013,6 +1013,31 @@ export function TaskManager() {
     }
   }
 
+  const handleMoveMeet = (meetId: string, startsAtUtc: string, durationMinutes: number) => {
+    const meeting = meetItems.find((m) => m.id === meetId)
+    if (!meeting) return
+    if (connected) {
+      bridge.sendMeetingCommand({
+        type: "updateMeeting",
+        meetingId: meetId,
+        startsAtUtc,
+        durationMinutes: durationMinutes || meetDurationMinutes(meeting),
+      })
+    } else if (!bridged) {
+      const slot = localSlotFromIso(startsAtUtc)
+      if (!slot) return
+      setMockMeetItems((prev) => prev.map((m) => m.id === meetId
+        ? {
+            ...m,
+            date: slot.dateKey,
+            startTime: `${String(Math.floor(slot.minutes / 60)).padStart(2, "0")}:${String(slot.minutes % 60).padStart(2, "0")}`,
+          }
+        : m))
+    }
+    setSelection({ kind: "meet", id: meetId })
+    setSelectedTimelineItemId(null)
+  }
+
   const handleCreateMeeting = (dateKey?: string) => {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId) return
@@ -1310,6 +1335,7 @@ export function TaskManager() {
                 }}
                 onPickDay={handleCalendarPickDay}
                 onPlanTask={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
+                onMoveMeet={handleMoveMeet}
                 onClearPlanned={(taskId) => handlePlannedWork(taskId, null, null)}
               />
             )}

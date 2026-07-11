@@ -90,7 +90,7 @@ item.
   - Timeline = attention/risk horizon.
   - Calendar = time allocation.
 - Timeline can display MEET as an upcoming event, but Calendar is the MEET
-  planning/creation surface.
+  planning/creation/rescheduling surface.
 - Workstreams are context recovery, not a Kanban/status board/Calendar.
 - Direct meeting service integrations are not MVP.
 - Basic MEET CRUD is connected through the WebView2 bridge. Recording,

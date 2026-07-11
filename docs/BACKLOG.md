@@ -324,7 +324,8 @@ Active product scope:
   - Timeline is a visual upcoming-events / attention horizon;
   - click MEET row -> MEET Details;
   - Timeline displays MEET but does not own MEET creation.
-- Calendar is the MEET planning/creation surface.
+- Calendar is the MEET planning/creation surface, including visual
+  drag/drop rescheduling through the connected `updateMeeting` path.
 - Default meeting duration is 30 minutes.
 - Recording, transcription, AI analysis, recurrence, calendar sync, and direct
   provider APIs remain later work.

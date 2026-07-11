@@ -48,7 +48,9 @@ interface Block {
   location?: string; hasLink?: boolean; status?: Status; selected: boolean
 }
 interface Marker { key: string; kind: "REMIND" | "DEADLINE"; title: string; projectId: string; min: number; taskId: string; selected: boolean }
-type DragState = { taskId: string; source: "pool" | "block"; duration: number }
+type DragState =
+  | { kind: "TASK"; taskId: string; source: "pool" | "block"; duration: number }
+  | { kind: "MEET"; meetId: string; duration: number }
 
 const STATUS_STYLES: Record<Status, { bg: string; text: string; label: string }> = {
   FOCUS: { bg: "bg-status-focus/15", text: "text-status-focus", label: "Focus" },
@@ -83,13 +85,14 @@ interface CalendarViewProps {
   onSelectTask: (taskId: string) => void; onSelectMeet: (meetId: string) => void
   onPickDay: (dateKey: string) => void
   onPlanTask: (taskId: string, plannedStartAtUtc: string, plannedDurationMinutes: number) => void
+  onMoveMeet: (meetId: string, startsAtUtc: string, durationMinutes: number) => void
   onClearPlanned: (taskId: string) => void
 }
 
 export function CalendarView({
   viewMode, selectedDate, projects, sections, tasks, meetItems,
   selectedProjectIds, selectedTaskId, selectedMeetId, showDone, canSchedule,
-  onSelectTask, onSelectMeet, onPickDay, onPlanTask, onClearPlanned,
+  onSelectTask, onSelectMeet, onPickDay, onPlanTask, onMoveMeet, onClearPlanned,
 }: CalendarViewProps) {
   const today = todayKey()
   const [nowMin, setNowMin] = useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes() })
@@ -145,18 +148,26 @@ export function CalendarView({
 
   // ─── Drag model ───────────────────────────────────────────────────────────
   const startPoolDrag = (e: React.DragEvent, taskId: string) => {
-    dragRef.current = { taskId, source: "pool", duration: DEFAULT_DURATION }
+    dragRef.current = { kind: "TASK", taskId, source: "pool", duration: DEFAULT_DURATION }
     e.dataTransfer.effectAllowed = "copyMove"; e.dataTransfer.setData("text/plain", taskId)
   }
-  const startBlockDrag = (e: React.DragEvent, taskId: string, duration: number) => {
-    dragRef.current = { taskId, source: "block", duration }
-    e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", taskId)
+  const startBlockDrag = (e: React.DragEvent, block: Block) => {
+    const duration = block.endMin - block.startMin
+    if (block.kind === "MEET") {
+      if (!block.meetId) return
+      dragRef.current = { kind: "MEET", meetId: block.meetId, duration }
+      e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", block.meetId)
+      return
+    }
+    if (!block.taskId) return
+    dragRef.current = { kind: "TASK", taskId: block.taskId, source: "block", duration }
+    e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", block.taskId)
   }
   const minFromRect = (rect: DOMRect, clientY: number) => clamp(snapTo(START_MIN + (clientY - rect.top) / PX_PER_MIN, SNAP_MIN), START_MIN, END_MIN - MIN_DURATION)
 
   const onDayDragOver = (e: React.DragEvent) => {
     if (!dragRef.current || !gridRef.current) return
-    e.preventDefault(); e.dataTransfer.dropEffect = dragRef.current.source === "block" ? "move" : "copy"
+    e.preventDefault(); e.dataTransfer.dropEffect = dragRef.current.kind === "TASK" && dragRef.current.source === "pool" ? "copy" : "move"
     const startMin = minFromRect(gridRef.current.getBoundingClientRect(), e.clientY)
     setGhost({ startMin, endMin: clamp(startMin + dragRef.current.duration, START_MIN, END_MIN) })
   }
@@ -165,14 +176,20 @@ export function CalendarView({
     const d = dragRef.current; dragRef.current = null; setGhost(null)
     if (!d || !canSchedule || !gridRef.current) return
     const startMin = minFromRect(gridRef.current.getBoundingClientRect(), e.clientY)
-    onPlanTask(d.taskId, isoFromLocalDateTime(selectedDate, Math.floor(startMin / 60), startMin % 60), d.duration)
+    const startsAtUtc = isoFromLocalDateTime(selectedDate, Math.floor(startMin / 60), startMin % 60)
+    if (d.kind === "MEET") {
+      onMoveMeet(d.meetId, startsAtUtc, d.duration)
+      onSelectMeet(d.meetId)
+      return
+    }
+    onPlanTask(d.taskId, startsAtUtc, d.duration)
     onSelectTask(d.taskId)
     if (d.source === "pool") setNewBlock({ taskId: d.taskId, startMin })
   }
   const onColumnDragOver = (e: React.DragEvent, dayIso: string) => {
     if (!dragRef.current || !canSchedule) return
     e.preventDefault()
-    e.dataTransfer.dropEffect = dragRef.current.source === "block" ? "move" : "copy"
+    e.dataTransfer.dropEffect = dragRef.current.kind === "TASK" && dragRef.current.source === "pool" ? "copy" : "move"
     const startMin = minFromRect((e.currentTarget as HTMLElement).getBoundingClientRect(), e.clientY)
     setWeekGhost({ dayIso, startMin, endMin: clamp(startMin + dragRef.current.duration, START_MIN, END_MIN) })
   }
@@ -181,7 +198,13 @@ export function CalendarView({
     const d = dragRef.current; dragRef.current = null; setWeekGhost(null)
     if (!d || !canSchedule) return
     const startMin = minFromRect((e.currentTarget as HTMLElement).getBoundingClientRect(), e.clientY)
-    onPlanTask(d.taskId, isoFromLocalDateTime(dayIso, Math.floor(startMin / 60), startMin % 60), d.duration)
+    const startsAtUtc = isoFromLocalDateTime(dayIso, Math.floor(startMin / 60), startMin % 60)
+    if (d.kind === "MEET") {
+      onMoveMeet(d.meetId, startsAtUtc, d.duration)
+      onSelectMeet(d.meetId)
+      return
+    }
+    onPlanTask(d.taskId, startsAtUtc, d.duration)
     onSelectTask(d.taskId)
   }
   // Cleanup when a drag ends anywhere (including cancel/drop outside a target).
@@ -189,7 +212,7 @@ export function CalendarView({
   const onPoolDrop = (e: React.DragEvent) => {
     e.preventDefault(); setPoolDropActive(false)
     const d = dragRef.current; dragRef.current = null
-    if (d?.source === "block" && canSchedule) onClearPlanned(d.taskId)
+    if (d?.kind === "TASK" && d.source === "block" && canSchedule) onClearPlanned(d.taskId)
   }
 
   useEffect(() => {
@@ -220,7 +243,7 @@ export function CalendarView({
       <div
         className={cn("relative flex shrink-0 flex-col border-r border-border bg-sidebar/40", poolDropActive && "bg-primary/5")}
         style={{ width: poolWidth }}
-        onDragOver={(e) => { if (dragRef.current?.source === "block") { e.preventDefault(); setPoolDropActive(true) } }}
+        onDragOver={(e) => { if (dragRef.current?.kind === "TASK" && dragRef.current.source === "block") { e.preventDefault(); setPoolDropActive(true) } }}
         onDragLeave={() => setPoolDropActive(false)}
         onDrop={onPoolDrop}
       >
@@ -308,7 +331,7 @@ function DayGrid({
   ghost: { startMin: number; endMin: number } | null; newBlock: { taskId: string; startMin: number } | null
   gridRef: React.RefObject<HTMLDivElement | null>
   onDayDragOver: (e: React.DragEvent) => void; onDayDragLeave: () => void; onDayDrop: (e: React.DragEvent) => void
-  onStartBlockDrag: (e: React.DragEvent, taskId: string, duration: number) => void; onDragCleanup: () => void
+  onStartBlockDrag: (e: React.DragEvent, block: Block) => void; onDragCleanup: () => void
   onSelectTask: (id: string) => void; onSelectMeet: (id: string) => void; onClearPlanned: (taskId: string) => void
   onResize: (taskId: string, startMin: number, endMin: number) => void
   onApplyDuration: (taskId: string, startMin: number, durMin: number) => void
@@ -387,13 +410,13 @@ function DayGrid({
             const height = Math.max(28, (clamp(b.endMin, START_MIN, END_MIN) - clamp(b.startMin, START_MIN, END_MIN)) * PX_PER_MIN)
             const widthPct = 100 / b.cols; const isMeet = b.kind === "MEET"; const st = b.status ? STATUS_STYLES[b.status] : null
             const isNew = b.kind === "WORK" && newBlock?.taskId === b.taskId
-            const draggable = b.kind === "WORK" && canSchedule && !resizing
+            const draggable = canSchedule && !resizing && (b.kind === "WORK" || b.kind === "MEET")
             return (
               <div key={b.key} className="group absolute" style={{ top, height, left: `calc(${b.col * widthPct}% + ${b.col * 4}px)`, width: `calc(${widthPct}% - 4px)` }}>
                 <button
                   type="button"
                   draggable={draggable}
-                  onDragStart={(e) => onStartBlockDrag(e, b.taskId!, b.endMin - b.startMin)}
+                  onDragStart={(e) => onStartBlockDrag(e, b)}
                   onDragEnd={onDragCleanup}
                   onClick={() => (isMeet ? onSelectMeet(b.meetId!) : onSelectTask(b.taskId!))}
                   className={cn("absolute inset-0 overflow-hidden rounded-lg border text-left transition-colors",
@@ -464,7 +487,7 @@ function WeekGrid({
   weekGhost: { dayIso: string; startMin: number; endMin: number } | null
   onColumnDragOver: (e: React.DragEvent, dayIso: string) => void
   onColumnDrop: (e: React.DragEvent, dayIso: string) => void
-  onStartBlockDrag: (e: React.DragEvent, taskId: string, duration: number) => void; onDragCleanup: () => void
+  onStartBlockDrag: (e: React.DragEvent, block: Block) => void; onDragCleanup: () => void
   onSelectTask: (id: string) => void; onSelectMeet: (id: string) => void; onPickDay: (dateKey: string) => void
 }) {
   const days = weekDayKeys(mondayOfWeekKey(selectedDate))
@@ -507,9 +530,9 @@ function WeekGrid({
                   const p = projectMap.get(b.projectId); const isMeet = b.kind === "MEET"
                   const top = (clamp(b.startMin, START_MIN, END_MIN) - START_MIN) * PX_PER_MIN
                   const height = Math.max(16, (clamp(b.endMin, START_MIN, END_MIN) - clamp(b.startMin, START_MIN, END_MIN)) * PX_PER_MIN)
-                  const widthPct = 100 / b.cols; const draggable = b.kind === "WORK" && canSchedule
+                  const widthPct = 100 / b.cols; const draggable = canSchedule && (b.kind === "WORK" || b.kind === "MEET")
                   return (
-                    <button key={b.key} type="button" draggable={draggable} onDragStart={(e) => onStartBlockDrag(e, b.taskId!, b.endMin - b.startMin)} onDragEnd={onDragCleanup} onClick={() => (isMeet ? onSelectMeet(b.meetId!) : onSelectTask(b.taskId!))} title={`${b.title} · ${fmtMin(b.startMin)}–${fmtMin(b.endMin)}`}
+                    <button key={b.key} type="button" draggable={draggable} onDragStart={(e) => onStartBlockDrag(e, b)} onDragEnd={onDragCleanup} onClick={() => (isMeet ? onSelectMeet(b.meetId!) : onSelectTask(b.taskId!))} title={`${b.title} · ${fmtMin(b.startMin)}–${fmtMin(b.endMin)}`}
                       className={cn("absolute overflow-hidden rounded border px-1 py-0.5 text-left transition-colors",
                         isMeet ? (b.selected ? "border-status-meet/70 bg-status-meet/25 ring-1 ring-status-meet/50" : "border-status-meet/40 bg-status-meet/15 hover:bg-status-meet/25") : (b.selected ? "bg-card ring-1 ring-primary/50" : "bg-card hover:bg-accent/60"),
                         draggable && "cursor-grab active:cursor-grabbing", b.status === "DONE" && "opacity-60")}

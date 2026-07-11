@@ -5248,11 +5248,39 @@ internal static class Program
                    "Updated sync",
                 "A meeting update should remain visible after reload and snapshot reconstruction.");
 
+            var move = dispatcher.Dispatch(WorkspaceCommandJson(
+                "meet-move", "updateMeeting", new
+                {
+                    meetingId = meetingId.ToString("N"),
+                    startsAtUtc = "2026-07-14T13:15:00Z",
+                    durationMinutes = 60
+                }), now.AddMinutes(2));
+            Assert(move.Success, "updateMeeting should accept a Calendar reschedule patch.");
+            var moved = store.Load().Meetings.Single(meeting => meeting.Id == meetingId);
+            Assert(moved.StartsAtUtc == DateTimeOffset.Parse("2026-07-14T13:15:00Z") &&
+                   moved.DurationMinutes == 60 &&
+                   moved.Title == "Updated sync" &&
+                   moved.ProjectId == project.Id &&
+                   moved.Notes == "Updated agenda" &&
+                   moved.Location == "Online" &&
+                   moved.Link == string.Empty &&
+                   moved.LinkedTaskId is null,
+                "Calendar reschedule should update time and preserve meeting metadata.");
+            var movedSnapshot = WorkspaceSnapshotFactory.Create(
+                store.Load(), now.AddMinutes(2), WorkspaceSnapshotFactory.ConnectedMode);
+            Assert(movedSnapshot.Meetings.Single(meeting => meeting.Id == meetingId.ToString("N")).StartsAtUtc ==
+                   DateTimeOffset.Parse("2026-07-14T13:15:00Z") &&
+                   movedSnapshot.TimelineItems.Single(item =>
+                       item.Kind == "MEET" &&
+                       item.LinkedMeetingId == meetingId.ToString("N")).OccursAtUtc ==
+                   DateTimeOffset.Parse("2026-07-14T13:15:00Z"),
+                "Workspace snapshot and MEET timeline item should reflect the rescheduled time after reload.");
+
             var delete = dispatcher.Dispatch(WorkspaceCommandJson(
-                "meet-delete", "deleteMeeting", new { meetingId = meetingId.ToString("N") }), now.AddMinutes(2));
+                "meet-delete", "deleteMeeting", new { meetingId = meetingId.ToString("N") }), now.AddMinutes(3));
             var reloadedAfterDelete = store.Load();
             var deletedSnapshot = WorkspaceSnapshotFactory.Create(
-                reloadedAfterDelete, now.AddMinutes(2), WorkspaceSnapshotFactory.ConnectedMode);
+                reloadedAfterDelete, now.AddMinutes(3), WorkspaceSnapshotFactory.ConnectedMode);
             Assert(delete.Success && reloadedAfterDelete.Meetings.Count == 0 &&
                    deletedSnapshot.Meetings.Count == 0 &&
                    deletedSnapshot.TimelineItems.All(item => item.LinkedMeetingId != meetingId.ToString("N")),

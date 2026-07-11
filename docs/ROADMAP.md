@@ -59,7 +59,7 @@ the backlog into a full release plan.
 
 1. MEET persistence and connected Details - implemented in the Basic MEET MVP.
 2. MEET Timeline display/navigation - implemented.
-3. MEET creation from Calendar - implemented.
+3. MEET creation and drag/drop rescheduling from Calendar - implemented.
 4. Handle next MEET countdown.
 5. Local recording.
 6. Emergency recording.
