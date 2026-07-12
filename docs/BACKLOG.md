@@ -483,8 +483,41 @@ Active product scope:
     added for PR #58 (previously only checked that the MEET existed);
   - MEET's linked task (`MeetItem.linkedTaskId`) stays untouched - still
     metadata/navigation only, not part of ContextHUB linking.
+- Context Pack export (done): deterministic markdown export/copy for Claude/
+  ChatGPT/Codex, generated entirely from stored TaskOverlay data. Export/copy
+  only - no AI, no external API calls, no automatic analysis, no task/MEET
+  creation, no AppState mutation.
+  - `lib/context-pack-builder.ts` - pure, framework-free TypeScript functions
+    (`buildProjectContextPack`, `buildTaskContextPack`,
+    `buildMeetingContextPack`, plus a `buildContextPack(mode, ...)`
+    dispatcher). Input is exactly projects/sections/tasks/meetings/
+    ContextSources/ContextItems already in the Workspace snapshot - the
+    function signatures make it structurally impossible to pass in the
+    Telegram bot token, allowed user id, or any other protected setting;
+  - deprecated/superseded ContextItems are excluded by default; every other
+    section (decisions, requirements/constraints, blockers, open questions,
+    risks, action items, project facts/notes) is always printed with a
+    "None recorded." fallback rather than silently omitted, so the pack
+    structure stays predictable even for an empty project;
+  - source previews and item/task/MEET notes are truncated to a readable
+    length (`... [truncated]`) rather than dropped or left unbounded;
+  - `components/context-pack-modal.tsx` - shared read-only preview + Copy
+    markdown button, with a text-selection fallback if the Clipboard API
+    fails (never silently fails with no feedback);
+  - "Context Pack" button in the ContextHUB toolbar generates the Project
+    pack for the single selected project; requires exactly one project
+    selected (same "Select one project" gating already used for
+    Workstreams) and stays enabled in read-only mode since it never
+    mutates state;
+  - "Context Pack" action added to the shared `RecordContextBlock` (Task
+    Details and MEET Details Context blocks) generates a focused pack for
+    the selected task/MEET, including its own linked context plus a
+    same-project "Relevant project memory" summary;
+  - every generated pack ends with an explicit "Excluded / omitted" section
+    stating it only reflects stored TaskOverlay data - not ChatGPT/Claude
+    history, not un-imported Telegram messages, not the bot token/allowed
+    user id/protected settings.
 - Later ContextHUB work, explicitly not in this PR:
-  - Project Context Pack export/copy (PR 3);
   - manual source import polish;
   - OpenAI meeting analysis writing drafts into ContextHUB after user review;
   - transcription provider output as `SourceDocument`;

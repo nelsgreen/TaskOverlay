@@ -6,6 +6,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   Database,
   FileText,
   Flag,
@@ -58,6 +59,10 @@ interface Props {
   onAddContextItem: () => void
   onAddContextSource: () => void
   addContextDisabled?: boolean
+  /** Read-only export/copy — always enabled, even when addContextDisabled (read-only mode). */
+  onContextPack: () => void
+  contextPackDisabled?: boolean
+  contextPackHint?: string | null
 }
 
 const tabs: { key: TabKey; label: string; icon: typeof FolderTree; later?: boolean }[] = [
@@ -136,6 +141,9 @@ export function WorkspaceHeader({
   onAddContextItem,
   onAddContextSource,
   addContextDisabled = false,
+  onContextPack,
+  contextPackDisabled = false,
+  contextPackHint = null,
 }: Props) {
   const searchDisabled = tab === "calendar"
 
@@ -250,6 +258,9 @@ export function WorkspaceHeader({
             onAddContextItem={onAddContextItem}
             onAddContextSource={onAddContextSource}
             addDisabled={addContextDisabled}
+            onContextPack={onContextPack}
+            contextPackDisabled={contextPackDisabled}
+            contextPackHint={contextPackHint}
           />
         )}
       </div>
@@ -261,10 +272,16 @@ function ContextHubToolbar({
   onAddContextItem,
   onAddContextSource,
   addDisabled,
+  onContextPack,
+  contextPackDisabled,
+  contextPackHint,
 }: {
   onAddContextItem: () => void
   onAddContextSource: () => void
   addDisabled?: boolean
+  onContextPack: () => void
+  contextPackDisabled?: boolean
+  contextPackHint?: string | null
 }) {
   return (
     <>
@@ -272,6 +289,16 @@ function ContextHubToolbar({
         Project memory: decisions, blockers, questions, and their sources
       </span>
       <div className="ml-auto flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onContextPack}
+          disabled={contextPackDisabled}
+          title={contextPackDisabled ? contextPackHint ?? undefined : "Copy a markdown context pack for Claude/ChatGPT/Codex"}
+          className="flex h-6 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ClipboardList className="size-3.5" />
+          Context Pack
+        </button>
         <button
           type="button"
           onClick={onAddContextSource}

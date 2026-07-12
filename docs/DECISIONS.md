@@ -123,7 +123,8 @@ item.
   anything is created.
 - Context Pack is a read-only export generated from stored TaskOverlay data;
   deprecated/superseded items are excluded by default. Not shipped in the
-  foundation PR.
+  foundation PR (expanded export shipped later - see the Context Pack entry
+  below).
 - Modal-based creation (Add Source / Add Context) worked well in v0 and may be
   considered for future large editors; Task/MEET editors are not being
   redesigned around modals for now.
@@ -174,6 +175,52 @@ item.
 - `MeetItem.linkedTaskId` (the single optional Task a MEET can point to) is
   unrelated to ContextHUB linking and is not touched by this PR - it remains
   metadata/navigation only, exactly as before.
+- Context Pack export (done): three deterministic markdown builders
+  (`buildProjectContextPack`, `buildTaskContextPack`,
+  `buildMeetingContextPack` in `lib/context-pack-builder.ts`) generate a
+  pack for Claude/ChatGPT/Codex from stored TaskOverlay data only. This is
+  export/copy, not persistence: it never calls the bridge, never mutates
+  AppState, and makes no network calls.
+- The builder is pure and framework-free by construction: its input types
+  are exactly the Workspace snapshot shapes (`Project`, `Section`, `Task`,
+  `MeetItem`, `WorkspaceContextSourceSnapshot`, `WorkspaceContextItemSnapshot`)
+  - there is no parameter through which the Telegram bot token, the allowed
+    user id, or any other protected setting could reach the generated
+    markdown, because those types are never passed in. This is enforced by
+    the type signatures, not by a runtime redaction step.
+- Deprecated/superseded ContextItems are excluded by default, same as the
+  ContextHUB foundation's existing convention; every section still prints
+  ("None recorded.") rather than being silently omitted, so a Context Pack
+  for an empty or lightly-populated project remains structurally
+  predictable.
+- Long text (source previews, ContextItem bodies, Task notes, MEET notes) is
+  truncated to a readable length with an explicit "... [truncated]" marker -
+  never silently cut with no indication, and titles/statuses/links are never
+  dropped to make room.
+- The "Context Pack" button in the ContextHUB toolbar requires exactly one
+  concrete project selected (reusing the "select one project" gating already
+  used for creating a Workstream) rather than operating on "All" projects at
+  once - a pack is scoped to a single project by design. Unlike the create
+  actions in that same toolbar, it stays enabled in read-only mode, since
+  generating and copying a pack is not a mutation.
+- Task/MEET Context Pack actions are added to the existing shared
+  `RecordContextBlock` (see the MEET Context block entry above) as one more
+  optional action alongside Link existing/Unlink/Open ContextHUB, rather
+  than as a separate component - this is the same block already used by both
+  Task Details and MEET Details, so both get the export for free.
+- `components/context-pack-modal.tsx` is shared by all three entry points
+  (Project/Task/MEET). If the Clipboard API throws or is unavailable, the
+  text stays selected in the preview and the modal shows "Copy failed -
+  select text manually" rather than failing silently.
+- No JS test runner exists in `v2/workspace-ui` (still true as of the
+  ContextHUB linked task picker PR #59); consistent with that precedent, no
+  new test framework was introduced. The builder was verified with a
+  throwaway manual script (compiled via `tsc`, run with plain `node` against
+  a fabricated multi-project dataset) covering project scoping, deprecated/
+  superseded exclusion, DONE-task exclusion from "linked active tasks",
+  Telegram-sourced captures, empty-project output, and truncation - not
+  committed to the repo, since it is not an automated regression test the
+  project can run in CI.
 
 ## Telegram Capture
 

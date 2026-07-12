@@ -111,7 +111,15 @@ meeting-provider APIs remain intentionally outside the Basic MEET MVP.
    picker (i.e. redesigning the "Linked task" dropdown inside MEET Details)
    is not part of this slice - only #59's ContextHUB Details task picker was
    in scope there.
-4. Project Context Pack export/copy.
+4. Context Pack export/copy - done: deterministic markdown export for
+   Claude/ChatGPT/Codex, generated from stored TaskOverlay data only
+   (`lib/context-pack-builder.ts`, `context-pack-modal.tsx`). Three entry
+   points: "Context Pack" in the ContextHUB toolbar (Project pack, requires
+   one project selected), and a "Context Pack" action in the shared Task/
+   MEET Context block (focused Task/MEET pack including linked context and
+   same-project active decisions/blockers/open questions). Export/copy
+   only - no AI, no external API calls, no automatic analysis, no task/MEET
+   creation, no AppState mutation.
 5. Manual source import polish.
 6. Later: OpenAI meeting analysis, transcription output, Telegram capture -
    all writing drafts for explicit user review, never auto-creating.
