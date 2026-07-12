@@ -157,6 +157,24 @@ item.
 - Plain text and command captures create raw capture / SourceDocument drafts
   for user review. Voice, transcription, AI interpretation, and automatic
   final task/MEET creation are later work.
+- PR 3 (done) adds status/diagnostics, not new capture behavior: a volatile,
+  non-secret `TelegramCaptureDiagnostics` snapshot in `TaskOverlay.Core`
+  reports one of `NotConfigured` / `Disabled` / `Running` /
+  `WaitingForMessages` / `TokenError` / `NetworkError` / `Error`, plus poll
+  timestamps, the last processed update id, a redacted error summary, and a
+  consecutive-error count. It is deliberately small; do not grow the status
+  taxonomy without a concrete need.
+- Diagnostics are kept in memory only (they reset on restart by design) and
+  are surfaced in Settings -> Telegram Capture; the persisted cursor
+  (`LastUpdateId`) is unchanged. `TelegramCaptureDiagnosticsRedactor` strips
+  anything token-shaped from diagnostics text as defense in depth; nothing
+  here changes token storage, the SourceDocument model, or polling filter
+  semantics from PR 2.
+- "Check now" (manual poll) stops the background loop, performs one
+  immediate getUpdates call, then resyncs the loop to current settings. It
+  never runs concurrently with the loop's own long poll, because concurrent
+  getUpdates calls for the same bot token can make Telegram terminate one of
+  them - manual checks must not destabilize normal polling.
 
 ## Sync And Platform
 

@@ -894,6 +894,30 @@ public partial class App : System.Windows.Application
         ShowAndActivateWindow(_treeManagerWindow);
     }
 
+    /// <summary>
+    /// Opens Workspace on the ContextHUB tab so a user checking Telegram
+    /// Capture status can jump straight to captured SourceDocuments. Only
+    /// preselects the tab when Workspace has not been created yet this
+    /// session; once hydrated, React owns tab selection and an external
+    /// snapshot push never overrides the user's current tab (see
+    /// WorkspaceWindow.RefreshFromExternalChange), so this simply
+    /// shows/activates the existing window instead of forcing a tab switch.
+    /// </summary>
+    private void OpenContextHubFromSettings()
+    {
+        if (_isShuttingDown || _state is null)
+        {
+            return;
+        }
+
+        if (_workspaceWindow is null)
+        {
+            _state.WorkspaceSettings.ActiveTab = WorkspaceTab.ContextHub;
+        }
+
+        ShowWorkspace();
+    }
+
     private void ShowWorkspace()
     {
         if (_isShuttingDown)
@@ -1026,7 +1050,10 @@ public partial class App : System.Windows.Application
                 HasTelegramToken,
                 SaveTelegramToken,
                 ClearTelegramToken,
-                TestTelegramConnectionAsync),
+                TestTelegramConnectionAsync,
+                GetTelegramCaptureDiagnostics,
+                PollTelegramNowAsync,
+                OpenContextHubFromSettings),
             active => _overlayWindow?.SetModalInteractionActive(active));
         _utilityShellWindow.ActiveTabChanged += UtilityShellWindow_OnActiveTabChanged;
         _utilityShellWindow.Closed += UtilityShellWindow_OnClosed;
@@ -1184,16 +1211,16 @@ public partial class App : System.Windows.Application
     /// AppState mutation (RunCommand, task edits, etc.) and the polling loop
     /// blocks until the cursor is persisted before requesting the next batch.
     /// </summary>
-    private void ApplyTelegramCaptures(IReadOnlyList<TelegramIncomingUpdate> updates)
+    private TelegramCaptureApplyResult ApplyTelegramCaptures(IReadOnlyList<TelegramIncomingUpdate> updates)
     {
-        Dispatcher.Invoke(() => ApplyTelegramCapturesOnUiThread(updates));
+        return Dispatcher.Invoke(() => ApplyTelegramCapturesOnUiThread(updates));
     }
 
-    private void ApplyTelegramCapturesOnUiThread(IReadOnlyList<TelegramIncomingUpdate> updates)
+    private TelegramCaptureApplyResult ApplyTelegramCapturesOnUiThread(IReadOnlyList<TelegramIncomingUpdate> updates)
     {
         if (_isShuttingDown || _state is null)
         {
-            return;
+            return new TelegramCaptureApplyResult(CapturedCount: 0, LastProcessedUpdateId: 0);
         }
 
         var settings = GetTelegramCaptureSettings();
@@ -1217,6 +1244,28 @@ public partial class App : System.Windows.Application
 
         _diagnostics?.Log(
             $"Telegram Capture batch processed: total={results.Count}; captured={capturedCount}.");
+        return new TelegramCaptureApplyResult(capturedCount, newLastUpdateId);
+    }
+
+    private TelegramCaptureDiagnostics GetTelegramCaptureDiagnostics()
+    {
+        if (_telegramPollingService is null || _state is null)
+        {
+            return TelegramCaptureDiagnostics.Empty;
+        }
+
+        var settings = GetTelegramCaptureSettings();
+        return _telegramPollingService.GetDiagnostics(
+            settings.Enabled,
+            HasTelegramToken(),
+            settings.AllowedUserId.HasValue);
+    }
+
+    private Task<TelegramPollNowResult> PollTelegramNowAsync()
+    {
+        return _telegramPollingService is null
+            ? Task.FromResult(TelegramPollNowResult.Skipped("Telegram Capture polling is not available."))
+            : _telegramPollingService.PollNowAsync();
     }
 
     private bool HasTelegramToken() => _telegramTokenStore?.HasToken() == true;

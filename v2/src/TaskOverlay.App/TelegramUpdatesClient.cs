@@ -14,13 +14,16 @@ namespace TaskOverlay.App;
 public sealed record TelegramGetUpdatesOutcome(
     bool Succeeded,
     IReadOnlyList<TelegramIncomingUpdate> Updates,
-    string Message)
+    string Message,
+    TelegramPollOutcomeKind? FailureKind)
 {
     public static TelegramGetUpdatesOutcome Success(IReadOnlyList<TelegramIncomingUpdate> updates) =>
-        new(true, updates, string.Empty);
+        new(true, updates, string.Empty, null);
 
-    public static TelegramGetUpdatesOutcome Fail(string message) =>
-        new(false, Array.Empty<TelegramIncomingUpdate>(), message);
+    public static TelegramGetUpdatesOutcome Fail(
+        string message,
+        TelegramPollOutcomeKind kind = TelegramPollOutcomeKind.Error) =>
+        new(false, Array.Empty<TelegramIncomingUpdate>(), message, kind);
 }
 
 /// <summary>
@@ -78,8 +81,11 @@ public sealed class TelegramUpdatesClient : ITelegramUpdatesClient
                 cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                var statusCode = (int)response.StatusCode;
+                var isTokenFailure = statusCode is 401 or 403 or 404;
                 return TelegramGetUpdatesOutcome.Fail(
-                    $"Telegram getUpdates failed: {(int)response.StatusCode} {response.ReasonPhrase}.");
+                    $"Telegram getUpdates failed: {statusCode} {response.ReasonPhrase}.",
+                    isTokenFailure ? TelegramPollOutcomeKind.TokenError : TelegramPollOutcomeKind.Error);
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -101,14 +107,17 @@ public sealed class TelegramUpdatesClient : ITelegramUpdatesClient
             // Let the polling loop distinguish a clean shutdown/timeout from a real failure.
             throw;
         }
-        catch (Exception ex) when (
-            ex is HttpRequestException or
-            JsonException or
-            IOException or
-            NotSupportedException)
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
             return TelegramGetUpdatesOutcome.Fail(
-                $"Telegram getUpdates failed: {ex.GetType().Name}.");
+                $"Telegram getUpdates failed: {ex.GetType().Name}.",
+                TelegramPollOutcomeKind.NetworkError);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            return TelegramGetUpdatesOutcome.Fail(
+                $"Telegram getUpdates failed: {ex.GetType().Name}.",
+                TelegramPollOutcomeKind.Error);
         }
     }
 

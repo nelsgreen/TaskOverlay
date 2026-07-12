@@ -128,6 +128,19 @@ internal static class Program
             ("telegram capture duplicate update id not processed twice", TelegramCaptureDuplicateUpdateIdNotProcessedTwice),
             ("telegram capture save failure preserves prior progress", TelegramCaptureSaveFailurePreservesPriorProgress),
             ("telegram capture unresolved project hint preserved", TelegramCaptureUnresolvedProjectHintPreserved),
+            ("telegram capture redactor strips token url", TelegramCaptureRedactorStripsTokenUrl),
+            ("telegram capture redactor strips bare token", TelegramCaptureRedactorStripsBareToken),
+            ("telegram capture redactor passes through safe messages", TelegramCaptureRedactorPassesThroughSafeMessages),
+            ("telegram capture redactor truncates long messages", TelegramCaptureRedactorTruncatesLongMessages),
+            ("telegram capture redactor handles empty input", TelegramCaptureRedactorHandlesEmptyInput),
+            ("telegram capture status not configured", TelegramCaptureStatusNotConfigured),
+            ("telegram capture status disabled", TelegramCaptureStatusDisabled),
+            ("telegram capture status running before first success", TelegramCaptureStatusRunningBeforeFirstSuccess),
+            ("telegram capture status waiting for messages", TelegramCaptureStatusWaitingForMessages),
+            ("telegram capture status token error takes precedence", TelegramCaptureStatusTokenErrorTakesPrecedence),
+            ("telegram capture status network error", TelegramCaptureStatusNetworkError),
+            ("telegram capture status generic error", TelegramCaptureStatusGenericError),
+            ("telegram capture diagnostics empty defaults", TelegramCaptureDiagnosticsEmptyDefaults),
             ("backup metadata and latest discovery", BackupMetadataAndLatestDiscovery),
             ("backup discovery fallback and freshness", BackupDiscoveryFallbackAndFreshness),
             ("backup restore safety pair", BackupRestoreSafetyPair),
@@ -3798,6 +3811,136 @@ internal static class Program
         Assert(source.Body.Contains("something happened", StringComparison.Ordinal),
             "Original text must still be preserved even when the project hint is unresolved.");
         Assert(state.Projects.Count == 1, "Resolving an unknown project hint must never auto-create a project.");
+    }
+
+    private static void TelegramCaptureRedactorStripsTokenUrl()
+    {
+        var message =
+            "Telegram getUpdates failed while calling " +
+            "https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/getUpdates.";
+        var redacted = TelegramCaptureDiagnosticsRedactor.Redact(message);
+
+        Assert(!redacted.Contains("123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw", StringComparison.Ordinal),
+            "A token-bearing URL must never survive redaction.");
+        Assert(redacted.Contains("https://api.telegram.org/bot[REDACTED]", StringComparison.Ordinal),
+            "Redaction should leave a safe placeholder in place of the token-bearing URL.");
+    }
+
+    private static void TelegramCaptureRedactorStripsBareToken()
+    {
+        var message = "Unexpected token 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw in response.";
+        var redacted = TelegramCaptureDiagnosticsRedactor.Redact(message);
+
+        Assert(!redacted.Contains("123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw", StringComparison.Ordinal),
+            "A bare token-shaped substring must never survive redaction, even outside a URL.");
+        Assert(redacted.Contains("[REDACTED]", StringComparison.Ordinal),
+            "Redaction should leave a visible placeholder so the message still reads as an error.");
+    }
+
+    private static void TelegramCaptureRedactorPassesThroughSafeMessages()
+    {
+        var message = "Telegram getUpdates failed: 500 Internal Server Error.";
+        var redacted = TelegramCaptureDiagnosticsRedactor.Redact(message);
+
+        Assert(redacted == message, "A message with no token-shaped content should pass through unchanged.");
+    }
+
+    private static void TelegramCaptureRedactorTruncatesLongMessages()
+    {
+        var message = new string('e', 500);
+        var redacted = TelegramCaptureDiagnosticsRedactor.Redact(message);
+
+        Assert(redacted.Length == 300, "Redacted diagnostics text should be capped to a safe display length.");
+    }
+
+    private static void TelegramCaptureRedactorHandlesEmptyInput()
+    {
+        Assert(TelegramCaptureDiagnosticsRedactor.Redact(null) == string.Empty,
+            "Null input should redact to an empty string.");
+        Assert(TelegramCaptureDiagnosticsRedactor.Redact("   ") == string.Empty,
+            "Blank input should redact to an empty string.");
+    }
+
+    private static void TelegramCaptureStatusNotConfigured()
+    {
+        var missingToken = TelegramCaptureStatusEvaluator.Evaluate(
+            enabled: true, hasToken: false, hasAllowedUserId: true,
+            hasCompletedSuccessfulPoll: false, lastOutcomeKind: null, consecutiveErrorCount: 0);
+        Assert(missingToken == TelegramCaptureStatusKind.NotConfigured,
+            "A missing bot token must report NotConfigured even if enabled.");
+
+        var missingAllowedUserId = TelegramCaptureStatusEvaluator.Evaluate(
+            enabled: true, hasToken: true, hasAllowedUserId: false,
+            hasCompletedSuccessfulPoll: false, lastOutcomeKind: null, consecutiveErrorCount: 0);
+        Assert(missingAllowedUserId == TelegramCaptureStatusKind.NotConfigured,
+            "A missing allowed user id must report NotConfigured even if enabled.");
+    }
+
+    private static void TelegramCaptureStatusDisabled()
+    {
+        var status = TelegramCaptureStatusEvaluator.Evaluate(
+            enabled: false, hasToken: true, hasAllowedUserId: true,
+            hasCompletedSuccessfulPoll: true, lastOutcomeKind: null, consecutiveErrorCount: 0);
+        Assert(status == TelegramCaptureStatusKind.Disabled,
+            "Fully configured but disabled Telegram Capture must report Disabled.");
+    }
+
+    private static void TelegramCaptureStatusRunningBeforeFirstSuccess()
+    {
+        var status = TelegramCaptureStatusEvaluator.Evaluate(
+            enabled: true, hasToken: true, hasAllowedUserId: true,
+            hasCompletedSuccessfulPoll: false, lastOutcomeKind: null, consecutiveErrorCount: 0);
+        Assert(status == TelegramCaptureStatusKind.Running,
+            "Configured and enabled but with no completed poll yet should report Running, not WaitingForMessages.");
+    }
+
+    private static void TelegramCaptureStatusWaitingForMessages()
+    {
+        var status = TelegramCaptureStatusEvaluator.Evaluate(
+            enabled: true, hasToken: true, hasAllowedUserId: true,
+            hasCompletedSuccessfulPoll: true, lastOutcomeKind: null, consecutiveErrorCount: 0);
+        Assert(status == TelegramCaptureStatusKind.WaitingForMessages,
+            "A successful poll with no pending error should report WaitingForMessages.");
+    }
+
+    private static void TelegramCaptureStatusTokenErrorTakesPrecedence()
+    {
+        var status = TelegramCaptureStatusEvaluator.Evaluate(
+            enabled: true, hasToken: true, hasAllowedUserId: true,
+            hasCompletedSuccessfulPoll: true, lastOutcomeKind: TelegramPollOutcomeKind.TokenError, consecutiveErrorCount: 1);
+        Assert(status == TelegramCaptureStatusKind.TokenError,
+            "A current TokenError must be reported even after a prior successful poll.");
+    }
+
+    private static void TelegramCaptureStatusNetworkError()
+    {
+        var status = TelegramCaptureStatusEvaluator.Evaluate(
+            enabled: true, hasToken: true, hasAllowedUserId: true,
+            hasCompletedSuccessfulPoll: false, lastOutcomeKind: TelegramPollOutcomeKind.NetworkError, consecutiveErrorCount: 3);
+        Assert(status == TelegramCaptureStatusKind.NetworkError,
+            "A transient network failure should report NetworkError.");
+    }
+
+    private static void TelegramCaptureStatusGenericError()
+    {
+        var status = TelegramCaptureStatusEvaluator.Evaluate(
+            enabled: true, hasToken: true, hasAllowedUserId: true,
+            hasCompletedSuccessfulPoll: false, lastOutcomeKind: TelegramPollOutcomeKind.Error, consecutiveErrorCount: 1);
+        Assert(status == TelegramCaptureStatusKind.Error,
+            "An unclassified failure should report the generic Error status.");
+    }
+
+    private static void TelegramCaptureDiagnosticsEmptyDefaults()
+    {
+        var empty = TelegramCaptureDiagnostics.Empty;
+        Assert(empty.Kind == TelegramCaptureStatusKind.NotConfigured,
+            "The empty diagnostics snapshot should default to NotConfigured.");
+        Assert(empty.LastPollStartedUtc is null && empty.LastPollCompletedUtc is null &&
+               empty.LastSuccessfulPollUtc is null && empty.LastCapturedMessageUtc is null,
+            "The empty diagnostics snapshot should have no timestamps.");
+        Assert(empty.LastProcessedUpdateId == 0 && empty.ConsecutiveErrorCount == 0 &&
+               empty.LastErrorSummary == string.Empty,
+            "The empty diagnostics snapshot should have zeroed counters and no error text.");
     }
 
     private static void BackupMetadataAndLatestDiscovery()

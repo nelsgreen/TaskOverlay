@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
@@ -34,6 +35,7 @@ public partial class SettingsView : UserControl
     private bool _workingSettingsDirty;
     private BackupFolderCheckResult? _backupFolderCheck;
     private string _checkedBackupFolder = string.Empty;
+    private DispatcherTimer? _telegramStatusTimer;
 
     public SettingsView(
         AppState state,
@@ -63,11 +65,40 @@ public partial class SettingsView : UserControl
         {
             ModeListBox.Focus();
         }
+
+        StartTelegramStatusTimer();
     }
 
     public void OnDeactivated()
     {
         CommitWorkingPresentationSettings();
+        StopTelegramStatusTimer();
+    }
+
+    private void StartTelegramStatusTimer()
+    {
+        if (_telegramStatusTimer is not null)
+        {
+            return;
+        }
+
+        _telegramStatusTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(3)
+        };
+        _telegramStatusTimer.Tick += (_, _) => RefreshTelegramRuntimeStatus();
+        _telegramStatusTimer.Start();
+    }
+
+    private void StopTelegramStatusTimer()
+    {
+        if (_telegramStatusTimer is null)
+        {
+            return;
+        }
+
+        _telegramStatusTimer.Stop();
+        _telegramStatusTimer = null;
     }
 
     public void UpdateFromSettings()
@@ -465,6 +496,78 @@ public partial class SettingsView : UserControl
         {
             _updatingControls = wasUpdating;
         }
+
+        RefreshTelegramRuntimeStatus();
+    }
+
+    private void RefreshTelegramRuntimeStatus()
+    {
+        if (TelegramRuntimeStatusText is null)
+        {
+            return;
+        }
+
+        var diagnostics = _actions.GetTelegramDiagnostics();
+        TelegramRuntimeStatusText.Text = $"Status: {DescribeStatus(diagnostics.Kind)}";
+
+        var detailLines = new List<string>
+        {
+            $"Last poll: {FormatTimestamp(diagnostics.LastPollStartedUtc)}",
+            $"Last success: {FormatTimestamp(diagnostics.LastSuccessfulPollUtc)}",
+            $"Last captured message: {FormatTimestamp(diagnostics.LastCapturedMessageUtc)}",
+            $"Last processed update id: {(diagnostics.LastProcessedUpdateId > 0 ? diagnostics.LastProcessedUpdateId.ToString() : "none yet")}"
+        };
+        TelegramRuntimeDetailText.Text = string.Join("   |   ", detailLines);
+
+        if (diagnostics.ConsecutiveErrorCount > 0 && !string.IsNullOrWhiteSpace(diagnostics.LastErrorSummary))
+        {
+            TelegramRuntimeErrorText.Text =
+                $"Last error ({diagnostics.ConsecutiveErrorCount} in a row): {diagnostics.LastErrorSummary}";
+            TelegramRuntimeErrorText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            TelegramRuntimeErrorText.Text = string.Empty;
+            TelegramRuntimeErrorText.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private static string DescribeStatus(TelegramCaptureStatusKind kind) => kind switch
+    {
+        TelegramCaptureStatusKind.NotConfigured => "Not configured (missing token or allowed user id)",
+        TelegramCaptureStatusKind.Disabled => "Disabled",
+        TelegramCaptureStatusKind.Running => "Running",
+        TelegramCaptureStatusKind.WaitingForMessages => "Running - waiting for messages",
+        TelegramCaptureStatusKind.TokenError => "Token error - check the bot token",
+        TelegramCaptureStatusKind.NetworkError => "Network error - retrying",
+        TelegramCaptureStatusKind.Error => "Error - see details below",
+        _ => "Unknown"
+    };
+
+    private static string FormatTimestamp(DateTimeOffset? value) =>
+        value is DateTimeOffset timestamp
+            ? timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            : "never (this session)";
+
+    private async void PollTelegramNowButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        PollTelegramNowButton.IsEnabled = false;
+        TelegramRuntimeStatusText.Text = "Status: checking now...";
+        try
+        {
+            var result = await _actions.PollTelegramNow();
+            RefreshTelegramRuntimeStatus();
+            TelegramStatusText.Text = result.Message;
+        }
+        finally
+        {
+            PollTelegramNowButton.IsEnabled = true;
+        }
+    }
+
+    private void OpenTelegramContextHubButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        _actions.OpenContextHub();
     }
 
     private void CommitTelegramSettings()

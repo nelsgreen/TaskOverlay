@@ -23,7 +23,10 @@ public sealed class SettingsWindowActions
         Func<bool> hasTelegramToken,
         Func<string, bool> saveTelegramToken,
         Func<bool> clearTelegramToken,
-        Func<Task<TelegramConnectionTestResult>> testTelegramConnection)
+        Func<Task<TelegramConnectionTestResult>> testTelegramConnection,
+        Func<TelegramCaptureDiagnostics> getTelegramDiagnostics,
+        Func<Task<TelegramPollNowResult>> pollTelegramNow,
+        Action openContextHub)
     {
         SetOverlayMode = setOverlayMode;
         OpenLogs = openLogs;
@@ -42,6 +45,9 @@ public sealed class SettingsWindowActions
         SaveTelegramToken = saveTelegramToken;
         ClearTelegramToken = clearTelegramToken;
         TestTelegramConnection = testTelegramConnection;
+        GetTelegramDiagnostics = getTelegramDiagnostics;
+        PollTelegramNow = pollTelegramNow;
+        OpenContextHub = openContextHub;
     }
 
     public Action<OverlayMode> SetOverlayMode { get; }
@@ -61,4 +67,7 @@ public sealed class SettingsWindowActions
     public Func<string, bool> SaveTelegramToken { get; }
     public Func<bool> ClearTelegramToken { get; }
     public Func<Task<TelegramConnectionTestResult>> TestTelegramConnection { get; }
+    public Func<TelegramCaptureDiagnostics> GetTelegramDiagnostics { get; }
+    public Func<Task<TelegramPollNowResult>> PollTelegramNow { get; }
+    public Action OpenContextHub { get; }
 }
