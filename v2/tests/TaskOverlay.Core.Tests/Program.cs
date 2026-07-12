@@ -108,6 +108,26 @@ internal static class Program
             ("telegram capture settings defaults", TelegramCaptureSettingsDefaults),
             ("telegram capture settings repair", TelegramCaptureSettingsRepair),
             ("telegram capture state excludes token", TelegramCaptureStateExcludesToken),
+            ("telegram capture cursor default and repair", TelegramCaptureCursorDefaultAndRepair),
+            ("telegram capture parser plain text", TelegramCaptureParserPlainText),
+            ("telegram capture parser capture command", TelegramCaptureParserCaptureCommand),
+            ("telegram capture parser source command", TelegramCaptureParserSourceCommand),
+            ("telegram capture parser task command", TelegramCaptureParserTaskCommand),
+            ("telegram capture parser meet command", TelegramCaptureParserMeetCommand),
+            ("telegram capture parser missing project hint", TelegramCaptureParserMissingProjectHint),
+            ("telegram capture project resolver alias match", TelegramCaptureProjectResolverAliasMatch),
+            ("telegram capture project resolver unresolved hint", TelegramCaptureProjectResolverUnresolvedHint),
+            ("telegram capture plain text creates source document", TelegramCapturePlainTextCreatesSourceDocument),
+            ("telegram capture task command creates draft not task", TelegramCaptureTaskCommandCreatesDraftNotTask),
+            ("telegram capture meet command creates draft not meeting", TelegramCaptureMeetCommandCreatesDraftNotMeeting),
+            ("telegram capture unknown user ignored", TelegramCaptureUnknownUserIgnored),
+            ("telegram capture group chat ignored", TelegramCaptureGroupChatIgnored),
+            ("telegram capture bot message ignored", TelegramCaptureBotMessageIgnored),
+            ("telegram capture non text update ignored", TelegramCaptureNonTextUpdateIgnored),
+            ("telegram capture cursor advances past ignored update", TelegramCaptureCursorAdvancesPastIgnoredUpdate),
+            ("telegram capture duplicate update id not processed twice", TelegramCaptureDuplicateUpdateIdNotProcessedTwice),
+            ("telegram capture save failure preserves prior progress", TelegramCaptureSaveFailurePreservesPriorProgress),
+            ("telegram capture unresolved project hint preserved", TelegramCaptureUnresolvedProjectHintPreserved),
             ("backup metadata and latest discovery", BackupMetadataAndLatestDiscovery),
             ("backup discovery fallback and freshness", BackupDiscoveryFallbackAndFreshness),
             ("backup restore safety pair", BackupRestoreSafetyPair),
@@ -3422,6 +3442,362 @@ internal static class Program
                 loaded.TelegramCapture.ProjectAliases.Single().Alias == "kaz",
                 "Telegram Capture non-secret settings should roundtrip.");
         });
+    }
+
+    private static void TelegramCaptureCursorDefaultAndRepair()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var loaded = store.Load();
+            Assert(loaded.TelegramCapture.LastUpdateId == 0, "Fresh state should start with cursor 0.");
+        });
+
+        var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-12T09:00:00Z"));
+        state.TelegramCapture.LastUpdateId = -5;
+        Assert(StateMigrator.RepairCurrentState(state), "Negative cursor should be repaired.");
+        Assert(state.TelegramCapture.LastUpdateId == 0, "Negative cursor should be clamped to 0.");
+        Assert(!StateMigrator.RepairCurrentState(state), "Second repair pass should be a no-op.");
+    }
+
+    private static void TelegramCaptureParserPlainText()
+    {
+        var parsed = TelegramCaptureParser.Parse("жду ответ от Мадины по sandbox credentials");
+        Assert(parsed.Command == TelegramCaptureCommand.PlainText, "Text without a leading slash is plain text.");
+        Assert(parsed.ProjectHint is null, "Plain text has no project hint.");
+        Assert(parsed.Body == "жду ответ от Мадины по sandbox credentials",
+            "Plain text body should be the trimmed original text.");
+        Assert(parsed.OriginalText == "жду ответ от Мадины по sandbox credentials",
+            "Original text should be preserved exactly.");
+    }
+
+    private static void TelegramCaptureParserCaptureCommand()
+    {
+        var parsed = TelegramCaptureParser.Parse("/capture remember to check sandbox logs");
+        Assert(parsed.Command == TelegramCaptureCommand.Capture, "/capture should parse as Capture.");
+        Assert(parsed.ProjectHint is null, "/capture has no project hint.");
+        Assert(parsed.Body == "remember to check sandbox logs", "/capture body should be text after the command.");
+    }
+
+    private static void TelegramCaptureParserSourceCommand()
+    {
+        var parsed = TelegramCaptureParser.Parse("/source TaskOverlay: client asked for sandbox access");
+        Assert(parsed.Command == TelegramCaptureCommand.Source, "/source should parse as Source.");
+        Assert(parsed.ProjectHint == "TaskOverlay", "/source project hint should be the text before the colon.");
+        Assert(parsed.Body == "client asked for sandbox access",
+            "/source body should be the trimmed text after the colon.");
+    }
+
+    private static void TelegramCaptureParserTaskCommand()
+    {
+        var parsed = TelegramCaptureParser.Parse("/task TaskOverlay: добавить быстрый capture из телеграма");
+        Assert(parsed.Command == TelegramCaptureCommand.Task, "/task should parse as Task.");
+        Assert(parsed.ProjectHint == "TaskOverlay", "/task project hint should be the text before the colon.");
+        Assert(parsed.Body == "добавить быстрый capture из телеграма",
+            "/task body should preserve Cyrillic text after JSON round-trip normalization.");
+    }
+
+    private static void TelegramCaptureParserMeetCommand()
+    {
+        var parsed = TelegramCaptureParser.Parse("/meet@my_capture_bot KazChess: sync Thursday about release");
+        Assert(parsed.Command == TelegramCaptureCommand.Meet,
+            "/meet with an @botusername suffix should still parse as Meet.");
+        Assert(parsed.ProjectHint == "KazChess", "/meet project hint should be the text before the colon.");
+        Assert(parsed.Body == "sync Thursday about release",
+            "/meet does not attempt natural-language date parsing; raw text is preserved as the body.");
+    }
+
+    private static void TelegramCaptureParserMissingProjectHint()
+    {
+        var parsed = TelegramCaptureParser.Parse("/task no colon here");
+        Assert(parsed.Command == TelegramCaptureCommand.Task, "Command should still parse without a colon.");
+        Assert(parsed.ProjectHint is null, "Missing colon means no project hint, not a dropped message.");
+        Assert(parsed.Body == "no colon here", "Whole remainder should become the body when unclear.");
+    }
+
+    private static void TelegramCaptureProjectResolverAliasMatch()
+    {
+        var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-12T09:30:00Z"));
+        var project = new ProjectService(state).CreateProject("KazChess", state.CreatedAtUtc)!;
+        var settings = new TelegramCaptureSettings
+        {
+            ProjectAliases = new List<TelegramProjectAlias>
+            {
+                new() { Alias = "kaz", ProjectId = project.Id }
+            }
+        };
+
+        var resolution = TelegramProjectResolver.Resolve("  KAZ  ", settings, state.Projects);
+        Assert(resolution.ProjectId == project.Id, "Alias match should be case-insensitive and trim-tolerant.");
+        Assert(!resolution.HintUnresolved, "A matched alias is not unresolved.");
+        Assert(resolution.ProjectHint == "KAZ", "Resolution should keep the trimmed original hint for display.");
+    }
+
+    private static void TelegramCaptureProjectResolverUnresolvedHint()
+    {
+        var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-12T09:45:00Z"));
+        var defaultProject = state.Projects.Single();
+        var settings = new TelegramCaptureSettings();
+
+        var resolution = TelegramProjectResolver.Resolve("Ghost", settings, state.Projects);
+        Assert(resolution.HintUnresolved, "An unmatched hint must be marked unresolved, not silently dropped.");
+        Assert(resolution.ProjectId == defaultProject.Id,
+            "Unresolved hint should fall back to the app-wide Default project, never auto-create one.");
+        Assert(state.Projects.Count == 1, "Resolution must never create a project.");
+    }
+
+    private static void TelegramCapturePlainTextCreatesSourceDocument()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T10:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var defaultProject = state.Projects.Single();
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var messageDate = now.AddMinutes(-2);
+        var update = new TelegramIncomingUpdate(
+            500,
+            new TelegramIncomingMessage(111, false, "private", "жду ответ от Мадины по sandbox credentials", messageDate));
+
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out var newLastUpdateId, now);
+
+        Assert(results.Count == 1 && results[0].Outcome == TelegramCaptureOutcome.Captured,
+            "Allowed plain text should be captured.");
+        Assert(newLastUpdateId == 500, "Cursor should advance to the processed update id.");
+        var source = state.ContextSources.Single();
+        Assert(source.SourceType == ContextSourceType.TelegramCapture, "Capture must be stored as TelegramCapture.");
+        Assert(source.SourceApp == ContextSourceApp.Telegram, "Capture must record Telegram as the source app.");
+        Assert(source.Title == "Telegram capture", "Plain text title should be 'Telegram capture'.");
+        Assert(source.Body.Contains("жду ответ от Мадины по sandbox credentials", StringComparison.Ordinal),
+            "Body must preserve the original Cyrillic text exactly.");
+        Assert(source.ProjectId == defaultProject.Id, "No hint/default configured should fall back to Default project.");
+        Assert(source.SourceDateUtc == messageDate, "Source date should use the Telegram message date when available.");
+        Assert(source.LinkedTaskIds.Count == 0 && source.LinkedMeetingIds.Count == 0,
+            "A fresh capture must not be pre-linked to anything.");
+    }
+
+    private static void TelegramCaptureTaskCommandCreatesDraftNotTask()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T10:15:00Z");
+        var state = AppState.CreateDefault(now);
+        var taskCountBefore = state.Tasks.Count;
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var update = new TelegramIncomingUpdate(
+            501,
+            new TelegramIncomingMessage(111, false, "private", "/task TaskOverlay: добавить быстрый capture из телеграма", now));
+
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out _, now);
+
+        Assert(results.Single().Outcome == TelegramCaptureOutcome.Captured, "/task text should be captured.");
+        var source = state.ContextSources.Single();
+        Assert(source.Title == "Telegram task draft", "/task should create a draft-titled SourceDocument.");
+        Assert(source.SourceType == ContextSourceType.TelegramCapture, "/task draft is still a TelegramCapture source.");
+        Assert(source.Body.Contains("добавить быстрый capture из телеграма", StringComparison.Ordinal),
+            "Draft body must preserve the original text.");
+        Assert(state.Tasks.Count == taskCountBefore,
+            "PR 2 must never auto-create a final Task from /task; only a draft SourceDocument.");
+    }
+
+    private static void TelegramCaptureMeetCommandCreatesDraftNotMeeting()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T10:30:00Z");
+        var state = AppState.CreateDefault(now);
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var update = new TelegramIncomingUpdate(
+            502,
+            new TelegramIncomingMessage(111, false, "private", "/meet TaskOverlay: sync Thursday about release", now));
+
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out _, now);
+
+        Assert(results.Single().Outcome == TelegramCaptureOutcome.Captured, "/meet text should be captured.");
+        var source = state.ContextSources.Single();
+        Assert(source.Title == "Telegram MEET draft", "/meet should create a draft-titled SourceDocument.");
+        Assert(state.Meetings.Count == 0,
+            "PR 2 must never auto-create a final MEET from /meet; only a draft SourceDocument.");
+    }
+
+    private static void TelegramCaptureUnknownUserIgnored()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T10:45:00Z");
+        var state = AppState.CreateDefault(now);
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var update = new TelegramIncomingUpdate(
+            503,
+            new TelegramIncomingMessage(999, false, "private", "hello from a stranger", now));
+
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out var newLastUpdateId, now);
+
+        Assert(results.Single().Outcome == TelegramCaptureOutcome.IgnoredUnknownUser,
+            "A user id other than the configured allowed id must be ignored.");
+        Assert(state.ContextSources.Count == 0, "Ignored messages must not create a SourceDocument.");
+        Assert(newLastUpdateId == 503, "Cursor must still advance so the app does not loop forever.");
+    }
+
+    private static void TelegramCaptureGroupChatIgnored()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T11:00:00Z");
+        var state = AppState.CreateDefault(now);
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var update = new TelegramIncomingUpdate(
+            504,
+            new TelegramIncomingMessage(111, false, "group", "hello from a group", now));
+
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out _, now);
+
+        Assert(results.Single().Outcome == TelegramCaptureOutcome.IgnoredNonPrivateChat,
+            "Group/channel chats must be ignored even from the allowed user id.");
+        Assert(state.ContextSources.Count == 0, "Ignored group messages must not create a SourceDocument.");
+    }
+
+    private static void TelegramCaptureBotMessageIgnored()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T11:15:00Z");
+        var state = AppState.CreateDefault(now);
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var update = new TelegramIncomingUpdate(
+            505,
+            new TelegramIncomingMessage(111, true, "private", "beep boop", now));
+
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out _, now);
+
+        Assert(results.Single().Outcome == TelegramCaptureOutcome.IgnoredBotMessage,
+            "Bot/self messages must be ignored.");
+        Assert(state.ContextSources.Count == 0, "Ignored bot messages must not create a SourceDocument.");
+    }
+
+    private static void TelegramCaptureNonTextUpdateIgnored()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T11:30:00Z");
+        var state = AppState.CreateDefault(now);
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var noMessageUpdate = new TelegramIncomingUpdate(506, Message: null);
+        var emptyTextUpdate = new TelegramIncomingUpdate(
+            507,
+            new TelegramIncomingMessage(111, false, "private", "   ", now));
+
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { noMessageUpdate, emptyTextUpdate }, out var newLastUpdateId, now);
+
+        Assert(results.Count == 2 &&
+               results.All(result => result.Outcome == TelegramCaptureOutcome.IgnoredNonText),
+            "Non-message updates and blank text must both be ignored as non-text this PR.");
+        Assert(state.ContextSources.Count == 0, "Ignored non-text updates must not create a SourceDocument.");
+        Assert(newLastUpdateId == 507, "Cursor should advance past both ignored updates.");
+    }
+
+    private static void TelegramCaptureCursorAdvancesPastIgnoredUpdate()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T11:45:00Z");
+        var state = AppState.CreateDefault(now);
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var update = new TelegramIncomingUpdate(
+            508,
+            new TelegramIncomingMessage(999, false, "private", "unknown user text", now));
+
+        TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out var newLastUpdateId, now);
+
+        Assert(newLastUpdateId == 508,
+            "Even a fully-ignored update must advance the cursor so the same update is not refetched forever.");
+    }
+
+    private static void TelegramCaptureDuplicateUpdateIdNotProcessedTwice()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T12:00:00Z");
+        var state = AppState.CreateDefault(now);
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var update = new TelegramIncomingUpdate(
+            509,
+            new TelegramIncomingMessage(111, false, "private", "first pass text", now));
+
+        var firstResults = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out var firstCursor, now);
+        state.TelegramCapture.LastUpdateId = firstCursor;
+        Assert(firstResults.Single().Outcome == TelegramCaptureOutcome.Captured, "First pass should capture the update.");
+        Assert(state.ContextSources.Count == 1, "First pass should create exactly one SourceDocument.");
+
+        // Simulate a restart re-fetching the same update (e.g. offset computed
+        // before the cursor was persisted). It must be a safe no-op.
+        var secondResults = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out var secondCursor, now);
+
+        Assert(secondResults.Count == 0, "An update at or before the cursor must not be reprocessed.");
+        Assert(secondCursor == firstCursor, "Cursor must not move backward or re-trigger on a repeat.");
+        Assert(state.ContextSources.Count == 1, "Reprocessing must not create a duplicate SourceDocument.");
+    }
+
+    private static void TelegramCaptureSaveFailurePreservesPriorProgress()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T12:15:00Z");
+        var state = AppState.CreateDefault(now);
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var goodUpdate = new TelegramIncomingUpdate(
+            510,
+            new TelegramIncomingMessage(111, false, "private", "a normal short message", now));
+        var oversizedUpdate = new TelegramIncomingUpdate(
+            511,
+            new TelegramIncomingMessage(111, false, "private", new string('x', ContextService.MaximumBodyLength + 1), now));
+
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { goodUpdate, oversizedUpdate }, out var newLastUpdateId, now);
+
+        Assert(results.Count == 2, "Both updates should be evaluated in order.");
+        Assert(results[0].Outcome == TelegramCaptureOutcome.Captured, "The first, valid update should be captured.");
+        Assert(results[1].Outcome == TelegramCaptureOutcome.SaveFailed, "The oversized update should fail to save.");
+        Assert(newLastUpdateId == 510,
+            "An allowed update must not be lost before a successful save: the cursor must stop before the failed one, so it is retried.");
+        Assert(state.ContextSources.Count == 1, "Only the successfully saved capture should exist.");
+    }
+
+    private static void TelegramCaptureUnresolvedProjectHintPreserved()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T12:30:00Z");
+        var state = AppState.CreateDefault(now);
+        var defaultProject = state.Projects.Single();
+        state.TelegramCapture.Enabled = true;
+        state.TelegramCapture.AllowedUserId = 111;
+
+        var update = new TelegramIncomingUpdate(
+            512,
+            new TelegramIncomingMessage(111, false, "private", "/source Ghost: something happened", now));
+
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            state, state.TelegramCapture, new[] { update }, out _, now);
+
+        Assert(results.Single().Outcome == TelegramCaptureOutcome.Captured,
+            "An unresolved project hint must not drop the message.");
+        var source = state.ContextSources.Single();
+        Assert(source.ProjectId == defaultProject.Id,
+            "Unresolved hint should fall back to the Default project, never auto-create one.");
+        Assert(source.Body.Contains("Unresolved project hint: Ghost", StringComparison.Ordinal),
+            "Unresolved hint should be marked in the stored body, not silently discarded.");
+        Assert(source.Body.Contains("something happened", StringComparison.Ordinal),
+            "Original text must still be preserved even when the project hint is unresolved.");
+        Assert(state.Projects.Count == 1, "Resolving an unknown project hint must never auto-create a project.");
     }
 
     private static void BackupMetadataAndLatestDiscovery()

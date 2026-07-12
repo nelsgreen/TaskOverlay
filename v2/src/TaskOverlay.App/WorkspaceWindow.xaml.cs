@@ -175,6 +175,21 @@ public partial class WorkspaceWindow : Window
         TrySendMessage(result);
     }
 
+    /// <summary>
+    /// Pushes a fresh snapshot after AppState changed outside of a Workspace
+    /// command (e.g. a Telegram Capture poll saved a SourceDocument). A no-op
+    /// if the WebView has not finished loading yet.
+    /// </summary>
+    public void RefreshFromExternalChange()
+    {
+        if (!_initialized || WorkspaceWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        TrySendSnapshot();
+    }
+
     private void SendSnapshot()
     {
         var snapshot = WorkspaceSnapshotFactory.Create(

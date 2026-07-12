@@ -541,6 +541,8 @@ public sealed class TelegramCaptureSettings
     public Guid? DefaultProjectId { get; set; }
     public List<TelegramProjectAlias> ProjectAliases { get; set; } = new();
     public int PollIntervalSeconds { get; set; } = DefaultPollIntervalSeconds;
+    /// <summary>Highest processed Telegram update_id; next poll uses offset = LastUpdateId + 1.</summary>
+    public long LastUpdateId { get; set; }
 
     public bool Normalize(IReadOnlyCollection<ProjectItem> projects)
     {
@@ -551,6 +553,12 @@ public sealed class TelegramCaptureSettings
         if (BotUsername != normalizedBotUsername)
         {
             BotUsername = normalizedBotUsername;
+            changed = true;
+        }
+
+        if (LastUpdateId < 0)
+        {
+            LastUpdateId = 0;
             changed = true;
         }
 

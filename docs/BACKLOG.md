@@ -446,21 +446,36 @@ Active product scope:
     storage;
   - Test connection uses Telegram Bot API `getMe` and must not log the token or
     tokenized URL.
-- Polling is a later PR:
-  - no webhook;
-  - no hosting;
-  - no cloud sync;
-  - text-only first;
-  - accept messages only from the configured allowed Telegram user id;
-  - ignore groups/channels and unknown users;
-  - deduplicate updates with a stored cursor;
-  - create raw capture / SourceDocument drafts for explicit user review.
-- Future, not PR 1:
+- Polling (PR 2, done):
+  - local-only `TelegramPollingService` inside WPF v2 using Telegram Bot API
+    `getUpdates` long polling; no webhook, no hosting, no cloud sync;
+  - text-only; accepts messages only from the configured allowed Telegram
+    user id; ignores groups/channels, bot/self messages, and non-text
+    updates;
+  - deduplicates with a stored `LastUpdateId` cursor (`offset =
+    LastUpdateId + 1`); ignored updates still advance the cursor so the app
+    never loops on the same update, while an allowed capture only advances
+    the cursor after it is saved;
+  - optional deterministic command shortcuts: plain text, `/capture <text>`,
+    `/source <project>: <text>`, `/task <project>: <title>`,
+    `/meet <project>: <title/date text>`; commands are shortcuts, not the
+    final UX, and use no NLP/date parsing;
+  - `/task` and `/meet` create `TelegramCapture` `SourceDocument` drafts
+    ("Telegram task draft" / "Telegram MEET draft"), never a final Task or
+    MEET;
+  - project aliases resolve case-insensitively; an unresolved hint falls
+    back to the configured default project (or the app Default project) and
+    is marked unresolved in the stored body rather than dropped or
+    auto-creating a project;
+  - the bot token stays in the PR 1 protected local store; polling never
+    logs the token or a token-bearing URL.
+- Future, not PR 2:
   - voice;
   - transcription;
-  - AI interpretation;
-  - automatic task/MEET creation;
-  - Context Pack integration.
+  - AI interpretation / LLM-proposed actions with review-before-apply;
+  - automatic final task/MEET creation from ambiguous text;
+  - Context Pack integration;
+  - multi-user or group/channel support.
 
 ## Notes
 

@@ -31,6 +31,7 @@ public partial class App : System.Windows.Application
     private LocalAppSettings? _localSettings;
     private TelegramTokenStore? _telegramTokenStore;
     private TelegramBotApiClient? _telegramBotApiClient;
+    private TelegramPollingService? _telegramPollingService;
     private BackupService? _backupService;
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
@@ -70,6 +71,12 @@ public partial class App : System.Windows.Application
                 _diagnostics.StateDirectory,
                 (message, exception) => _diagnostics.Log(message, exception));
             _telegramBotApiClient = new TelegramBotApiClient();
+            _telegramPollingService = new TelegramPollingService(
+                GetTelegramPollingSnapshot,
+                () => _telegramTokenStore?.LoadToken(),
+                new TelegramUpdatesClient(),
+                ApplyTelegramCaptures,
+                (message, exception) => _diagnostics?.Log(message, exception));
             _backupService = new BackupService(
                 _stateStore.StatePath,
                 (message, exception) => _diagnostics.Log(message, exception));
@@ -81,6 +88,7 @@ public partial class App : System.Windows.Application
             }
 
             RunStartupBackupFreshnessCheck();
+            _telegramPollingService?.SyncWithSettings();
 
             _overlayWindow = GetOrCreateOverlayWindow();
             _overlayWindow.Show();
@@ -108,6 +116,7 @@ public partial class App : System.Windows.Application
             StopOverlayAndPersist();
         }
 
+        _telegramPollingService?.Stop();
         DisposeGlobalHotkeys();
         StopReminderTimer();
         StopBackupTimer();
@@ -1013,7 +1022,7 @@ public partial class App : System.Windows.Application
                 CheckBackupFolderAsync,
                 RestoreLatestBackupAsync,
                 GetTelegramCaptureSettings,
-                PersistState,
+                SaveTelegramCaptureSettings,
                 HasTelegramToken,
                 SaveTelegramToken,
                 ClearTelegramToken,
@@ -1143,6 +1152,71 @@ public partial class App : System.Windows.Application
         _state.TelegramCapture ??= new TelegramCaptureSettings();
         _state.TelegramCapture.Normalize(_state.Projects);
         return _state.TelegramCapture;
+    }
+
+    private void SaveTelegramCaptureSettings()
+    {
+        PersistState();
+        _telegramPollingService?.SyncWithSettings();
+    }
+
+    private TelegramPollingSnapshot GetTelegramPollingSnapshot()
+    {
+        if (_state is null)
+        {
+            return new TelegramPollingSnapshot(Enabled: false, LastUpdateId: 0, PollIntervalSeconds: 30);
+        }
+
+        return Dispatcher.Invoke(() =>
+        {
+            var settings = GetTelegramCaptureSettings();
+            return new TelegramPollingSnapshot(
+                settings.Enabled,
+                settings.LastUpdateId,
+                settings.PollIntervalSeconds);
+        });
+    }
+
+    /// <summary>
+    /// Applies a batch of Telegram updates to AppState. TelegramPollingService
+    /// calls this from its background polling thread; it is dispatched onto
+    /// the UI thread here so the mutation is serialized with every other
+    /// AppState mutation (RunCommand, task edits, etc.) and the polling loop
+    /// blocks until the cursor is persisted before requesting the next batch.
+    /// </summary>
+    private void ApplyTelegramCaptures(IReadOnlyList<TelegramIncomingUpdate> updates)
+    {
+        Dispatcher.Invoke(() => ApplyTelegramCapturesOnUiThread(updates));
+    }
+
+    private void ApplyTelegramCapturesOnUiThread(IReadOnlyList<TelegramIncomingUpdate> updates)
+    {
+        if (_isShuttingDown || _state is null)
+        {
+            return;
+        }
+
+        var settings = GetTelegramCaptureSettings();
+        var results = TelegramCaptureProcessor.ProcessBatch(
+            _state,
+            settings,
+            updates,
+            out var newLastUpdateId);
+
+        if (newLastUpdateId != settings.LastUpdateId)
+        {
+            settings.LastUpdateId = newLastUpdateId;
+            PersistState();
+        }
+
+        var capturedCount = results.Count(result => result.Outcome == TelegramCaptureOutcome.Captured);
+        if (capturedCount > 0)
+        {
+            _workspaceWindow?.RefreshFromExternalChange();
+        }
+
+        _diagnostics?.Log(
+            $"Telegram Capture batch processed: total={results.Count}; captured={capturedCount}.");
     }
 
     private bool HasTelegramToken() => _telegramTokenStore?.HasToken() == true;
@@ -1431,6 +1505,7 @@ public partial class App : System.Windows.Application
         _isShuttingDown = true;
         _diagnostics?.Log($"Application shutdown started. Reason: {reason}");
 
+        _telegramPollingService?.Stop();
         StopReminderTimer();
         StopBackupTimer();
         CaptureUtilityShellGeometry();
