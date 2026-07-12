@@ -234,7 +234,9 @@ public sealed class AppStateStore
             state.TreeManagerSettings is null ||
             state.TreeManagerSettings.ExpandedNodeIds is null ||
             state.WorkspaceSettings is null ||
-            state.WorkspaceSettings.SelectedProjectIds is null)
+            state.WorkspaceSettings.SelectedProjectIds is null ||
+            state.TelegramCapture is null ||
+            state.TelegramCapture.ProjectAliases is null)
         {
             throw new InvalidDataException("State file is missing required sections.");
         }
@@ -341,6 +343,23 @@ public sealed class AppStateStore
                 item.LinkedMeetingIds.Any(id => !meetingIds.Contains(id)))
             {
                 throw new InvalidDataException("State file contains an invalid context item.");
+            }
+        }
+
+        if (state.TelegramCapture.DefaultProjectId is Guid defaultTelegramProjectId &&
+            !projectIds.Contains(defaultTelegramProjectId))
+        {
+            throw new InvalidDataException("State file contains an invalid Telegram default project.");
+        }
+
+        foreach (var alias in state.TelegramCapture.ProjectAliases)
+        {
+            if (alias is null ||
+                string.IsNullOrWhiteSpace(alias.Alias) ||
+                alias.ProjectId == Guid.Empty ||
+                !projectIds.Contains(alias.ProjectId))
+            {
+                throw new InvalidDataException("State file contains an invalid Telegram project alias.");
             }
         }
     }

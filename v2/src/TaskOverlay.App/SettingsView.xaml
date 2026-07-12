@@ -394,6 +394,105 @@
                         Style="{StaticResource AppCardStyle}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource AppSectionLabelStyle}"
+                                   Text="TELEGRAM CAPTURE" />
+                        <CheckBox x:Name="TelegramEnabledCheckBox"
+                                  Margin="0,10,0,0"
+                                  VerticalContentAlignment="Center"
+                                  Foreground="{StaticResource AppTextBrush}"
+                                  FontSize="11"
+                                  Content="Enable Telegram Capture setup"
+                                  Checked="TelegramSettings_OnChanged"
+                                  Unchecked="TelegramSettings_OnChanged" />
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource AppSectionLabelStyle}"
+                                           Text="BOT USERNAME" />
+                                <TextBox x:Name="TelegramBotUsernameTextBox"
+                                         Margin="0,5,0,0"
+                                         Style="{StaticResource AppTextBoxStyle}"
+                                         LostKeyboardFocus="TelegramSettings_OnLostKeyboardFocus" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource AppSectionLabelStyle}"
+                                           Text="ALLOWED USER ID" />
+                                <TextBox x:Name="TelegramAllowedUserIdTextBox"
+                                         Margin="0,5,0,0"
+                                         Style="{StaticResource AppTextBoxStyle}"
+                                         LostKeyboardFocus="TelegramSettings_OnLostKeyboardFocus" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource AppSectionLabelStyle}"
+                                           Text="DEFAULT PROJECT" />
+                                <ComboBox x:Name="TelegramDefaultProjectComboBox"
+                                          Margin="0,5,0,0"
+                                          MinHeight="28"
+                                          SelectionChanged="TelegramDefaultProjectComboBox_OnSelectionChanged"
+                                          DisplayMemberPath="Name"
+                                          SelectedValuePath="Id" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource AppSectionLabelStyle}"
+                                           Text="BOT TOKEN" />
+                                <PasswordBox x:Name="TelegramTokenPasswordBox"
+                                             Margin="0,5,0,0"
+                                             MinHeight="28" />
+                            </StackPanel>
+                        </Grid>
+                        <WrapPanel Margin="0,10,0,0">
+                            <Button Margin="0,0,8,8"
+                                    Style="{StaticResource AppButtonStyle}"
+                                    Content="Update token"
+                                    Click="UpdateTelegramTokenButton_OnClick" />
+                            <Button Margin="0,0,8,8"
+                                    Style="{StaticResource AppButtonStyle}"
+                                    Content="Clear token"
+                                    Click="ClearTelegramTokenButton_OnClick" />
+                            <Button x:Name="TestTelegramConnectionButton"
+                                    Margin="0,0,8,8"
+                                    Style="{StaticResource AppPrimaryButtonStyle}"
+                                    Content="Test connection"
+                                    Click="TestTelegramConnectionButton_OnClick" />
+                        </WrapPanel>
+                        <TextBlock Margin="0,2,0,0"
+                                   Style="{StaticResource AppSubtitleStyle}"
+                                   Text="Token is stored with Windows user protection and is not written to state.json." />
+                        <TextBlock Margin="0,10,0,0"
+                                   Style="{StaticResource AppSectionLabelStyle}"
+                                   Text="PROJECT ALIASES" />
+                        <TextBox x:Name="TelegramAliasesTextBox"
+                                 Margin="0,5,0,0"
+                                 Height="78"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 TextWrapping="Wrap"
+                                 Style="{StaticResource AppTextBoxStyle}"
+                                 LostKeyboardFocus="TelegramSettings_OnLostKeyboardFocus" />
+                        <TextBlock Margin="0,6,0,0"
+                                   Style="{StaticResource AppSubtitleStyle}"
+                                   Text="One alias per line: alias = Project name. Matching is case-insensitive in future polling." />
+                        <TextBlock x:Name="TelegramStatusText"
+                                   Margin="0,8,0,0"
+                                   TextWrapping="Wrap"
+                                   Style="{StaticResource AppSubtitleStyle}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,12,0,0"
+                        Style="{StaticResource AppCardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource AppSectionLabelStyle}"
                                    Text="DIAGNOSTICS &amp; STORAGE" />
                         <WrapPanel Margin="0,10,0,0">
                             <Button Margin="0,0,8,8"

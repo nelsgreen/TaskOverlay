@@ -128,6 +128,21 @@ item.
   considered for future large editors; Task/MEET editors are not being
   redesigned around modals for now.
 
+## Telegram Capture
+
+- Telegram Capture is local-first: no hosting, no webhook, no cloud sync.
+- PR 1 is setup only: Settings UI, non-secret configuration, protected bot
+  token storage, and a safe Telegram `getMe` connection test.
+- The bot token must never be stored in `state.json`, committed, or logged.
+  Non-secret settings may live in `AppState`: enabled flag, bot username,
+  allowed Telegram user id, default project, aliases, and future poll interval.
+- Polling will be implemented later with Bot API long polling inside WPF v2.
+  Future polling must accept messages only from the configured allowed user id
+  and ignore unknown users, groups, and channels.
+- Plain text capture should create raw capture / SourceDocument drafts for user
+  review. Voice, transcription, AI interpretation, and automatic task/MEET
+  creation are later work.
+
 ## Sync And Platform
 
 - Full sync/mobile/cloud comes later.

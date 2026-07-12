@@ -17,6 +17,7 @@ public static class StateMigrator
         state.ContextSources ??= new List<SourceDocument>();
         state.ContextItems ??= new List<ContextItem>();
         state.WorkspaceSettings ??= new WorkspaceSettings();
+        state.TelegramCapture ??= new TelegramCaptureSettings();
 
         if (state.SchemaVersion == AppState.CurrentSchemaVersion)
         {
@@ -94,6 +95,12 @@ public static class StateMigrator
         if (state.ContextItems is null)
         {
             state.ContextItems = new List<ContextItem>();
+            changed = true;
+        }
+
+        if (state.TelegramCapture is null)
+        {
+            state.TelegramCapture = new TelegramCaptureSettings();
             changed = true;
         }
 
@@ -451,6 +458,11 @@ public static class StateMigrator
         }
 
         if (WorkspaceStatePolicy.Normalize(state))
+        {
+            changed = true;
+        }
+
+        if (state.TelegramCapture.Normalize(state.Projects))
         {
             changed = true;
         }

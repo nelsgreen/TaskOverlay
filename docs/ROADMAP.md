@@ -100,6 +100,17 @@ meeting-provider APIs remain intentionally outside the Basic MEET MVP.
 5. Later: OpenAI meeting analysis, transcription output, Telegram capture -
    all writing drafts for explicit user review, never auto-creating.
 
+## Telegram Capture
+
+1. Setup: native Settings UI, protected bot token storage, non-secret
+   `AppState` settings, project aliases, and Bot API `getMe` test.
+2. Long polling: receive text messages inside WPF v2, allowlist one Telegram
+   user id, ignore groups/channels/unknown users, and deduplicate updates.
+3. Capture inbox / ContextHUB draft path: store raw text safely and let the
+   user review before applying anything.
+4. Later: voice, transcription, AI interpretation, task/MEET suggestions,
+   Context Pack workflows.
+
 ## Workstreams
 
 1. Keep Workstream = section/group MVP.

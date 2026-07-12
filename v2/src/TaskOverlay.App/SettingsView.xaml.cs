@@ -9,6 +9,7 @@ using TaskOverlay.Core;
 namespace TaskOverlay.App;
 
 internal sealed record SettingsHotkeyItem(string Label, string Key);
+internal sealed record TelegramProjectOption(Guid Id, string Name);
 
 public partial class SettingsView : UserControl
 {
@@ -86,6 +87,7 @@ public partial class SettingsView : UserControl
                 _state.OverlaySettings.WorkingWindowHeight;
             UpdateValueLabels();
             UpdateBackupControls();
+            UpdateTelegramControls();
         }
         finally
         {
@@ -395,6 +397,146 @@ public partial class SettingsView : UserControl
             check.LatestBackup is not null;
     }
 
+    private void TelegramSettings_OnChanged(object sender, RoutedEventArgs e)
+    {
+        if (_updatingControls)
+        {
+            return;
+        }
+
+        CommitTelegramSettings();
+    }
+
+    private void TelegramSettings_OnLostKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+    {
+        if (_updatingControls)
+        {
+            return;
+        }
+
+        CommitTelegramSettings();
+    }
+
+    private void TelegramDefaultProjectComboBox_OnSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_updatingControls)
+        {
+            return;
+        }
+
+        CommitTelegramSettings();
+    }
+
+    private void UpdateTelegramControls()
+    {
+        if (TelegramEnabledCheckBox is null)
+        {
+            return;
+        }
+
+        var settings = _actions.GetTelegramSettings();
+        var projects = _state.Projects
+            .OrderBy(project => project.SortOrder)
+            .ThenBy(project => project.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(project => new TelegramProjectOption(project.Id, project.Name))
+            .ToArray();
+
+        var wasUpdating = _updatingControls;
+        _updatingControls = true;
+        try
+        {
+            TelegramDefaultProjectComboBox.ItemsSource = projects;
+            TelegramEnabledCheckBox.IsChecked = settings.Enabled;
+            TelegramBotUsernameTextBox.Text = settings.BotUsername;
+            TelegramAllowedUserIdTextBox.Text = settings.AllowedUserId?.ToString() ?? string.Empty;
+            TelegramDefaultProjectComboBox.SelectedValue = settings.DefaultProjectId;
+            TelegramAliasesTextBox.Text = FormatTelegramAliases(settings.ProjectAliases);
+            TelegramTokenPasswordBox.Clear();
+            TelegramTokenPasswordBox.Password = string.Empty;
+            TelegramStatusText.Text = _actions.HasTelegramToken()
+                ? "Token saved. Enter a new token only when replacing it."
+                : "No bot token saved.";
+        }
+        finally
+        {
+            _updatingControls = wasUpdating;
+        }
+    }
+
+    private void CommitTelegramSettings()
+    {
+        var settings = _actions.GetTelegramSettings();
+        settings.Enabled = TelegramEnabledCheckBox.IsChecked == true;
+        settings.BotUsername = TelegramBotUsernameTextBox.Text;
+        settings.AllowedUserId = ParseAllowedTelegramUserId(
+            TelegramAllowedUserIdTextBox.Text);
+        settings.DefaultProjectId =
+            TelegramDefaultProjectComboBox.SelectedValue is Guid projectId
+                ? projectId
+                : null;
+        settings.ProjectAliases = ParseTelegramAliases(
+            TelegramAliasesTextBox.Text,
+            out var aliasWarning);
+        settings.Normalize(_state.Projects);
+        _actions.SaveTelegramSettings();
+        TelegramStatusText.Text = string.IsNullOrWhiteSpace(aliasWarning)
+            ? "Telegram Capture settings saved."
+            : aliasWarning;
+    }
+
+    private void UpdateTelegramTokenButton_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        var token = TelegramTokenPasswordBox.Password;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            TelegramStatusText.Text = "Enter a bot token before updating token storage.";
+            return;
+        }
+
+        if (_actions.SaveTelegramToken(token))
+        {
+            TelegramTokenPasswordBox.Clear();
+            TelegramStatusText.Text = "Bot token saved with Windows user protection.";
+        }
+        else
+        {
+            TelegramStatusText.Text = "Bot token could not be saved.";
+        }
+    }
+
+    private void ClearTelegramTokenButton_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        TelegramTokenPasswordBox.Clear();
+        TelegramStatusText.Text = _actions.ClearTelegramToken()
+            ? "Bot token cleared."
+            : "Bot token could not be cleared.";
+    }
+
+    private async void TestTelegramConnectionButton_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        TestTelegramConnectionButton.IsEnabled = false;
+        TelegramStatusText.Text = "Testing Telegram bot connection...";
+        try
+        {
+            var result = await _actions.TestTelegramConnection();
+            TelegramStatusText.Text = result.Message;
+        }
+        finally
+        {
+            TestTelegramConnectionButton.IsEnabled = true;
+        }
+    }
+
     private void ResetWindowPositionsButton_OnClick(
         object sender,
         RoutedEventArgs e)
@@ -438,5 +580,92 @@ public partial class SettingsView : UserControl
     private static string FormatPixels(double value)
     {
         return $"{value:0} px";
+    }
+
+    private static long? ParseAllowedTelegramUserId(string value)
+    {
+        return long.TryParse(value.Trim(), out var parsed) && parsed > 0
+            ? parsed
+            : null;
+    }
+
+    private List<TelegramProjectAlias> ParseTelegramAliases(
+        string value,
+        out string warning)
+    {
+        var aliases = new List<TelegramProjectAlias>();
+        var warnings = new List<string>();
+        var projectsByName = _state.Projects.ToDictionary(
+            project => project.Name,
+            StringComparer.OrdinalIgnoreCase);
+        var projectsById = _state.Projects.ToDictionary(project => project.Id);
+        var seenAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rawLine in value.Split(
+                     new[] { "\r\n", "\n" },
+                     StringSplitOptions.None))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            var parts = line.Split('=', 2);
+            if (parts.Length != 2)
+            {
+                warnings.Add($"Ignored alias line without '=': {line}");
+                continue;
+            }
+
+            var alias = parts[0].Trim();
+            var projectValue = parts[1].Trim();
+            if (alias.Length == 0 || !seenAliases.Add(alias))
+            {
+                warnings.Add($"Ignored duplicate or empty alias: {line}");
+                continue;
+            }
+
+            ProjectItem? project = null;
+            if (Guid.TryParse(projectValue, out var projectId))
+            {
+                projectsById.TryGetValue(projectId, out project);
+            }
+
+            project ??= projectsByName.TryGetValue(projectValue, out var namedProject)
+                ? namedProject
+                : null;
+            if (project is null)
+            {
+                warnings.Add($"Ignored alias with unknown project: {line}");
+                continue;
+            }
+
+            aliases.Add(new TelegramProjectAlias
+            {
+                Alias = alias,
+                ProjectId = project.Id
+            });
+        }
+
+        warning = warnings.Count == 0
+            ? string.Empty
+            : string.Join(" ", warnings);
+        return aliases;
+    }
+
+    private string FormatTelegramAliases(
+        IEnumerable<TelegramProjectAlias> aliases)
+    {
+        var projects = _state.Projects.ToDictionary(project => project.Id);
+        return string.Join(
+            Environment.NewLine,
+            aliases.Select(alias =>
+            {
+                var projectLabel = projects.TryGetValue(alias.ProjectId, out var project)
+                    ? project.Name
+                    : alias.ProjectId.ToString();
+                return $"{alias.Alias} = {projectLabel}";
+            }));
     }
 }

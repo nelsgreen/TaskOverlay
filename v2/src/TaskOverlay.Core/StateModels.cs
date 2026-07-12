@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Serialization;
 
 namespace TaskOverlay.Core;
@@ -19,6 +20,7 @@ public sealed class AppState
     public WindowPlacement WindowPlacement { get; set; } = new();
     public TreeManagerSettings TreeManagerSettings { get; set; } = new();
     public WorkspaceSettings WorkspaceSettings { get; set; } = new();
+    public TelegramCaptureSettings TelegramCapture { get; set; } = new();
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
@@ -525,4 +527,143 @@ public enum WorkspaceFilter
     All,
     Active,
     ActivePath
+}
+
+public sealed class TelegramCaptureSettings
+{
+    public const int DefaultPollIntervalSeconds = 30;
+    public const int MinimumPollIntervalSeconds = 5;
+    public const int MaximumPollIntervalSeconds = 3600;
+
+    public bool Enabled { get; set; }
+    public string BotUsername { get; set; } = string.Empty;
+    public long? AllowedUserId { get; set; }
+    public Guid? DefaultProjectId { get; set; }
+    public List<TelegramProjectAlias> ProjectAliases { get; set; } = new();
+    public int PollIntervalSeconds { get; set; } = DefaultPollIntervalSeconds;
+
+    public bool Normalize(IReadOnlyCollection<ProjectItem> projects)
+    {
+        ArgumentNullException.ThrowIfNull(projects);
+
+        var changed = false;
+        var normalizedBotUsername = NormalizeBotUsername(BotUsername);
+        if (BotUsername != normalizedBotUsername)
+        {
+            BotUsername = normalizedBotUsername;
+            changed = true;
+        }
+
+        var projectIds = projects.Select(project => project.Id).ToHashSet();
+        if (DefaultProjectId.HasValue && !projectIds.Contains(DefaultProjectId.Value))
+        {
+            DefaultProjectId = null;
+            changed = true;
+        }
+
+        var normalizedInterval = Math.Clamp(
+            PollIntervalSeconds,
+            MinimumPollIntervalSeconds,
+            MaximumPollIntervalSeconds);
+        if (PollIntervalSeconds != normalizedInterval)
+        {
+            PollIntervalSeconds = normalizedInterval;
+            changed = true;
+        }
+
+        if (ProjectAliases is null)
+        {
+            ProjectAliases = new List<TelegramProjectAlias>();
+            changed = true;
+        }
+
+        var seenAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var normalizedAliases = new List<TelegramProjectAlias>();
+        foreach (var alias in ProjectAliases)
+        {
+            if (alias is null)
+            {
+                changed = true;
+                continue;
+            }
+
+            var aliasChanged = alias.Normalize(projectIds);
+            if (aliasChanged)
+            {
+                changed = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(alias.Alias) ||
+                alias.ProjectId == Guid.Empty ||
+                !projectIds.Contains(alias.ProjectId) ||
+                !seenAliases.Add(alias.Alias))
+            {
+                changed = true;
+                continue;
+            }
+
+            normalizedAliases.Add(alias);
+        }
+
+        if (!AliasesEqual(ProjectAliases, normalizedAliases))
+        {
+            ProjectAliases = normalizedAliases;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool AliasesEqual(
+        IReadOnlyList<TelegramProjectAlias> left,
+        IReadOnlyList<TelegramProjectAlias> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Count; i++)
+        {
+            if (!string.Equals(
+                    left[i].Alias,
+                    right[i].Alias,
+                    StringComparison.Ordinal) ||
+                left[i].ProjectId != right[i].ProjectId)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string NormalizeBotUsername(string? value)
+    {
+        var username = (value ?? string.Empty).Trim();
+        return username.StartsWith("@", StringComparison.Ordinal)
+            ? username[1..].Trim()
+            : username;
+    }
+}
+
+public sealed class TelegramProjectAlias
+{
+    public string Alias { get; set; } = string.Empty;
+    public Guid ProjectId { get; set; }
+
+    public bool Normalize(IReadOnlyCollection<Guid> validProjectIds)
+    {
+        ArgumentNullException.ThrowIfNull(validProjectIds);
+
+        var normalizedAlias = Alias?.Trim() ?? string.Empty;
+        var changed = Alias != normalizedAlias;
+        Alias = normalizedAlias;
+        if (ProjectId == Guid.Empty || !validProjectIds.Contains(ProjectId))
+        {
+            return true;
+        }
+
+        return changed;
+    }
 }
