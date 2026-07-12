@@ -27,12 +27,14 @@ import type {
   ContextSourceType,
   MeetItem,
   Project,
+  Section,
   Task,
   WorkspaceContextHubCommand,
   WorkspaceContextItemSnapshot,
   WorkspaceContextSourceSnapshot,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { LinkedTasksField } from "./linked-task-picker"
 
 // ─── Selection shared with task-manager ─────────────────────────────────────
 
@@ -570,6 +572,7 @@ interface ContextHubDetailsPanelProps {
   item: WorkspaceContextItemSnapshot | null
   source: WorkspaceContextSourceSnapshot | null
   projects: Project[]
+  sections: Section[]
   tasks: Task[]
   meetItems: MeetItem[]
   contextSources: WorkspaceContextSourceSnapshot[]
@@ -675,6 +678,7 @@ function LinkEditor({
 function ContextItemEditor({
   item,
   projects,
+  sections,
   tasks,
   meetItems,
   contextSources,
@@ -829,12 +833,12 @@ function ContextItemEditor({
           </button>
         )}
 
-        <LinkEditor
-          label="Linked tasks"
-          icon={Link2}
-          linkedIds={item.linkedTaskIds}
-          options={tasks.map((t) => ({ id: t.id, label: t.title || "(untitled)" }))}
-          emptyText="No linked tasks."
+        <LinkedTasksField
+          projectId={item.projectId}
+          tasks={tasks}
+          projects={projects}
+          sections={sections}
+          linkedTaskIds={item.linkedTaskIds}
           disabled={readOnly}
           onLink={(taskId) => onCommand({ type: "linkContextItemToTask", itemId: item.id, taskId })}
           onUnlink={(taskId) => onCommand({ type: "unlinkContextItemFromTask", itemId: item.id, taskId })}
@@ -889,6 +893,7 @@ function ContextItemEditor({
 function SourceEditor({
   source,
   projects,
+  sections,
   tasks,
   meetItems,
   contextItems,
@@ -1032,12 +1037,12 @@ function SourceEditor({
           )}
         </div>
 
-        <LinkEditor
-          label="Linked tasks"
-          icon={Link2}
-          linkedIds={source.linkedTaskIds}
-          options={tasks.map((t) => ({ id: t.id, label: t.title || "(untitled)" }))}
-          emptyText="No linked tasks."
+        <LinkedTasksField
+          projectId={source.projectId}
+          tasks={tasks}
+          projects={projects}
+          sections={sections}
+          linkedTaskIds={source.linkedTaskIds}
           disabled={readOnly}
           onLink={(taskId) => onCommand({ type: "linkSourceToTask", sourceId: source.id, taskId })}
           onUnlink={(taskId) => onCommand({ type: "unlinkSourceFromTask", sourceId: source.id, taskId })}

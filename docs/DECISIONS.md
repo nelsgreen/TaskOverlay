@@ -144,6 +144,18 @@ item.
   already covered it.
 - MEET Details Context block is intentionally deferred to a later PR; this PR
   is Task Details only.
+- The ContextHUB Details -> LINKED TASKS picker only ever lists same-project,
+  not-yet-linked tasks: cross-project tasks are hidden from the picker
+  entirely rather than shown disabled with a reason, since the QA complaint
+  was that unselectable tasks in a plain dropdown were confusing with no
+  explanation. This is a UX-only change; the underlying link semantics,
+  bridge commands, and Core cross-project guard are unchanged.
+- The picker's status filter uses the real `Status` values only
+  (TODO/FOCUS/WAIT/DONE). REMIND is reminder/attention metadata, not a task
+  status (see the ContextHUB entry above and the domain rules this repo
+  already follows) - it is shown as a small indicator on a task row instead
+  of being added as a fake status filter chip.
+- MEET picker/MEET Context block redesign stays out of scope for this PR.
 
 ## Telegram Capture
 
