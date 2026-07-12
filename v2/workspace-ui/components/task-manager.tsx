@@ -1587,6 +1587,7 @@ export function TaskManager() {
               item={selectedContextItem}
               source={selectedContextSource}
               projects={projects}
+              sections={sections}
               tasks={tasks}
               meetItems={meetItems}
               contextSources={contextSources}

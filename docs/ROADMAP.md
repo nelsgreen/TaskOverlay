@@ -98,7 +98,12 @@ meeting-provider APIs remain intentionally outside the Basic MEET MVP.
    and ContextItems from the task's own project, compact card below Steps,
    "Open ContextHUB" shortcut. MEET Details Context block is not part of
    this slice.
-3. MEET Details Context block.
+2a. ContextHUB Details -> LINKED TASKS picker - done: replaced the plain
+    task dropdown (showed every task including other projects; picking an
+    ineligible one silently failed) with a searchable, same-project-only
+    picker showing status and path, used from both SourceDocument and
+    ContextItem Details.
+3. MEET Details Context block (including its own linked-picker UX).
 4. Project Context Pack export/copy.
 5. Manual source import polish.
 6. Later: OpenAI meeting analysis, transcription output, Telegram capture -

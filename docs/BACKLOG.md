@@ -444,6 +444,25 @@ Active product scope:
     existed); Task Details already only offers same-project candidates, this
     is defense in depth against a direct cross-project link;
   - MEET Context block is explicitly deferred to a later PR (not this one).
+- ContextHUB Details -> LINKED TASKS picker (done):
+  - replaced the plain `<select>` (listed every task in the workspace,
+    including other projects and already-linked ones - picking one of those
+    silently failed against the Core cross-project guard with no feedback)
+    with a small searchable picker;
+  - `LinkedTasksField` (linked list + "Link task" button) and
+    `LinkedTaskPickerModal` (search + TODO/FOCUS/WAIT/DONE status chips +
+    rows showing title, status, and a "Project / Section / Parent task"
+    path) in `v2/workspace-ui/components/linked-task-picker.tsx`;
+  - the picker only ever lists same-project, not-yet-linked tasks
+    (`getEligibleTasks`); cross-project tasks are not shown at all rather
+    than shown disabled;
+  - REMIND is reminder/attention metadata, not a task status, so it is shown
+    as a small Bell indicator on a row instead of a fake fifth status chip;
+  - applies to both SourceDocument and ContextItem Details; reuses the same
+    `linkSourceToTask` / `unlinkSourceFromTask` / `linkContextItemToTask` /
+    `unlinkContextItemFromTask` bridge commands unchanged - no new commands,
+    no snapshot changes, no Core changes;
+  - MEET picker and MEET Context block remain explicitly out of scope.
 - Later ContextHUB work, explicitly not in this PR:
   - MEET Details Context block;
   - Project Context Pack export/copy (PR 3);
