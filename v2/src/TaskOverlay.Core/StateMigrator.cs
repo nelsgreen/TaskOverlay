@@ -14,6 +14,8 @@ public static class StateMigrator
         state.Projects ??= new List<ProjectItem>();
         state.Groups ??= new List<GroupItem>();
         state.Meetings ??= new List<MeetingItem>();
+        state.ContextSources ??= new List<SourceDocument>();
+        state.ContextItems ??= new List<ContextItem>();
         state.WorkspaceSettings ??= new WorkspaceSettings();
 
         if (state.SchemaVersion == AppState.CurrentSchemaVersion)
@@ -80,6 +82,18 @@ public static class StateMigrator
         if (state.Meetings is null)
         {
             state.Meetings = new List<MeetingItem>();
+            changed = true;
+        }
+
+        if (state.ContextSources is null)
+        {
+            state.ContextSources = new List<SourceDocument>();
+            changed = true;
+        }
+
+        if (state.ContextItems is null)
+        {
+            state.ContextItems = new List<ContextItem>();
             changed = true;
         }
 
@@ -266,6 +280,165 @@ public static class StateMigrator
             }
         }
 
+        // ContextHUB repair: normalize records conservatively and drop dangling
+        // links, but never delete a valid record just because one link is stale.
+        var sourceIds = new HashSet<Guid>();
+        foreach (var source in state.ContextSources.ToList())
+        {
+            if (string.IsNullOrWhiteSpace(source.Title))
+            {
+                state.ContextSources.Remove(source);
+                changed = true;
+                continue;
+            }
+
+            if (source.Id == Guid.Empty || !sourceIds.Add(source.Id))
+            {
+                source.Id = Guid.NewGuid();
+                sourceIds.Add(source.Id);
+                changed = true;
+            }
+
+            if (!projectIds.Contains(source.ProjectId))
+            {
+                source.ProjectId = defaultProject.Id;
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(source.SourceType))
+            {
+                source.SourceType = ContextSourceType.Other;
+                changed = true;
+            }
+
+            if (source.SourceApp is { } app && !Enum.IsDefined(app))
+            {
+                source.SourceApp = ContextSourceApp.Other;
+                changed = true;
+            }
+
+            var title = source.Title.Trim();
+            var body = source.Body?.Trim() ?? string.Empty;
+            var summary = source.Summary?.Trim() ?? string.Empty;
+            if (source.Title != title || source.Body != body || source.Summary != summary)
+            {
+                source.Title = title;
+                source.Body = body;
+                source.Summary = summary;
+                changed = true;
+            }
+
+            changed |= RepairIdList(
+                source.LinkedTaskIds is null
+                    ? source.LinkedTaskIds = new List<Guid>()
+                    : source.LinkedTaskIds,
+                tasksById.ContainsKey);
+            changed |= RepairIdList(
+                source.LinkedMeetingIds is null
+                    ? source.LinkedMeetingIds = new List<Guid>()
+                    : source.LinkedMeetingIds,
+                meetingIds.Contains);
+
+            if (source.SourceDateUtc == default)
+            {
+                source.SourceDateUtc = source.CreatedAtUtc == default
+                    ? DateTimeOffset.UtcNow
+                    : source.CreatedAtUtc;
+                changed = true;
+            }
+
+            if (source.CreatedAtUtc == default)
+            {
+                source.CreatedAtUtc = source.SourceDateUtc;
+                changed = true;
+            }
+
+            if (source.UpdatedAtUtc == default)
+            {
+                source.UpdatedAtUtc = source.CreatedAtUtc;
+                changed = true;
+            }
+        }
+
+        var contextItemIds = new HashSet<Guid>();
+        foreach (var item in state.ContextItems.ToList())
+        {
+            if (string.IsNullOrWhiteSpace(item.Title))
+            {
+                state.ContextItems.Remove(item);
+                changed = true;
+                continue;
+            }
+
+            if (item.Id == Guid.Empty || !contextItemIds.Add(item.Id))
+            {
+                item.Id = Guid.NewGuid();
+                contextItemIds.Add(item.Id);
+                changed = true;
+            }
+
+            if (!projectIds.Contains(item.ProjectId))
+            {
+                item.ProjectId = defaultProject.Id;
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(item.ItemType))
+            {
+                item.ItemType = ContextItemType.Note;
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(item.Status))
+            {
+                item.Status = ContextItemStatus.Active;
+                changed = true;
+            }
+
+            var itemTitle = item.Title.Trim();
+            var itemBody = item.Body?.Trim() ?? string.Empty;
+            if (item.Title != itemTitle || item.Body != itemBody)
+            {
+                item.Title = itemTitle;
+                item.Body = itemBody;
+                changed = true;
+            }
+
+            changed |= RepairIdList(
+                item.SourceDocumentIds is null
+                    ? item.SourceDocumentIds = new List<Guid>()
+                    : item.SourceDocumentIds,
+                sourceIds.Contains);
+            changed |= RepairIdList(
+                item.LinkedTaskIds is null
+                    ? item.LinkedTaskIds = new List<Guid>()
+                    : item.LinkedTaskIds,
+                tasksById.ContainsKey);
+            changed |= RepairIdList(
+                item.LinkedMeetingIds is null
+                    ? item.LinkedMeetingIds = new List<Guid>()
+                    : item.LinkedMeetingIds,
+                meetingIds.Contains);
+
+            if (item.Status == ContextItemStatus.Active && item.ResolvedAtUtc is not null)
+            {
+                item.ResolvedAtUtc = null;
+                changed = true;
+            }
+
+            if (item.CreatedAtUtc == default)
+            {
+                item.CreatedAtUtc = DateTimeOffset.UtcNow;
+                changed = true;
+            }
+
+            if (item.UpdatedAtUtc == default)
+            {
+                item.UpdatedAtUtc = item.CreatedAtUtc;
+                changed = true;
+            }
+        }
+
         var visitState = new Dictionary<Guid, int>();
         foreach (var task in state.Tasks)
         {
@@ -317,6 +490,23 @@ public static class StateMigrator
             }
 
             visitState[task.Id] = 2;
+        }
+
+        // Removes empty, duplicate, and dangling ids in place.
+        static bool RepairIdList(List<Guid> ids, Func<Guid, bool> exists)
+        {
+            var repaired = ids
+                .Where(id => id != Guid.Empty && exists(id))
+                .Distinct()
+                .ToList();
+            if (repaired.Count == ids.Count)
+            {
+                return false;
+            }
+
+            ids.Clear();
+            ids.AddRange(repaired);
+            return true;
         }
 
         void RepairDirectAssignment(TaskItem task)

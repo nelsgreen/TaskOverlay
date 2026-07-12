@@ -103,6 +103,31 @@ item.
 - Reminder repeat is a flat minute interval (`remindEveryMinutes`). Monthly
   repeat is not connected until a calendar-aware recurrence model exists.
 
+## ContextHUB
+
+- ContextHUB is the local project-memory and future AI-grounding layer.
+- Core entities are `SourceDocument` (raw captured/imported text with
+  provenance) and `ContextItem` (durable memory unit: decision, requirement,
+  constraint, blocker, open question, action item, project fact, risk, note).
+- ContextHUB stores manually entered/imported data only. It does not
+  automatically read ChatGPT/Claude history or any external service.
+- Links to tasks and MEETs are navigation pointers by id, not embedded copies.
+- Links are stored one-directionally: `ContextItem.SourceDocumentIds` owns the
+  item-source relation; reverse lists are derived in snapshot/UI. No duplicate
+  bidirectional link storage.
+- Deleting a task/MEET/source repairs links; it never deletes context records.
+- Deleting a SourceDocument keeps derived ContextItems and only removes the
+  source reference.
+- Future OpenAI meeting analysis, transcription, and Telegram capture will
+  write into this layer as drafts that require explicit user review before
+  anything is created.
+- Context Pack is a read-only export generated from stored TaskOverlay data;
+  deprecated/superseded items are excluded by default. Not shipped in the
+  foundation PR.
+- Modal-based creation (Add Source / Add Context) worked well in v0 and may be
+  considered for future large editors; Task/MEET editors are not being
+  redesigned around modals for now.
+
 ## Sync And Platform
 
 - Full sync/mobile/cloud comes later.

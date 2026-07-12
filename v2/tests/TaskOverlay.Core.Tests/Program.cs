@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -157,7 +158,19 @@ internal static class Program
             ("workspace command checkpoint reorder persistence", WorkspaceCommandCheckpointReorderPersistence),
             ("workspace command checkpoint validation", WorkspaceCommandCheckpointValidation),
             ("workspace checkpoint snapshot and safe load", WorkspaceCheckpointSnapshotAndSafeLoad),
-            ("workspace checkpoint independent of parent done", WorkspaceCheckpointIndependentOfParentDone)
+            ("workspace checkpoint independent of parent done", WorkspaceCheckpointIndependentOfParentDone),
+            ("workspace legacy state without context data", WorkspaceLegacyStateWithoutContextData),
+            ("workspace context source command persistence", WorkspaceContextSourceCommandPersistence),
+            ("workspace context item command persistence", WorkspaceContextItemCommandPersistence),
+            ("workspace context source delete keeps items", WorkspaceContextSourceDeleteKeepsItems),
+            ("workspace context item link commands persistence", WorkspaceContextItemLinkCommandsPersistence),
+            ("workspace context source link commands persistence", WorkspaceContextSourceLinkCommandsPersistence),
+            ("workspace context delete task clears links", WorkspaceContextDeleteTaskClearsLinks),
+            ("workspace context delete meeting clears links", WorkspaceContextDeleteMeetingClearsLinks),
+            ("workspace context command validation", WorkspaceContextCommandValidation),
+            ("workspace context repair removes dangling links", WorkspaceContextRepairRemovesDanglingLinks),
+            ("workspace snapshot includes context data", WorkspaceSnapshotIncludesContextData),
+            ("workspace context hub restart snapshot", WorkspaceContextHubRestartSnapshot)
         };
 
         foreach (var test in tests)
@@ -5392,6 +5405,610 @@ internal static class Program
                 "Active Now collapsed state should persist through Workspace context.");
             Assert(WorkspaceSnapshotFactory.Create(store.Load()).Context.ActiveNowCollapsed,
                 "Workspace snapshot should restore Active Now collapsed state.");
+        });
+    }
+
+    private static void WorkspaceLegacyStateWithoutContextData()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-12T08:00:00Z"));
+            var store = new AppStateStore(directory);
+            store.Save(state);
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            root.Remove("contextSources");
+            root.Remove("contextItems");
+            File.WriteAllText(store.StatePath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+            var loaded = store.Load();
+            Assert(loaded.ContextSources is { Count: 0 },
+                "Legacy state without context sources must load as an empty list.");
+            Assert(loaded.ContextItems is { Count: 0 },
+                "Legacy state without context items must load as an empty list.");
+        });
+    }
+
+    private static void WorkspaceContextSourceCommandPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T09:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var create = dispatcher.Dispatch(WorkspaceCommandJson(
+                "ctx-src-create", "createContextSource", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    sourceType = "meetingSummary",
+                    sourceApp = "chatgpt",
+                    title = "  SmartBridge sync notes  ",
+                    body = "Full pasted notes",
+                    summary = "One-line recap",
+                    sourceDateUtc = "2026-07-08T10:00:00Z",
+                    linkedTaskIds = new[] { task.Id.ToString("N") }
+                }), now);
+            Assert(create.Success && Guid.TryParse(create.CreatedContextSourceId, out _),
+                "createContextSource should succeed and return the new source id.");
+
+            var sourceId = Guid.Parse(create.CreatedContextSourceId!);
+            var loaded = store.Load().ContextSources.Single(s => s.Id == sourceId);
+            Assert(loaded.Title == "SmartBridge sync notes", "Source title should be trimmed and persisted.");
+            Assert(loaded.SourceType == ContextSourceType.MeetingSummary, "Source type should persist.");
+            Assert(loaded.SourceApp == ContextSourceApp.ChatGpt, "Source app should persist.");
+            Assert(loaded.Body == "Full pasted notes" && loaded.Summary == "One-line recap",
+                "Source body/summary should persist.");
+            Assert(loaded.SourceDateUtc == DateTimeOffset.Parse("2026-07-08T10:00:00Z"),
+                "Source date should persist.");
+            Assert(loaded.LinkedTaskIds.SequenceEqual(new[] { task.Id }),
+                "Source linked tasks should persist.");
+
+            var update = dispatcher.Dispatch(WorkspaceCommandJson(
+                "ctx-src-update", "updateContextSource", new
+                {
+                    sourceId = sourceId.ToString("N"),
+                    title = "Renamed source",
+                    sourceType = "clientRequest"
+                }), now);
+            Assert(update.Success, "updateContextSource should succeed as a partial patch.");
+            var updated = store.Load().ContextSources.Single(s => s.Id == sourceId);
+            Assert(updated.Title == "Renamed source" &&
+                   updated.SourceType == ContextSourceType.ClientRequest &&
+                   updated.Body == "Full pasted notes",
+                "Patch should change only the provided fields.");
+
+            var delete = dispatcher.Dispatch(WorkspaceCommandJson(
+                "ctx-src-delete", "deleteContextSource", new { sourceId = sourceId.ToString("N") }), now);
+            Assert(delete.Success, "deleteContextSource should succeed.");
+            Assert(store.Load().ContextSources.Count == 0, "Deleted source should not persist.");
+        });
+    }
+
+    private static void WorkspaceContextItemCommandPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T09:30:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var create = dispatcher.Dispatch(WorkspaceCommandJson(
+                "ctx-item-create", "createContextItem", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    itemType = "decision",
+                    title = "  Webhooks use JSON  ",
+                    body = "Idempotent by event_id"
+                }), now);
+            Assert(create.Success && Guid.TryParse(create.CreatedContextItemId, out _),
+                "createContextItem should succeed and return the new item id.");
+
+            var itemId = Guid.Parse(create.CreatedContextItemId!);
+            var loaded = store.Load().ContextItems.Single(i => i.Id == itemId);
+            Assert(loaded.Title == "Webhooks use JSON", "Item title should be trimmed and persisted.");
+            Assert(loaded.ItemType == ContextItemType.Decision, "Item type should persist.");
+            Assert(loaded.Status == ContextItemStatus.Active, "Item should default to Active.");
+            Assert(loaded.ResolvedAtUtc is null, "Active item should have no resolved timestamp.");
+
+            var resolve = dispatcher.Dispatch(WorkspaceCommandJson(
+                "ctx-item-resolve", "updateContextItem", new
+                {
+                    itemId = itemId.ToString("N"),
+                    status = "resolved"
+                }), now);
+            Assert(resolve.Success, "updateContextItem status patch should succeed.");
+            var resolved = store.Load().ContextItems.Single(i => i.Id == itemId);
+            Assert(resolved.Status == ContextItemStatus.Resolved && resolved.ResolvedAtUtc is not null,
+                "Leaving Active should set ResolvedAtUtc.");
+            Assert(resolved.Title == "Webhooks use JSON", "Status patch should not change other fields.");
+
+            var reopen = dispatcher.Dispatch(WorkspaceCommandJson(
+                "ctx-item-reopen", "updateContextItem", new
+                {
+                    itemId = itemId.ToString("N"),
+                    status = "active"
+                }), now);
+            Assert(reopen.Success, "Reopening a context item should succeed.");
+            Assert(store.Load().ContextItems.Single(i => i.Id == itemId).ResolvedAtUtc is null,
+                "Returning to Active should clear ResolvedAtUtc.");
+
+            var delete = dispatcher.Dispatch(WorkspaceCommandJson(
+                "ctx-item-delete", "deleteContextItem", new { itemId = itemId.ToString("N") }), now);
+            Assert(delete.Success, "deleteContextItem should succeed.");
+            Assert(store.Load().ContextItems.Count == 0, "Deleted item should not persist.");
+        });
+    }
+
+    private static void WorkspaceContextSourceDeleteKeepsItems()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T10:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var source = dispatcher.Dispatch(WorkspaceCommandJson(
+                "src", "createContextSource", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    sourceType = "manualNote",
+                    title = "Origin"
+                }), now);
+            var sourceId = source.CreatedContextSourceId!;
+            var item = dispatcher.Dispatch(WorkspaceCommandJson(
+                "item", "createContextItem", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    itemType = "blocker",
+                    title = "Waiting on credentials",
+                    sourceDocumentIds = new[] { sourceId }
+                }), now);
+            Assert(item.Success, "Item derived from a source should be created.");
+            var itemId = Guid.Parse(item.CreatedContextItemId!);
+            Assert(state.ContextItems.Single(i => i.Id == itemId).SourceDocumentIds.Count == 1,
+                "Item should reference the source before deletion.");
+
+            var delete = dispatcher.Dispatch(WorkspaceCommandJson(
+                "src-del", "deleteContextSource", new { sourceId }), now);
+            Assert(delete.Success, "Source deletion should succeed.");
+
+            var loaded = store.Load();
+            var survivor = loaded.ContextItems.SingleOrDefault(i => i.Id == itemId);
+            Assert(survivor is not null, "Deleting a source must not delete derived context items.");
+            Assert(survivor!.SourceDocumentIds.Count == 0,
+                "Deleting a source must remove its id from derived context items.");
+        });
+    }
+
+    private static void WorkspaceContextItemLinkCommandsPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T10:30:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+            var meeting = new MeetingService(state).Create(new MeetingUpdate(
+                project.Id, "Sync", null, now.AddDays(1), 30, null, null, null), now)!;
+
+            var item = dispatcher.Dispatch(WorkspaceCommandJson(
+                "item", "createContextItem", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    itemType = "openQuestion",
+                    title = "Who owns docs?"
+                }), now);
+            var itemId = item.CreatedContextItemId!;
+
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "l1", "linkContextItemToTask", new { itemId, taskId = task.Id.ToString("N") }), now).Success,
+                "linkContextItemToTask should succeed.");
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "l2", "linkContextItemToMeeting", new { itemId, meetingId = meeting.Id.ToString("N") }), now).Success,
+                "linkContextItemToMeeting should succeed.");
+            var linked = store.Load().ContextItems.Single();
+            Assert(linked.LinkedTaskIds.Contains(task.Id), "Task link should persist.");
+            Assert(linked.LinkedMeetingIds.Contains(meeting.Id), "Meeting link should persist.");
+
+            // Idempotent re-link must not duplicate.
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "l3", "linkContextItemToTask", new { itemId, taskId = task.Id.ToString("N") }), now).Success,
+                "Re-linking the same task should succeed idempotently.");
+            Assert(store.Load().ContextItems.Single().LinkedTaskIds.Count == 1,
+                "Re-linking must not create duplicates.");
+
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "u1", "unlinkContextItemFromTask", new { itemId, taskId = task.Id.ToString("N") }), now).Success,
+                "unlinkContextItemFromTask should succeed.");
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "u2", "unlinkContextItemFromMeeting", new { itemId, meetingId = meeting.Id.ToString("N") }), now).Success,
+                "unlinkContextItemFromMeeting should succeed.");
+            var unlinked = store.Load().ContextItems.Single();
+            Assert(unlinked.LinkedTaskIds.Count == 0 && unlinked.LinkedMeetingIds.Count == 0,
+                "Unlinked ids should persist as removed.");
+        });
+    }
+
+    private static void WorkspaceContextSourceLinkCommandsPersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T11:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+            var meeting = new MeetingService(state).Create(new MeetingUpdate(
+                project.Id, "Kickoff", null, now.AddDays(2), 30, null, null, null), now)!;
+
+            var source = dispatcher.Dispatch(WorkspaceCommandJson(
+                "src", "createContextSource", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    sourceType = "chatSummary",
+                    title = "Chat recap"
+                }), now);
+            var sourceId = source.CreatedContextSourceId!;
+
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "l1", "linkSourceToTask", new { sourceId, taskId = task.Id.ToString("N") }), now).Success,
+                "linkSourceToTask should succeed.");
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "l2", "linkSourceToMeeting", new { sourceId, meetingId = meeting.Id.ToString("N") }), now).Success,
+                "linkSourceToMeeting should succeed.");
+            var linked = store.Load().ContextSources.Single();
+            Assert(linked.LinkedTaskIds.Contains(task.Id) && linked.LinkedMeetingIds.Contains(meeting.Id),
+                "Source links should persist.");
+
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "u1", "unlinkSourceFromTask", new { sourceId, taskId = task.Id.ToString("N") }), now).Success,
+                "unlinkSourceFromTask should succeed.");
+            Assert(dispatcher.Dispatch(WorkspaceCommandJson(
+                "u2", "unlinkSourceFromMeeting", new { sourceId, meetingId = meeting.Id.ToString("N") }), now).Success,
+                "unlinkSourceFromMeeting should succeed.");
+            var unlinked = store.Load().ContextSources.Single();
+            Assert(unlinked.LinkedTaskIds.Count == 0 && unlinked.LinkedMeetingIds.Count == 0,
+                "Source unlinks should persist.");
+        });
+    }
+
+    private static void WorkspaceContextDeleteTaskClearsLinks()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T11:30:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var item = dispatcher.Dispatch(WorkspaceCommandJson(
+                "item", "createContextItem", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    itemType = "actionItem",
+                    title = "Follow up",
+                    linkedTaskIds = new[] { task.Id.ToString("N") }
+                }), now);
+            var source = dispatcher.Dispatch(WorkspaceCommandJson(
+                "src", "createContextSource", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    sourceType = "manualNote",
+                    title = "Notes",
+                    linkedTaskIds = new[] { task.Id.ToString("N") }
+                }), now);
+            Assert(item.Success && source.Success, "Linked context records should be created.");
+
+            var delete = dispatcher.Dispatch(WorkspaceCommandJson(
+                "del", "deleteTask", new { taskId = task.Id.ToString("N") }), now);
+            Assert(delete.Success, "deleteTask should succeed.");
+
+            var loaded = store.Load();
+            Assert(loaded.ContextItems.Single().LinkedTaskIds.Count == 0,
+                "Deleting a task must clear item task links.");
+            Assert(loaded.ContextSources.Single().LinkedTaskIds.Count == 0,
+                "Deleting a task must clear source task links.");
+            Assert(loaded.ContextItems.Count == 1 && loaded.ContextSources.Count == 1,
+                "Deleting a task must not delete context records.");
+        });
+    }
+
+    private static void WorkspaceContextDeleteMeetingClearsLinks()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T12:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+            var meeting = new MeetingService(state).Create(new MeetingUpdate(
+                project.Id, "Review", null, now.AddDays(1), 30, null, null, null), now)!;
+
+            var item = dispatcher.Dispatch(WorkspaceCommandJson(
+                "item", "createContextItem", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    itemType = "decision",
+                    title = "Ship v2",
+                    linkedMeetingIds = new[] { meeting.Id.ToString("N") }
+                }), now);
+            var source = dispatcher.Dispatch(WorkspaceCommandJson(
+                "src", "createContextSource", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    sourceType = "meetingSummary",
+                    title = "Review notes",
+                    linkedMeetingIds = new[] { meeting.Id.ToString("N") }
+                }), now);
+            Assert(item.Success && source.Success, "Linked context records should be created.");
+
+            var delete = dispatcher.Dispatch(WorkspaceCommandJson(
+                "del", "deleteMeeting", new { meetingId = meeting.Id.ToString("N") }), now);
+            Assert(delete.Success, "deleteMeeting should succeed.");
+
+            var loaded = store.Load();
+            Assert(loaded.ContextItems.Single().LinkedMeetingIds.Count == 0,
+                "Deleting a meeting must clear item meeting links.");
+            Assert(loaded.ContextSources.Single().LinkedMeetingIds.Count == 0,
+                "Deleting a meeting must clear source meeting links.");
+            Assert(loaded.ContextItems.Count == 1 && loaded.ContextSources.Count == 1,
+                "Deleting a meeting must not delete context records.");
+        });
+    }
+
+    private static void WorkspaceContextCommandValidation()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T12:30:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+
+        var unknownProject = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "v1", "createContextItem", new
+            {
+                projectId = Guid.NewGuid().ToString("N"),
+                itemType = "decision",
+                title = "Orphan"
+            }), now);
+        Assert(!unknownProject.Success, "Unknown projectId must be rejected.");
+
+        var badEnum = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "v2", "createContextItem", new
+            {
+                projectId = project.Id.ToString("N"),
+                itemType = "vibe",
+                title = "Bad type"
+            }), now);
+        Assert(!badEnum.Success && badEnum.ErrorCode == "invalidPayload",
+            "Unknown itemType must be an invalid payload.");
+
+        var blankTitle = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "v3", "createContextItem", new
+            {
+                projectId = project.Id.ToString("N"),
+                itemType = "note",
+                title = "   "
+            }), now);
+        Assert(!blankTitle.Success, "Blank title must be rejected.");
+
+        var oversizedBody = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "v4", "createContextSource", new
+            {
+                projectId = project.Id.ToString("N"),
+                sourceType = "manualNote",
+                title = "Big",
+                body = new string('x', ContextService.MaximumBodyLength + 1)
+            }), now);
+        Assert(!oversizedBody.Success, "Oversized body must be rejected.");
+
+        var danglingTask = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "v5", "createContextItem", new
+            {
+                projectId = project.Id.ToString("N"),
+                itemType = "risk",
+                title = "Linked to ghost",
+                linkedTaskIds = new[] { Guid.NewGuid().ToString("N") }
+            }), now);
+        Assert(!danglingTask.Success, "Unknown linked task id must reject the whole command.");
+
+        var missingItem = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "v6", "linkContextItemToTask", new
+            {
+                itemId = Guid.NewGuid().ToString("N"),
+                taskId = state.Tasks[0].Id.ToString("N")
+            }), now);
+        Assert(!missingItem.Success, "Linking a missing context item must fail.");
+
+        Assert(state.ContextItems.Count == 0 && state.ContextSources.Count == 0,
+            "Rejected commands must not mutate context state.");
+    }
+
+    private static void WorkspaceContextRepairRemovesDanglingLinks()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T13:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var task = state.Tasks[0];
+
+        var source = new SourceDocument
+        {
+            ProjectId = project.Id,
+            Title = "Valid source",
+            SourceType = (ContextSourceType)999,
+            LinkedTaskIds = new List<Guid> { task.Id, Guid.NewGuid() },
+            LinkedMeetingIds = new List<Guid> { Guid.NewGuid() },
+            SourceDateUtc = now,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.ContextSources.Add(source);
+        var item = new ContextItem
+        {
+            ProjectId = Guid.NewGuid(),
+            Title = "Valid item",
+            ItemType = (ContextItemType)999,
+            Status = (ContextItemStatus)999,
+            SourceDocumentIds = new List<Guid> { source.Id, Guid.NewGuid() },
+            LinkedTaskIds = new List<Guid> { task.Id, task.Id },
+            LinkedMeetingIds = new List<Guid> { Guid.NewGuid() },
+            ResolvedAtUtc = now,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.ContextItems.Add(item);
+
+        Assert(StateMigrator.RepairCurrentState(state), "Repair should report changes.");
+
+        Assert(source.SourceType == ContextSourceType.Other, "Unknown source type should normalize to Other.");
+        Assert(source.LinkedTaskIds.SequenceEqual(new[] { task.Id }),
+            "Dangling source task links should be removed, valid ones kept.");
+        Assert(source.LinkedMeetingIds.Count == 0, "Dangling source meeting links should be removed.");
+
+        Assert(item.ProjectId == project.Id, "Item with unknown project should move to the default project.");
+        Assert(item.ItemType == ContextItemType.Note, "Unknown item type should normalize to Note.");
+        Assert(item.Status == ContextItemStatus.Active, "Unknown status should normalize to Active.");
+        Assert(item.ResolvedAtUtc is null, "Active item should have ResolvedAtUtc cleared.");
+        Assert(item.SourceDocumentIds.SequenceEqual(new[] { source.Id }),
+            "Dangling source references should be removed, valid ones kept.");
+        Assert(item.LinkedTaskIds.SequenceEqual(new[] { task.Id }),
+            "Duplicate task links should collapse to one.");
+        Assert(item.LinkedMeetingIds.Count == 0, "Dangling item meeting links should be removed.");
+
+        Assert(!StateMigrator.RepairCurrentState(state), "Second repair pass should be a no-op.");
+    }
+
+    private static void WorkspaceSnapshotIncludesContextData()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T13:30:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var task = state.Tasks[0];
+
+        var createSource = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "src", "createContextSource", new
+            {
+                projectId = project.Id.ToString("N"),
+                sourceType = "telegramCapture",
+                sourceApp = "telegram",
+                title = "Voice note",
+                summary = "Docs access question",
+                linkedTaskIds = new[] { task.Id.ToString("N") }
+            }), now);
+        var createItem = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "item", "createContextItem", new
+            {
+                projectId = project.Id.ToString("N"),
+                itemType = "openQuestion",
+                title = "Who owns the docs?",
+                sourceDocumentIds = new[] { createSource.CreatedContextSourceId }
+            }), now);
+        Assert(createSource.Success && createItem.Success, "Context records should be created.");
+
+        // A dangling link injected directly (bypassing commands) must be
+        // filtered out of the snapshot even before repair runs.
+        state.ContextItems.Single().LinkedTaskIds.Add(Guid.NewGuid());
+
+        var snapshot = WorkspaceSnapshotFactory.Create(state, now);
+        var source = snapshot.ContextSources.Single();
+        Assert(source.Id == createSource.CreatedContextSourceId, "Snapshot should include the source.");
+        Assert(source.SourceType == "telegramCapture" && source.SourceApp == "telegram",
+            "Snapshot should carry camelCase source enums.");
+        Assert(source.LinkedTaskIds.Single() == task.Id.ToString("N"),
+            "Snapshot source should expose linked task ids.");
+
+        var item = snapshot.ContextItems.Single();
+        Assert(item.Id == createItem.CreatedContextItemId, "Snapshot should include the item.");
+        Assert(item.ItemType == "openQuestion" && item.Status == "active",
+            "Snapshot should carry camelCase item enums.");
+        Assert(item.SourceDocumentIds.Single() == createSource.CreatedContextSourceId,
+            "Snapshot item should expose derived source ids.");
+        Assert(item.LinkedTaskIds.Count == 0,
+            "Snapshot must filter dangling task links.");
+    }
+
+    private static void WorkspaceContextHubRestartSnapshot()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T14:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var source = new SourceDocument
+            {
+                ProjectId = project.Id,
+                SourceType = ContextSourceType.ChatSummary,
+                SourceApp = ContextSourceApp.ChatGpt,
+                Title = "Restart source",
+                Body = "Persisted source body",
+                Summary = "Persisted summary",
+                SourceDateUtc = now,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            var item = new ContextItem
+            {
+                ProjectId = project.Id,
+                ItemType = ContextItemType.ProjectFact,
+                Status = ContextItemStatus.Active,
+                Title = "Restart context",
+                Body = "Persisted context body",
+                SourceDocumentIds = new List<Guid> { source.Id },
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.ContextSources.Add(source);
+            state.ContextItems.Add(item);
+            state.WorkspaceSettings.ActiveTab = WorkspaceTab.ContextHub;
+            state.WorkspaceSettings.SelectedProjectIds = new List<Guid> { project.Id };
+
+            var store = new AppStateStore(directory);
+            store.Save(state);
+
+            var savedJson = File.ReadAllText(store.StatePath);
+            Assert(savedJson.Contains("\"activeTab\": \"contextHub\""),
+                "State JSON should persist the ContextHub enum in camelCase form.");
+
+            var loaded = store.Load();
+            Assert(loaded.ContextSources.Count == 1 && loaded.ContextItems.Count == 1,
+                "Persisted ContextHUB records must survive restart load.");
+
+            var snapshot = WorkspaceSnapshotFactory.Create(
+                loaded,
+                now,
+                WorkspaceSnapshotFactory.ConnectedMode);
+            Assert(snapshot.Mode == WorkspaceSnapshotFactory.ConnectedMode,
+                "Restart snapshot should be connected for the WPF Workspace.");
+            Assert(snapshot.Context.ActiveTab == "contexthub",
+                "Workspace snapshot must expose the React ContextHUB tab id.");
+            Assert(snapshot.ContextSources.Single().SourceApp == "chatgpt" &&
+                   snapshot.ContextSources.Single().SourceType == "chatSummary",
+                "Restart snapshot should expose frontend source enum values.");
+            Assert(snapshot.ContextItems.Single().ItemType == "projectFact" &&
+                   snapshot.ContextItems.Single().SourceDocumentIds.Single() == source.Id.ToString("N"),
+                "Restart snapshot should expose frontend item enum values and source links.");
+
+            var snapshotJson = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+            var document = JsonDocument.Parse(snapshotJson);
+            Assert(document.RootElement.GetProperty("context").GetProperty("activeTab").GetString() == "contexthub",
+                "Serialized restart snapshot should carry the normalized ContextHUB tab id.");
+            Assert(document.RootElement.GetProperty("contextSources").GetArrayLength() == 1 &&
+                   document.RootElement.GetProperty("contextItems").GetArrayLength() == 1,
+                "Serialized restart snapshot should include ContextHUB arrays.");
         });
     }
 

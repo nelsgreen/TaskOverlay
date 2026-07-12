@@ -90,6 +90,16 @@ meeting-provider APIs remain intentionally outside the Basic MEET MVP.
 3. Weekly report support.
 4. Work Pattern Analytics.
 
+## ContextHUB
+
+1. Foundation: models, service, commands, snapshot, ContextHUB tab - done in
+   the ContextHUB foundation PR.
+2. Task Details and MEET Details Context blocks.
+3. Project Context Pack export/copy.
+4. Manual source import polish.
+5. Later: OpenAI meeting analysis, transcription output, Telegram capture -
+   all writing drafts for explicit user review, never auto-creating.
+
 ## Workstreams
 
 1. Keep Workstream = section/group MVP.

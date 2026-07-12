@@ -74,8 +74,17 @@ public sealed class MeetingService
         return true;
     }
 
-    public bool Delete(Guid meetingId) =>
-        _state.Meetings.RemoveAll(item => item.Id == meetingId) > 0;
+    public bool Delete(Guid meetingId, DateTimeOffset? now = null)
+    {
+        if (_state.Meetings.RemoveAll(item => item.Id == meetingId) == 0)
+        {
+            return false;
+        }
+
+        // Project memory outlives the meeting: clear navigation links only.
+        new ContextService(_state).ClearMeetingLinks(meetingId, now);
+        return true;
+    }
 
     public bool ClearLinkedTask(Guid taskId, DateTimeOffset? now = null)
     {

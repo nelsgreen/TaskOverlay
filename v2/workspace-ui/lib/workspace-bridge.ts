@@ -5,6 +5,7 @@ import type {
   MeetItem,
   Project,
   Section,
+  TabKey,
   Task,
   TimelineItem,
   PendingWorkspaceCommand,
@@ -12,7 +13,10 @@ import type {
   WorkspaceCommandEnvelope,
   WorkspaceCommandResult,
   WorkspaceContextCommand,
+  WorkspaceContextHubCommand,
+  WorkspaceContextItemSnapshot,
   WorkspaceContextSnapshot,
+  WorkspaceContextSourceSnapshot,
   WorkspaceCreateSectionCommand,
   WorkspaceCreateTaskCommand,
   WorkspaceMeetingCommand,
@@ -48,6 +52,8 @@ export interface WorkspaceData {
   activeNowTaskIds: string[]
   timelineItems: TimelineItem[]
   meetItems: MeetItem[]
+  contextSources: WorkspaceContextSourceSnapshot[]
+  contextItems: WorkspaceContextItemSnapshot[]
   context: WorkspaceContextSnapshot
 }
 
@@ -62,16 +68,20 @@ export interface WorkspaceBridgeState {
   /** Id of the most recently created section/workstream once the bridge confirms it, until cleared. */
   lastCreatedSectionId: string | null
   lastCreatedMeetingId: string | null
+  lastCreatedContextSourceId: string | null
+  lastCreatedContextItemId: string | null
   sendCommand(command: WorkspaceTaskCommand): boolean
   sendSectionCommand(command: WorkspaceSectionCommand): boolean
   sendCreateTask(input: Omit<WorkspaceCreateTaskCommand, "type">): boolean
   sendCreateSection(input: Omit<WorkspaceCreateSectionCommand, "type">): boolean
   sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
   sendMeetingCommand(command: WorkspaceMeetingCommand): boolean
+  sendContextHubCommand(command: WorkspaceContextHubCommand): boolean
   clearError(): void
   clearLastCreatedTaskId(): void
   clearLastCreatedSectionId(): void
   clearLastCreatedMeetingId(): void
+  clearLastCreatedContextIds(): void
 }
 
 export function useWorkspaceBridge(): WorkspaceBridgeState {
@@ -82,6 +92,8 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const [lastCreatedTaskId, setLastCreatedTaskId] = useState<string | null>(null)
   const [lastCreatedSectionId, setLastCreatedSectionId] = useState<string | null>(null)
   const [lastCreatedMeetingId, setLastCreatedMeetingId] = useState<string | null>(null)
+  const [lastCreatedContextSourceId, setLastCreatedContextSourceId] = useState<string | null>(null)
+  const [lastCreatedContextItemId, setLastCreatedContextItemId] = useState<string | null>(null)
 
   useEffect(() => {
     const webview = window.chrome?.webview
@@ -107,6 +119,8 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
           if (result.createdTaskId) setLastCreatedTaskId(result.createdTaskId)
           if (result.createdSectionId) setLastCreatedSectionId(result.createdSectionId)
           if (result.createdMeetingId) setLastCreatedMeetingId(result.createdMeetingId)
+          if (result.createdContextSourceId) setLastCreatedContextSourceId(result.createdContextSourceId)
+          if (result.createdContextItemId) setLastCreatedContextItemId(result.createdContextItemId)
         }
       }
     }
@@ -177,10 +191,17 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const sendMeetingCommand = useCallback((command: WorkspaceMeetingCommand): boolean =>
     postCommand(command), [postCommand])
 
+  const sendContextHubCommand = useCallback((command: WorkspaceContextHubCommand): boolean =>
+    postCommand(command), [postCommand])
+
   const clearError = useCallback(() => setError(null), [])
   const clearLastCreatedTaskId = useCallback(() => setLastCreatedTaskId(null), [])
   const clearLastCreatedSectionId = useCallback(() => setLastCreatedSectionId(null), [])
   const clearLastCreatedMeetingId = useCallback(() => setLastCreatedMeetingId(null), [])
+  const clearLastCreatedContextIds = useCallback(() => {
+    setLastCreatedContextSourceId(null)
+    setLastCreatedContextItemId(null)
+  }, [])
 
   const shared = {
     pendingCommands,
@@ -188,16 +209,20 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     lastCreatedTaskId,
     lastCreatedSectionId,
     lastCreatedMeetingId,
+    lastCreatedContextSourceId,
+    lastCreatedContextItemId,
     sendCommand,
     sendSectionCommand,
     sendCreateTask,
     sendCreateSection,
     sendWorkspaceContext,
     sendMeetingCommand,
+    sendContextHubCommand,
     clearError,
     clearLastCreatedTaskId,
     clearLastCreatedSectionId,
     clearLastCreatedMeetingId,
+    clearLastCreatedContextIds,
   }
 
   if (data) {
@@ -232,7 +257,7 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
 function isWorkspaceContext(value: unknown): value is WorkspaceContextSnapshot {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceContextSnapshot>
-  return ["tree", "status", "timeline", "calendar", "workstreams"].includes(candidate.activeTab ?? "") &&
+  return ["tree", "status", "timeline", "calendar", "workstreams", "contexthub", "contextHub"].includes(candidate.activeTab ?? "") &&
     Array.isArray(candidate.selectedProjectIds) &&
     candidate.selectedProjectIds.every((id) => typeof id === "string") &&
     (candidate.selectedTaskId === null || typeof candidate.selectedTaskId === "string") &&
@@ -279,8 +304,19 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     activeNowTaskIds: snapshot.activeNow.map((item) => item.taskId),
     timelineItems,
     meetItems,
-    context: snapshot.context,
+    // Snapshot rows are used as-is (ids already snapshot-format); ?? [] keeps
+    // a host built before ContextHUB from breaking the whole snapshot.
+    contextSources: snapshot.contextSources ?? [],
+    contextItems: snapshot.contextItems ?? [],
+    context: {
+      ...snapshot.context,
+      activeTab: normalizeWorkspaceTab(snapshot.context.activeTab),
+    },
   }
+}
+
+function normalizeWorkspaceTab(value: string): TabKey {
+  return value === "contextHub" ? "contexthub" : value as TabKey
 }
 
 function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): MeetItem {

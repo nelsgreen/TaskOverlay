@@ -12,6 +12,8 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceSectionSnapshot> Sections,
     IReadOnlyList<WorkspaceTaskSnapshot> Tasks,
     IReadOnlyList<WorkspaceMeetingSnapshot> Meetings,
+    IReadOnlyList<WorkspaceContextSourceSnapshot> ContextSources,
+    IReadOnlyList<WorkspaceContextItemSnapshot> ContextItems,
     IReadOnlyList<WorkspaceActiveNowSnapshot> ActiveNow,
     IReadOnlyList<WorkspaceTimelineItemSnapshot> TimelineItems,
     WorkspaceContextSnapshot Context);
@@ -78,6 +80,34 @@ public sealed record WorkspaceMeetingSnapshot(
     string? LinkedTaskId,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
+
+public sealed record WorkspaceContextSourceSnapshot(
+    string Id,
+    string ProjectId,
+    string SourceType,
+    string? SourceApp,
+    string Title,
+    string Body,
+    string Summary,
+    DateTimeOffset SourceDateUtc,
+    IReadOnlyList<string> LinkedTaskIds,
+    IReadOnlyList<string> LinkedMeetingIds,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);
+
+public sealed record WorkspaceContextItemSnapshot(
+    string Id,
+    string ProjectId,
+    string ItemType,
+    string Status,
+    string Title,
+    string Body,
+    IReadOnlyList<string> SourceDocumentIds,
+    IReadOnlyList<string> LinkedTaskIds,
+    IReadOnlyList<string> LinkedMeetingIds,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    DateTimeOffset? ResolvedAtUtc);
 
 public sealed record WorkspaceActiveNowSnapshot(
     string TaskId,
@@ -207,6 +237,51 @@ public static class WorkspaceSnapshotFactory
                 meeting.UpdatedAtUtc))
             .ToList();
 
+        // ContextHUB: links to deleted tasks/meetings/sources are filtered out of
+        // the snapshot defensively; repair removes them from state on load/save.
+        var meetingIdSet = sourceMeetings.Select(meeting => meeting.Id).ToHashSet();
+        var sourceContextSources = state.ContextSources ?? new List<SourceDocument>();
+        var sourceContextItems = state.ContextItems ?? new List<ContextItem>();
+        var contextSourceIdSet = sourceContextSources.Select(source => source.Id).ToHashSet();
+        var contextSources = sourceContextSources
+            .Where(source => projectById.ContainsKey(source.ProjectId))
+            .OrderByDescending(source => source.SourceDateUtc)
+            .ThenByDescending(source => source.CreatedAtUtc)
+            .ThenBy(source => source.Id)
+            .Select(source => new WorkspaceContextSourceSnapshot(
+                FormatId(source.Id),
+                FormatId(source.ProjectId),
+                ToContextSourceType(source.SourceType),
+                source.SourceApp is { } app ? ToContextSourceApp(app) : null,
+                source.Title,
+                source.Body,
+                source.Summary,
+                source.SourceDateUtc,
+                FormatLinkedIds(source.LinkedTaskIds, taskIds),
+                FormatLinkedIds(source.LinkedMeetingIds, meetingIdSet),
+                source.CreatedAtUtc,
+                source.UpdatedAtUtc))
+            .ToList();
+        var contextItems = sourceContextItems
+            .Where(item => projectById.ContainsKey(item.ProjectId))
+            .OrderByDescending(item => item.UpdatedAtUtc)
+            .ThenByDescending(item => item.CreatedAtUtc)
+            .ThenBy(item => item.Id)
+            .Select(item => new WorkspaceContextItemSnapshot(
+                FormatId(item.Id),
+                FormatId(item.ProjectId),
+                ToContextItemType(item.ItemType),
+                ToContextItemStatus(item.Status),
+                item.Title,
+                item.Body,
+                FormatLinkedIds(item.SourceDocumentIds, contextSourceIdSet),
+                FormatLinkedIds(item.LinkedTaskIds, taskIds),
+                FormatLinkedIds(item.LinkedMeetingIds, meetingIdSet),
+                item.CreatedAtUtc,
+                item.UpdatedAtUtc,
+                item.ResolvedAtUtc))
+            .ToList();
+
         var activeNow = taskContexts
             .Where(context =>
                 context.Source.Status == TaskStatus.InWork ||
@@ -255,6 +330,8 @@ public static class WorkspaceSnapshotFactory
             sections,
             tasks,
             meetings,
+            contextSources,
+            contextItems,
             activeNow,
             timelineItems,
             context);
@@ -403,7 +480,59 @@ public static class WorkspaceSnapshotFactory
         WorkspaceTab.Timeline => "timeline",
         WorkspaceTab.Calendar => "calendar",
         WorkspaceTab.Workstreams => "workstreams",
+        WorkspaceTab.ContextHub => "contexthub",
         _ => "tree"
+    };
+
+    private static IReadOnlyList<string> FormatLinkedIds(
+        List<Guid>? ids,
+        IReadOnlySet<Guid> existing) =>
+        ids is null
+            ? Array.Empty<string>()
+            : ids.Where(existing.Contains).Select(FormatId).ToList();
+
+    private static string ToContextSourceType(ContextSourceType type) => type switch
+    {
+        ContextSourceType.MeetingSummary => "meetingSummary",
+        ContextSourceType.MeetingTranscript => "meetingTranscript",
+        ContextSourceType.ChatSummary => "chatSummary",
+        ContextSourceType.ManualNote => "manualNote",
+        ContextSourceType.ClientRequest => "clientRequest",
+        ContextSourceType.DocumentSummary => "documentSummary",
+        ContextSourceType.StatusUpdate => "statusUpdate",
+        ContextSourceType.TelegramCapture => "telegramCapture",
+        _ => "other"
+    };
+
+    private static string ToContextSourceApp(ContextSourceApp app) => app switch
+    {
+        ContextSourceApp.ChatGpt => "chatgpt",
+        ContextSourceApp.Claude => "claude",
+        ContextSourceApp.Codex => "codex",
+        ContextSourceApp.Telegram => "telegram",
+        ContextSourceApp.Manual => "manual",
+        _ => "other"
+    };
+
+    private static string ToContextItemType(ContextItemType type) => type switch
+    {
+        ContextItemType.Decision => "decision",
+        ContextItemType.Requirement => "requirement",
+        ContextItemType.Constraint => "constraint",
+        ContextItemType.Blocker => "blocker",
+        ContextItemType.OpenQuestion => "openQuestion",
+        ContextItemType.ActionItem => "actionItem",
+        ContextItemType.ProjectFact => "projectFact",
+        ContextItemType.Risk => "risk",
+        _ => "note"
+    };
+
+    private static string ToContextItemStatus(ContextItemStatus status) => status switch
+    {
+        ContextItemStatus.Resolved => "resolved",
+        ContextItemStatus.Deprecated => "deprecated",
+        ContextItemStatus.Superseded => "superseded",
+        _ => "active"
     };
 
     private static string ToWorkspaceFilter(WorkspaceFilter filter) => filter switch

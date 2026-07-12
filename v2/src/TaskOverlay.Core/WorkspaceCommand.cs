@@ -15,7 +15,9 @@ public sealed record WorkspaceCommandResult(
     string? ErrorMessage,
     string? CreatedTaskId = null,
     string? CreatedSectionId = null,
-    string? CreatedMeetingId = null)
+    string? CreatedMeetingId = null,
+    string? CreatedContextSourceId = null,
+    string? CreatedContextItemId = null)
 {
     public const int CurrentSchemaVersion = 1;
     public const string CurrentMessageType = "commandResult";
@@ -24,7 +26,9 @@ public sealed record WorkspaceCommandResult(
         string commandId,
         string? createdTaskId = null,
         string? createdSectionId = null,
-        string? createdMeetingId = null) =>
+        string? createdMeetingId = null,
+        string? createdContextSourceId = null,
+        string? createdContextItemId = null) =>
         new(
             CurrentSchemaVersion,
             CurrentMessageType,
@@ -34,7 +38,9 @@ public sealed record WorkspaceCommandResult(
             ErrorMessage: null,
             createdTaskId,
             createdSectionId,
-            createdMeetingId);
+            createdMeetingId,
+            createdContextSourceId,
+            createdContextItemId);
 
     public static WorkspaceCommandResult Failed(
         string commandId,
@@ -144,6 +150,16 @@ public static class WorkspaceCommandProcessor
             if (type == "deleteSection")
             {
                 return DeleteSection(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
+            }
+
+            if (type is "createContextSource" or "updateContextSource" or "deleteContextSource" or
+                "createContextItem" or "updateContextItem" or "deleteContextItem" or
+                "linkContextItemToTask" or "unlinkContextItemFromTask" or
+                "linkContextItemToMeeting" or "unlinkContextItemFromMeeting" or
+                "linkSourceToTask" or "unlinkSourceFromTask" or
+                "linkSourceToMeeting" or "unlinkSourceFromMeeting")
+            {
+                return ExecuteContextCommand(state, type, payload, commandId, now ?? DateTimeOffset.UtcNow);
             }
 
             var taskIdText = ReadString(payload, "taskId");
@@ -802,6 +818,7 @@ public static class WorkspaceCommandProcessor
             "timeline" => WorkspaceTab.Timeline,
             "calendar" => WorkspaceTab.Calendar,
             "workstreams" => WorkspaceTab.Workstreams,
+            "contexthub" => WorkspaceTab.ContextHub,
             _ => (WorkspaceTab?)null
         };
         var filter = ReadString(payload, "filter") switch
@@ -904,6 +921,393 @@ public static class WorkspaceCommandProcessor
         return new MeetingService(state).Delete(meetingId)
             ? WorkspaceCommandResult.Succeeded(commandId)
             : Fail(commandId, "meetingNotFound", "The requested meeting does not exist.");
+    }
+
+    private static WorkspaceCommandResult ExecuteContextCommand(
+        AppState state,
+        string type,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        var service = new ContextService(state);
+        switch (type)
+        {
+            case "createContextSource":
+            {
+                if (!TryReadSourceInput(payload, existing: null, timestamp, out var input))
+                {
+                    return Fail(commandId, "invalidPayload", "Context source payload is invalid.");
+                }
+
+                var created = service.CreateSource(input, timestamp);
+                return created is null
+                    ? Fail(commandId, "invalidContextSource", "Context source project, links, or fields are invalid.")
+                    : WorkspaceCommandResult.Succeeded(
+                        commandId,
+                        createdContextSourceId: created.Id.ToString("N"));
+            }
+
+            case "updateContextSource":
+            {
+                if (!Guid.TryParse(ReadString(payload, "sourceId"), out var sourceId))
+                {
+                    return Fail(commandId, "invalidContextSourceId", "A valid sourceId is required.");
+                }
+
+                var existing = state.ContextSources.FirstOrDefault(source => source.Id == sourceId);
+                if (existing is null)
+                {
+                    return Fail(commandId, "contextSourceNotFound", "The requested context source does not exist.");
+                }
+
+                if (!TryReadSourceInput(payload, existing, timestamp, out var input))
+                {
+                    return Fail(commandId, "invalidPayload", "Context source patch is invalid.");
+                }
+
+                return service.UpdateSource(sourceId, input, timestamp)
+                    ? WorkspaceCommandResult.Succeeded(commandId)
+                    : Fail(commandId, "invalidContextSource", "Context source project, links, or fields are invalid.");
+            }
+
+            case "deleteContextSource":
+            {
+                if (!Guid.TryParse(ReadString(payload, "sourceId"), out var sourceId))
+                {
+                    return Fail(commandId, "invalidContextSourceId", "A valid sourceId is required.");
+                }
+
+                return service.DeleteSource(sourceId, timestamp)
+                    ? WorkspaceCommandResult.Succeeded(commandId)
+                    : Fail(commandId, "contextSourceNotFound", "The requested context source does not exist.");
+            }
+
+            case "createContextItem":
+            {
+                if (!TryReadItemInput(payload, existing: null, out var input))
+                {
+                    return Fail(commandId, "invalidPayload", "Context item payload is invalid.");
+                }
+
+                var created = service.CreateItem(input, timestamp);
+                return created is null
+                    ? Fail(commandId, "invalidContextItem", "Context item project, links, or fields are invalid.")
+                    : WorkspaceCommandResult.Succeeded(
+                        commandId,
+                        createdContextItemId: created.Id.ToString("N"));
+            }
+
+            case "updateContextItem":
+            {
+                if (!Guid.TryParse(ReadString(payload, "itemId"), out var itemId))
+                {
+                    return Fail(commandId, "invalidContextItemId", "A valid itemId is required.");
+                }
+
+                var existing = state.ContextItems.FirstOrDefault(item => item.Id == itemId);
+                if (existing is null)
+                {
+                    return Fail(commandId, "contextItemNotFound", "The requested context item does not exist.");
+                }
+
+                if (!TryReadItemInput(payload, existing, out var input))
+                {
+                    return Fail(commandId, "invalidPayload", "Context item patch is invalid.");
+                }
+
+                return service.UpdateItem(itemId, input, timestamp)
+                    ? WorkspaceCommandResult.Succeeded(commandId)
+                    : Fail(commandId, "invalidContextItem", "Context item project, links, or fields are invalid.");
+            }
+
+            case "deleteContextItem":
+            {
+                if (!Guid.TryParse(ReadString(payload, "itemId"), out var itemId))
+                {
+                    return Fail(commandId, "invalidContextItemId", "A valid itemId is required.");
+                }
+
+                return service.DeleteItem(itemId)
+                    ? WorkspaceCommandResult.Succeeded(commandId)
+                    : Fail(commandId, "contextItemNotFound", "The requested context item does not exist.");
+            }
+
+            default:
+            {
+                // Link/unlink family: {itemId|sourceId} + {taskId|meetingId}.
+                var ownerIsItem = type.Contains("ContextItem");
+                var ownerKey = ownerIsItem ? "itemId" : "sourceId";
+                if (!Guid.TryParse(ReadString(payload, ownerKey), out var ownerId))
+                {
+                    return Fail(
+                        commandId,
+                        ownerIsItem ? "invalidContextItemId" : "invalidContextSourceId",
+                        $"A valid {ownerKey} is required.");
+                }
+
+                var targetIsTask = type.EndsWith("Task", StringComparison.Ordinal);
+                var targetKey = targetIsTask ? "taskId" : "meetingId";
+                if (!Guid.TryParse(ReadString(payload, targetKey), out var targetId))
+                {
+                    return Fail(
+                        commandId,
+                        targetIsTask ? "invalidTaskId" : "invalidMeetingId",
+                        $"A valid {targetKey} is required.");
+                }
+
+                var succeeded = type switch
+                {
+                    "linkContextItemToTask" => service.LinkItemToTask(ownerId, targetId, timestamp),
+                    "unlinkContextItemFromTask" => service.UnlinkItemFromTask(ownerId, targetId, timestamp),
+                    "linkContextItemToMeeting" => service.LinkItemToMeeting(ownerId, targetId, timestamp),
+                    "unlinkContextItemFromMeeting" => service.UnlinkItemFromMeeting(ownerId, targetId, timestamp),
+                    "linkSourceToTask" => service.LinkSourceToTask(ownerId, targetId, timestamp),
+                    "unlinkSourceFromTask" => service.UnlinkSourceFromTask(ownerId, targetId, timestamp),
+                    "linkSourceToMeeting" => service.LinkSourceToMeeting(ownerId, targetId, timestamp),
+                    "unlinkSourceFromMeeting" => service.UnlinkSourceFromMeeting(ownerId, targetId, timestamp),
+                    _ => false
+                };
+                return succeeded
+                    ? WorkspaceCommandResult.Succeeded(commandId)
+                    : Fail(commandId, "mutationRejected", "Context link could not be updated.");
+            }
+        }
+    }
+
+    private static bool TryReadSourceInput(
+        JsonElement payload,
+        SourceDocument? existing,
+        DateTimeOffset timestamp,
+        out SourceDocumentUpdate input)
+    {
+        input = default!;
+
+        var projectId = existing?.ProjectId ?? Guid.Empty;
+        if (payload.TryGetProperty("projectId", out var projectElement) &&
+            (projectElement.ValueKind != JsonValueKind.String ||
+             !Guid.TryParse(projectElement.GetString(), out projectId)))
+        {
+            return false;
+        }
+
+        var sourceType = existing?.SourceType ?? ContextSourceType.ManualNote;
+        if (payload.TryGetProperty("sourceType", out var typeElement))
+        {
+            if (typeElement.ValueKind != JsonValueKind.String ||
+                !TryParseSourceType(typeElement.GetString(), out sourceType))
+            {
+                return false;
+            }
+        }
+
+        var sourceApp = existing?.SourceApp;
+        if (payload.TryGetProperty("sourceApp", out var appElement))
+        {
+            if (appElement.ValueKind == JsonValueKind.Null)
+            {
+                sourceApp = null;
+            }
+            else if (appElement.ValueKind != JsonValueKind.String ||
+                     !TryParseSourceApp(appElement.GetString(), out var parsedApp))
+            {
+                return false;
+            }
+            else
+            {
+                sourceApp = parsedApp;
+            }
+        }
+
+        if (!TryReadPatchString(payload, "title", existing?.Title ?? string.Empty, out var title) ||
+            !TryReadPatchString(payload, "body", existing?.Body ?? string.Empty, out var body) ||
+            !TryReadPatchString(payload, "summary", existing?.Summary ?? string.Empty, out var summary))
+        {
+            return false;
+        }
+
+        // A JSON null title is not a valid clear (title is required); null
+        // body/summary clear to empty via the service normalization.
+        if (title is null)
+        {
+            return false;
+        }
+
+        var sourceDateUtc = existing?.SourceDateUtc ?? timestamp;
+        if (payload.TryGetProperty("sourceDateUtc", out var dateElement))
+        {
+            if (dateElement.ValueKind != JsonValueKind.String ||
+                !DateTimeOffset.TryParse(
+                    dateElement.GetString(),
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out sourceDateUtc))
+            {
+                return false;
+            }
+        }
+
+        if (!TryReadPatchGuidArray(payload, "linkedTaskIds", existing?.LinkedTaskIds, out var linkedTaskIds) ||
+            !TryReadPatchGuidArray(payload, "linkedMeetingIds", existing?.LinkedMeetingIds, out var linkedMeetingIds))
+        {
+            return false;
+        }
+
+        input = new SourceDocumentUpdate(
+            projectId,
+            sourceType,
+            sourceApp,
+            title,
+            body,
+            summary,
+            sourceDateUtc,
+            linkedTaskIds,
+            linkedMeetingIds);
+        return true;
+    }
+
+    private static bool TryReadItemInput(
+        JsonElement payload,
+        ContextItem? existing,
+        out ContextItemUpdate input)
+    {
+        input = default!;
+
+        var projectId = existing?.ProjectId ?? Guid.Empty;
+        if (payload.TryGetProperty("projectId", out var projectElement) &&
+            (projectElement.ValueKind != JsonValueKind.String ||
+             !Guid.TryParse(projectElement.GetString(), out projectId)))
+        {
+            return false;
+        }
+
+        var itemType = existing?.ItemType ?? ContextItemType.Note;
+        if (payload.TryGetProperty("itemType", out var typeElement))
+        {
+            if (typeElement.ValueKind != JsonValueKind.String ||
+                !TryParseItemType(typeElement.GetString(), out itemType))
+            {
+                return false;
+            }
+        }
+
+        var status = existing?.Status ?? ContextItemStatus.Active;
+        if (payload.TryGetProperty("status", out var statusElement))
+        {
+            if (statusElement.ValueKind != JsonValueKind.String ||
+                !TryParseItemStatus(statusElement.GetString(), out status))
+            {
+                return false;
+            }
+        }
+
+        if (!TryReadPatchString(payload, "title", existing?.Title ?? string.Empty, out var title) ||
+            !TryReadPatchString(payload, "body", existing?.Body ?? string.Empty, out var body))
+        {
+            return false;
+        }
+
+        if (title is null)
+        {
+            return false;
+        }
+
+        if (!TryReadPatchGuidArray(payload, "sourceDocumentIds", existing?.SourceDocumentIds, out var sourceDocumentIds) ||
+            !TryReadPatchGuidArray(payload, "linkedTaskIds", existing?.LinkedTaskIds, out var linkedTaskIds) ||
+            !TryReadPatchGuidArray(payload, "linkedMeetingIds", existing?.LinkedMeetingIds, out var linkedMeetingIds))
+        {
+            return false;
+        }
+
+        input = new ContextItemUpdate(
+            projectId,
+            itemType,
+            status,
+            title,
+            body,
+            sourceDocumentIds,
+            linkedTaskIds,
+            linkedMeetingIds);
+        return true;
+    }
+
+    private static bool TryReadPatchGuidArray(
+        JsonElement payload,
+        string propertyName,
+        IReadOnlyList<Guid>? existing,
+        out List<Guid> values)
+    {
+        if (!payload.TryGetProperty(propertyName, out _))
+        {
+            values = existing?.ToList() ?? new List<Guid>();
+            return true;
+        }
+
+        return TryReadGuidArray(payload, propertyName, out values);
+    }
+
+    private static bool TryParseSourceType(string? value, out ContextSourceType parsed)
+    {
+        parsed = value switch
+        {
+            "meetingSummary" => ContextSourceType.MeetingSummary,
+            "meetingTranscript" => ContextSourceType.MeetingTranscript,
+            "chatSummary" => ContextSourceType.ChatSummary,
+            "manualNote" => ContextSourceType.ManualNote,
+            "clientRequest" => ContextSourceType.ClientRequest,
+            "documentSummary" => ContextSourceType.DocumentSummary,
+            "statusUpdate" => ContextSourceType.StatusUpdate,
+            "telegramCapture" => ContextSourceType.TelegramCapture,
+            "other" => ContextSourceType.Other,
+            _ => (ContextSourceType)(-1)
+        };
+        return Enum.IsDefined(parsed);
+    }
+
+    private static bool TryParseSourceApp(string? value, out ContextSourceApp parsed)
+    {
+        parsed = value switch
+        {
+            "chatgpt" => ContextSourceApp.ChatGpt,
+            "claude" => ContextSourceApp.Claude,
+            "codex" => ContextSourceApp.Codex,
+            "telegram" => ContextSourceApp.Telegram,
+            "manual" => ContextSourceApp.Manual,
+            "other" => ContextSourceApp.Other,
+            _ => (ContextSourceApp)(-1)
+        };
+        return Enum.IsDefined(parsed);
+    }
+
+    private static bool TryParseItemType(string? value, out ContextItemType parsed)
+    {
+        parsed = value switch
+        {
+            "decision" => ContextItemType.Decision,
+            "requirement" => ContextItemType.Requirement,
+            "constraint" => ContextItemType.Constraint,
+            "blocker" => ContextItemType.Blocker,
+            "openQuestion" => ContextItemType.OpenQuestion,
+            "actionItem" => ContextItemType.ActionItem,
+            "projectFact" => ContextItemType.ProjectFact,
+            "risk" => ContextItemType.Risk,
+            "note" => ContextItemType.Note,
+            _ => (ContextItemType)(-1)
+        };
+        return Enum.IsDefined(parsed);
+    }
+
+    private static bool TryParseItemStatus(string? value, out ContextItemStatus parsed)
+    {
+        parsed = value switch
+        {
+            "active" => ContextItemStatus.Active,
+            "resolved" => ContextItemStatus.Resolved,
+            "deprecated" => ContextItemStatus.Deprecated,
+            "superseded" => ContextItemStatus.Superseded,
+            _ => (ContextItemStatus)(-1)
+        };
+        return Enum.IsDefined(parsed);
     }
 
     private static bool TryReadMeetingInput(
