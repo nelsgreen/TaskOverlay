@@ -94,10 +94,14 @@ meeting-provider APIs remain intentionally outside the Basic MEET MVP.
 
 1. Foundation: models, service, commands, snapshot, ContextHUB tab - done in
    the ContextHUB foundation PR.
-2. Task Details and MEET Details Context blocks.
-3. Project Context Pack export/copy.
-4. Manual source import polish.
-5. Later: OpenAI meeting analysis, transcription output, Telegram capture -
+2. Task Details Context block - done: link/unlink existing SourceDocuments
+   and ContextItems from the task's own project, compact card below Steps,
+   "Open ContextHUB" shortcut. MEET Details Context block is not part of
+   this slice.
+3. MEET Details Context block.
+4. Project Context Pack export/copy.
+5. Manual source import polish.
+6. Later: OpenAI meeting analysis, transcription output, Telegram capture -
    all writing drafts for explicit user review, never auto-creating.
 
 ## Telegram Capture

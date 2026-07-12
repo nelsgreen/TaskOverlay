@@ -202,6 +202,12 @@ internal static class Program
             ("workspace context item link commands persistence", WorkspaceContextItemLinkCommandsPersistence),
             ("workspace context source link commands persistence", WorkspaceContextSourceLinkCommandsPersistence),
             ("workspace context delete task clears links", WorkspaceContextDeleteTaskClearsLinks),
+            ("task context same project link allowed", TaskContextSameProjectLinkAllowed),
+            ("task context cross project link rejected", TaskContextCrossProjectLinkRejected),
+            ("task context duplicate link not added twice", TaskContextDuplicateLinkNotAddedTwice),
+            ("task context unlink missing link is safe", TaskContextUnlinkMissingLinkIsSafe),
+            ("task context telegram capture source linkable", TaskContextTelegramCaptureSourceLinkable),
+            ("task context done task can still link", TaskContextDoneTaskCanStillLink),
             ("workspace context delete meeting clears links", WorkspaceContextDeleteMeetingClearsLinks),
             ("workspace context command validation", WorkspaceContextCommandValidation),
             ("workspace context repair removes dangling links", WorkspaceContextRepairRemovesDanglingLinks),
@@ -6306,6 +6312,145 @@ internal static class Program
             Assert(unlinked.LinkedTaskIds.Count == 0 && unlinked.LinkedMeetingIds.Count == 0,
                 "Source unlinks should persist.");
         });
+    }
+
+    private static void TaskContextSameProjectLinkAllowed()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T11:45:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var task = state.Tasks[0];
+        var service = new ContextService(state);
+
+        var item = service.CreateItem(new ContextItemUpdate(
+            project.Id, ContextItemType.Note, ContextItemStatus.Active, "Same project item",
+            null, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+        var source = service.CreateSource(new SourceDocumentUpdate(
+            project.Id, ContextSourceType.ManualNote, null, "Same project source",
+            null, null, now, Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+        Assert(service.LinkItemToTask(item.Id, task.Id, now), "Linking an item to a same-project task should succeed.");
+        Assert(service.LinkSourceToTask(source.Id, task.Id, now), "Linking a source to a same-project task should succeed.");
+        Assert(item.LinkedTaskIds.Contains(task.Id) && source.LinkedTaskIds.Contains(task.Id),
+            "Same-project links should be recorded on both records.");
+    }
+
+    private static void TaskContextCrossProjectLinkRejected()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T12:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var defaultProject = state.Projects[0];
+        var task = state.Tasks[0];
+        var otherProject = new ProjectService(state).CreateProject("Other project", now)!;
+        var service = new ContextService(state);
+
+        var item = service.CreateItem(new ContextItemUpdate(
+            otherProject.Id, ContextItemType.Note, ContextItemStatus.Active, "Other project item",
+            null, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+        var source = service.CreateSource(new SourceDocumentUpdate(
+            otherProject.Id, ContextSourceType.ManualNote, null, "Other project source",
+            null, null, now, Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+        Assert(!service.LinkItemToTask(item.Id, task.Id, now),
+            "Linking an item to a task in a different project must be rejected.");
+        Assert(!service.LinkSourceToTask(source.Id, task.Id, now),
+            "Linking a source to a task in a different project must be rejected.");
+        Assert(item.LinkedTaskIds.Count == 0 && source.LinkedTaskIds.Count == 0,
+            "A rejected cross-project link must not be recorded.");
+        Assert(task.ProjectId == defaultProject.Id, "Sanity: the task stayed in its original project.");
+    }
+
+    private static void TaskContextDuplicateLinkNotAddedTwice()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T12:15:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var task = state.Tasks[0];
+        var service = new ContextService(state);
+
+        var item = service.CreateItem(new ContextItemUpdate(
+            project.Id, ContextItemType.Note, ContextItemStatus.Active, "Repeatable link item",
+            null, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+        var source = service.CreateSource(new SourceDocumentUpdate(
+            project.Id, ContextSourceType.ManualNote, null, "Repeatable link source",
+            null, null, now, Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+        Assert(service.LinkItemToTask(item.Id, task.Id, now) && service.LinkItemToTask(item.Id, task.Id, now),
+            "Linking the same item to the same task twice should both report success.");
+        Assert(service.LinkSourceToTask(source.Id, task.Id, now) && service.LinkSourceToTask(source.Id, task.Id, now),
+            "Linking the same source to the same task twice should both report success.");
+        Assert(item.LinkedTaskIds.Count == 1, "Duplicate item-task links must not be added twice.");
+        Assert(source.LinkedTaskIds.Count == 1, "Duplicate source-task links must not be added twice.");
+    }
+
+    private static void TaskContextUnlinkMissingLinkIsSafe()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T12:30:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var task = state.Tasks[0];
+        var service = new ContextService(state);
+
+        var item = service.CreateItem(new ContextItemUpdate(
+            project.Id, ContextItemType.Note, ContextItemStatus.Active, "Never linked item",
+            null, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+        var source = service.CreateSource(new SourceDocumentUpdate(
+            project.Id, ContextSourceType.ManualNote, null, "Never linked source",
+            null, null, now, Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+        Assert(service.UnlinkItemFromTask(item.Id, task.Id, now),
+            "Unlinking an item that was never linked to this task must be a safe no-op.");
+        Assert(service.UnlinkSourceFromTask(source.Id, task.Id, now),
+            "Unlinking a source that was never linked to this task must be a safe no-op.");
+        Assert(item.LinkedTaskIds.Count == 0 && source.LinkedTaskIds.Count == 0,
+            "Nothing should have been added by an unlink of a non-existent link.");
+    }
+
+    private static void TaskContextTelegramCaptureSourceLinkable()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T12:45:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var task = state.Tasks[0];
+            var store = new AppStateStore(directory);
+            var service = new ContextService(state);
+
+            var telegramSource = service.CreateSource(new SourceDocumentUpdate(
+                project.Id, ContextSourceType.TelegramCapture, ContextSourceApp.Telegram, "Telegram capture",
+                "жду ответ от Мадины по sandbox credentials", null, now,
+                Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+            Assert(service.LinkSourceToTask(telegramSource.Id, task.Id, now),
+                "A TelegramCapture SourceDocument should link to a task like any other source.");
+            store.Save(state);
+
+            var loaded = store.Load();
+            var reloaded = loaded.ContextSources.Single();
+            Assert(reloaded.SourceType == ContextSourceType.TelegramCapture &&
+                   reloaded.LinkedTaskIds.Contains(task.Id),
+                "The Telegram capture link should persist through save/load.");
+        });
+    }
+
+    private static void TaskContextDoneTaskCanStillLink()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T13:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var task = state.Tasks[0];
+        task.Status = TaskStatus.Done;
+        task.CompletedAtUtc = now;
+        var service = new ContextService(state);
+
+        var source = service.CreateSource(new SourceDocumentUpdate(
+            project.Id, ContextSourceType.ManualNote, null, "Note for a done task",
+            null, null, now, Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+        Assert(service.LinkSourceToTask(source.Id, task.Id, now),
+            "A DONE task must still be able to receive context links.");
+        Assert(source.LinkedTaskIds.Contains(task.Id), "The link should be recorded regardless of task status.");
     }
 
     private static void WorkspaceContextDeleteTaskClearsLinks()

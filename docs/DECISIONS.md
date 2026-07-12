@@ -127,6 +127,23 @@ item.
 - Modal-based creation (Add Source / Add Context) worked well in v0 and may be
   considered for future large editors; Task/MEET editors are not being
   redesigned around modals for now.
+- Task Details Context block (done): a compact, Task-only card in Task
+  Details shows linked SourceDocuments/ContextItems and lets the user link an
+  existing same-project record or unlink one. No create/edit of
+  SourceDocuments or ContextItems from Task Details - that stays in
+  ContextHUB, to keep this block small and avoid duplicating the ContextHUB
+  editors.
+- Linking is restricted to the task's own project. Task Details only ever
+  offers same-project candidates in "Link existing"; `ContextService` also
+  rejects a cross-project `LinkItemToTask`/`LinkSourceToTask` call directly,
+  so the rule holds even if a link is attempted outside the UI's own filter.
+- No new bridge commands or snapshot fields were needed for this: the
+  ContextHUB foundation's `linkSourceToTask` / `unlinkSourceFromTask` /
+  `linkContextItemToTask` / `unlinkContextItemFromTask` commands and the full
+  `contextSources`/`contextItems` snapshot arrays (with `linkedTaskIds`)
+  already covered it.
+- MEET Details Context block is intentionally deferred to a later PR; this PR
+  is Task Details only.
 
 ## Telegram Capture
 
