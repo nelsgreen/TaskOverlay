@@ -436,6 +436,32 @@ Active product scope:
   - moving very large transcript bodies out of `state.json` into external
     files with path references (`Body` is bounded in the foundation).
 
+## Telegram Capture
+
+- Local-first Telegram Capture setup is the first slice:
+  - native Settings section for enabling the capture channel;
+  - bot username, allowed Telegram user id, default project, and project aliases
+    stored as non-secret `AppState` settings;
+  - bot token stored outside `state.json` using Windows user-protected local
+    storage;
+  - Test connection uses Telegram Bot API `getMe` and must not log the token or
+    tokenized URL.
+- Polling is a later PR:
+  - no webhook;
+  - no hosting;
+  - no cloud sync;
+  - text-only first;
+  - accept messages only from the configured allowed Telegram user id;
+  - ignore groups/channels and unknown users;
+  - deduplicate updates with a stored cursor;
+  - create raw capture / SourceDocument drafts for explicit user review.
+- Future, not PR 1:
+  - voice;
+  - transcription;
+  - AI interpretation;
+  - automatic task/MEET creation;
+  - Context Pack integration.
+
 ## Notes
 
 - Short important notes module.

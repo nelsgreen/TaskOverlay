@@ -105,6 +105,9 @@ internal static class Program
             ("backup disabled and missing state", BackupDisabledAndMissingState),
             ("backup copy and scoped retention", BackupCopyAndScopedRetention),
             ("local backup settings persistence", LocalBackupSettingsPersistence),
+            ("telegram capture settings defaults", TelegramCaptureSettingsDefaults),
+            ("telegram capture settings repair", TelegramCaptureSettingsRepair),
+            ("telegram capture state excludes token", TelegramCaptureStateExcludesToken),
             ("backup metadata and latest discovery", BackupMetadataAndLatestDiscovery),
             ("backup discovery fallback and freshness", BackupDiscoveryFallbackAndFreshness),
             ("backup restore safety pair", BackupRestoreSafetyPair),
@@ -3314,6 +3317,110 @@ internal static class Program
                 loaded.Backups.LastBackupAttemptAtUtc ==
                 settings.Backups.LastBackupAttemptAtUtc,
                 "Backup attempt timestamp should persist for interval throttling.");
+        });
+    }
+
+    private static void TelegramCaptureSettingsDefaults()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var loaded = store.Load();
+
+            Assert(
+                loaded.TelegramCapture is not null,
+                "Fresh state should include Telegram Capture settings.");
+            var telegram = loaded.TelegramCapture!;
+            Assert(
+                !telegram.Enabled &&
+                telegram.BotUsername == string.Empty &&
+                telegram.AllowedUserId is null &&
+                telegram.DefaultProjectId is null &&
+                telegram.ProjectAliases.Count == 0 &&
+                telegram.PollIntervalSeconds ==
+                TelegramCaptureSettings.DefaultPollIntervalSeconds,
+                "Telegram Capture defaults should be safe and non-secret.");
+        });
+    }
+
+    private static void TelegramCaptureSettingsRepair()
+    {
+        var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-12T08:00:00Z"));
+        var project = state.Projects.Single();
+        var missingProjectId = Guid.NewGuid();
+        state.TelegramCapture = new TelegramCaptureSettings
+        {
+            Enabled = true,
+            BotUsername = " @capture_bot ",
+            AllowedUserId = 123456789,
+            DefaultProjectId = missingProjectId,
+            PollIntervalSeconds = -1,
+            ProjectAliases = new List<TelegramProjectAlias>
+            {
+                new() { Alias = "  kc  ", ProjectId = project.Id },
+                new() { Alias = "KC", ProjectId = project.Id },
+                new() { Alias = "ghost", ProjectId = missingProjectId },
+                new() { Alias = "   ", ProjectId = project.Id }
+            }
+        };
+
+        Assert(StateMigrator.RepairCurrentState(state), "Invalid Telegram settings should be repaired.");
+        Assert(state.TelegramCapture.BotUsername == "capture_bot", "Bot username should be trimmed and unprefixed.");
+        Assert(state.TelegramCapture.DefaultProjectId is null, "Invalid default project should be cleared.");
+        Assert(
+            state.TelegramCapture.PollIntervalSeconds ==
+            TelegramCaptureSettings.MinimumPollIntervalSeconds,
+            "Poll interval should be clamped.");
+        Assert(
+            state.TelegramCapture.ProjectAliases.Count == 1 &&
+            state.TelegramCapture.ProjectAliases[0].Alias == "kc" &&
+            state.TelegramCapture.ProjectAliases[0].ProjectId == project.Id,
+            "Aliases should trim, deduplicate, and remove invalid project references.");
+        Assert(!StateMigrator.RepairCurrentState(state), "Second Telegram repair pass should be a no-op.");
+    }
+
+    private static void TelegramCaptureStateExcludesToken()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-12T08:00:00Z"));
+            var project = state.Projects.Single();
+            state.TelegramCapture = new TelegramCaptureSettings
+            {
+                Enabled = true,
+                BotUsername = "capture_bot",
+                AllowedUserId = 987654321,
+                DefaultProjectId = project.Id,
+                ProjectAliases =
+                {
+                    new TelegramProjectAlias
+                    {
+                        Alias = "kaz",
+                        ProjectId = project.Id
+                    }
+                }
+            };
+
+            store.Save(state);
+
+            var json = File.ReadAllText(store.StatePath);
+            Assert(
+                json.Contains("\"telegramCapture\"", StringComparison.Ordinal),
+                "State should serialize non-secret Telegram Capture settings.");
+            Assert(
+                !json.Contains("token", StringComparison.OrdinalIgnoreCase) &&
+                !json.Contains("123456:ABC", StringComparison.OrdinalIgnoreCase),
+                "State must not contain Telegram bot token fields or values.");
+
+            var loaded = store.Load();
+            Assert(
+                loaded.TelegramCapture.Enabled &&
+                loaded.TelegramCapture.BotUsername == "capture_bot" &&
+                loaded.TelegramCapture.AllowedUserId == 987654321 &&
+                loaded.TelegramCapture.DefaultProjectId == project.Id &&
+                loaded.TelegramCapture.ProjectAliases.Single().Alias == "kaz",
+                "Telegram Capture non-secret settings should roundtrip.");
         });
     }
 

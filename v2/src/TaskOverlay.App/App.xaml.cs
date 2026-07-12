@@ -29,6 +29,8 @@ public partial class App : System.Windows.Application
     private AppStateStore? _stateStore;
     private LocalSettingsStore? _localSettingsStore;
     private LocalAppSettings? _localSettings;
+    private TelegramTokenStore? _telegramTokenStore;
+    private TelegramBotApiClient? _telegramBotApiClient;
     private BackupService? _backupService;
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
@@ -64,6 +66,10 @@ public partial class App : System.Windows.Application
                 _diagnostics.StateDirectory,
                 (message, exception) => _diagnostics.Log(message, exception));
             _localSettings = _localSettingsStore.Load();
+            _telegramTokenStore = new TelegramTokenStore(
+                _diagnostics.StateDirectory,
+                (message, exception) => _diagnostics.Log(message, exception));
+            _telegramBotApiClient = new TelegramBotApiClient();
             _backupService = new BackupService(
                 _stateStore.StatePath,
                 (message, exception) => _diagnostics.Log(message, exception));
@@ -1005,7 +1011,13 @@ public partial class App : System.Windows.Application
                 OpenConfiguredBackupFolder,
                 BackupNowAsync,
                 CheckBackupFolderAsync,
-                RestoreLatestBackupAsync),
+                RestoreLatestBackupAsync,
+                GetTelegramCaptureSettings,
+                PersistState,
+                HasTelegramToken,
+                SaveTelegramToken,
+                ClearTelegramToken,
+                TestTelegramConnectionAsync),
             active => _overlayWindow?.SetModalInteractionActive(active));
         _utilityShellWindow.ActiveTabChanged += UtilityShellWindow_OnActiveTabChanged;
         _utilityShellWindow.Closed += UtilityShellWindow_OnClosed;
@@ -1118,6 +1130,52 @@ public partial class App : System.Windows.Application
         return _localSettings?.Backups ??
                throw new InvalidOperationException(
                    "Local settings are not available before startup completes.");
+    }
+
+    private TelegramCaptureSettings GetTelegramCaptureSettings()
+    {
+        if (_state is null)
+        {
+            throw new InvalidOperationException(
+                "State is not available before startup completes.");
+        }
+
+        _state.TelegramCapture ??= new TelegramCaptureSettings();
+        _state.TelegramCapture.Normalize(_state.Projects);
+        return _state.TelegramCapture;
+    }
+
+    private bool HasTelegramToken() => _telegramTokenStore?.HasToken() == true;
+
+    private bool SaveTelegramToken(string token)
+    {
+        if (_telegramTokenStore is null)
+        {
+            return false;
+        }
+
+        return _telegramTokenStore.SaveToken(token);
+    }
+
+    private bool ClearTelegramToken() =>
+        _telegramTokenStore?.ClearToken() == true;
+
+    private async Task<TelegramConnectionTestResult> TestTelegramConnectionAsync()
+    {
+        if (_telegramTokenStore is null || _telegramBotApiClient is null)
+        {
+            return TelegramConnectionTestResult.Fail(
+                "Telegram token storage is not available.");
+        }
+
+        var token = _telegramTokenStore.LoadToken();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return TelegramConnectionTestResult.Fail(
+                "Bot token is missing. Save a token first.");
+        }
+
+        return await _telegramBotApiClient.TestConnectionAsync(token);
     }
 
     private void SaveLocalSettings()

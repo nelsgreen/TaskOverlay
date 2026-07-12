@@ -17,7 +17,13 @@ public sealed class SettingsWindowActions
         Func<bool> openBackupFolder,
         Func<Task<BackupResult>> backupNow,
         Func<Task<BackupFolderCheckResult>> checkBackupFolder,
-        Func<Task<RestoreResult>> restoreLatestBackup)
+        Func<Task<RestoreResult>> restoreLatestBackup,
+        Func<TelegramCaptureSettings> getTelegramSettings,
+        Action saveTelegramSettings,
+        Func<bool> hasTelegramToken,
+        Func<string, bool> saveTelegramToken,
+        Func<bool> clearTelegramToken,
+        Func<Task<TelegramConnectionTestResult>> testTelegramConnection)
     {
         SetOverlayMode = setOverlayMode;
         OpenLogs = openLogs;
@@ -30,6 +36,12 @@ public sealed class SettingsWindowActions
         BackupNow = backupNow;
         CheckBackupFolder = checkBackupFolder;
         RestoreLatestBackup = restoreLatestBackup;
+        GetTelegramSettings = getTelegramSettings;
+        SaveTelegramSettings = saveTelegramSettings;
+        HasTelegramToken = hasTelegramToken;
+        SaveTelegramToken = saveTelegramToken;
+        ClearTelegramToken = clearTelegramToken;
+        TestTelegramConnection = testTelegramConnection;
     }
 
     public Action<OverlayMode> SetOverlayMode { get; }
@@ -43,4 +55,10 @@ public sealed class SettingsWindowActions
     public Func<Task<BackupResult>> BackupNow { get; }
     public Func<Task<BackupFolderCheckResult>> CheckBackupFolder { get; }
     public Func<Task<RestoreResult>> RestoreLatestBackup { get; }
+    public Func<TelegramCaptureSettings> GetTelegramSettings { get; }
+    public Action SaveTelegramSettings { get; }
+    public Func<bool> HasTelegramToken { get; }
+    public Func<string, bool> SaveTelegramToken { get; }
+    public Func<bool> ClearTelegramToken { get; }
+    public Func<Task<TelegramConnectionTestResult>> TestTelegramConnection { get; }
 }
