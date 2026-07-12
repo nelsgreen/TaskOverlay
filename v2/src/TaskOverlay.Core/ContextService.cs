@@ -173,14 +173,23 @@ public sealed class ContextService
     public bool DeleteItem(Guid itemId) =>
         _state.ContextItems.RemoveAll(item => item.Id == itemId) > 0;
 
-    public bool LinkItemToTask(Guid itemId, Guid taskId, DateTimeOffset? now = null) =>
-        MutateLinks(
-            FindItem(itemId),
-            item => item.LinkedTaskIds,
+    /// <summary>
+    /// Links a context item to a task in the same project. Task Details only ever
+    /// offers same-project candidates, but this is enforced here too so a
+    /// cross-project link can never be created even if attempted directly.
+    /// </summary>
+    public bool LinkItemToTask(Guid itemId, Guid taskId, DateTimeOffset? now = null)
+    {
+        var item = FindItem(itemId);
+        var task = _state.Tasks.FirstOrDefault(candidate => candidate.Id == taskId);
+        return MutateLinks(
+            item,
+            candidate => candidate.LinkedTaskIds,
             taskId,
             add: true,
-            targetExists: _state.Tasks.Any(task => task.Id == taskId),
+            targetExists: item is not null && task is not null && task.ProjectId == item.ProjectId,
             now);
+    }
 
     public bool UnlinkItemFromTask(Guid itemId, Guid taskId, DateTimeOffset? now = null) =>
         MutateLinks(FindItem(itemId), item => item.LinkedTaskIds, taskId, add: false, targetExists: true, now);
@@ -197,14 +206,23 @@ public sealed class ContextService
     public bool UnlinkItemFromMeeting(Guid itemId, Guid meetingId, DateTimeOffset? now = null) =>
         MutateLinks(FindItem(itemId), item => item.LinkedMeetingIds, meetingId, add: false, targetExists: true, now);
 
-    public bool LinkSourceToTask(Guid sourceId, Guid taskId, DateTimeOffset? now = null) =>
-        MutateLinks(
-            FindSource(sourceId),
-            source => source.LinkedTaskIds,
+    /// <summary>
+    /// Links a source document to a task in the same project. Task Details only ever
+    /// offers same-project candidates, but this is enforced here too so a
+    /// cross-project link can never be created even if attempted directly.
+    /// </summary>
+    public bool LinkSourceToTask(Guid sourceId, Guid taskId, DateTimeOffset? now = null)
+    {
+        var source = FindSource(sourceId);
+        var task = _state.Tasks.FirstOrDefault(candidate => candidate.Id == taskId);
+        return MutateLinks(
+            source,
+            candidate => candidate.LinkedTaskIds,
             taskId,
             add: true,
-            targetExists: _state.Tasks.Any(task => task.Id == taskId),
+            targetExists: source is not null && task is not null && task.ProjectId == source.ProjectId,
             now);
+    }
 
     public bool UnlinkSourceFromTask(Guid sourceId, Guid taskId, DateTimeOffset? now = null) =>
         MutateLinks(FindSource(sourceId), source => source.LinkedTaskIds, taskId, add: false, targetExists: true, now);

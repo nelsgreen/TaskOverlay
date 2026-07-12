@@ -2,10 +2,24 @@
 
 import { useEffect, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, Bell, Check, ChevronRight, Flag, ListChecks, MapPin, Pin, Repeat, Trash2, UndoDot, X } from "lucide-react"
-import type { Project, ReminderPreset, ReminderState, RepeatInterval, Section, Status, Task, TaskCheckpoint, WorkspaceTaskCommand } from "@/lib/types"
+import type {
+  Project,
+  ReminderPreset,
+  ReminderState,
+  RepeatInterval,
+  Section,
+  Status,
+  Task,
+  TaskCheckpoint,
+  WorkspaceContextHubCommand,
+  WorkspaceContextItemSnapshot,
+  WorkspaceContextSourceSnapshot,
+  WorkspaceTaskCommand,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { isoFromLocalDateTime } from "@/lib/calendar-date"
 import { statusConfig } from "./status-badge"
+import { TaskContextBlock } from "./task-context-block"
 
 type BridgeEditField = "title" | "status" | "pinToPanel" | "notes" | "waitingFor" | "reminder" | "deadline"
 /** The bridge's updateTaskReminder command always replaces both fields at once (the C# side has
@@ -36,6 +50,13 @@ interface Props {
   /** Sends a fully-shaped checkpoint ("Steps") command through the bridge when connected. */
   onCheckpointCommand?: (command: WorkspaceTaskCommand) => boolean
   onClearBridgeError?: () => void
+  /** ContextHUB records for the Context block. Absent/empty renders the block's empty state. */
+  contextSources?: WorkspaceContextSourceSnapshot[]
+  contextItems?: WorkspaceContextItemSnapshot[]
+  /** Sends a link/unlink ContextHUB command through the bridge (mock fallback handled by the caller). */
+  onContextCommand?: (command: WorkspaceContextHubCommand) => boolean
+  /** Switches Workspace to the ContextHUB tab. */
+  onOpenContextHub?: () => void
 }
 
 /** Combines local date+time fields into a UTC ISO instant, or null when incomplete/absent. */
@@ -278,6 +299,10 @@ export function DetailsPanel({
   onBridgeEdit,
   onCheckpointCommand,
   onClearBridgeError,
+  contextSources = [],
+  contextItems = [],
+  onContextCommand,
+  onOpenContextHub,
 }: Props) {
   const [draft, setDraft] = useState<Task | null>(task)
   // Reminder/Deadline/Location cards are collapsed to one row and expand on hover
@@ -1397,6 +1422,18 @@ export function DetailsPanel({
             </div>
         </div>
         </fieldset>
+
+        {/* ── CONTEXT — linked ContextHUB SourceDocuments/ContextItems (Task-only MVP) ── */}
+        {onContextCommand && onOpenContextHub && (
+          <TaskContextBlock
+            task={draft}
+            contextSources={contextSources}
+            contextItems={contextItems}
+            onCommand={onContextCommand}
+            onOpenContextHub={onOpenContextHub}
+            locked={locked}
+          />
+        )}
       </div>
 
       {/* ── Bottom actions: Delete (left) + Revert (right) ── */}

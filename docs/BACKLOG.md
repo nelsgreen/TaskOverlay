@@ -424,9 +424,28 @@ Active product scope:
   - repair/migration for old states and dangling links;
   - deleting tasks/MEETs/sources repairs context links without deleting
     memory.
-- Later ContextHUB work, explicitly not in the foundation:
-  - Task Details Context block (PR 2);
-  - MEET Details Context block (PR 2);
+- Task Details Context block (done):
+  - compact "Context" card in Task Details, below Steps;
+  - shows SourceDocuments and ContextItems already linked to the selected
+    task (type/status/source-app badges, short summary/body preview, linked
+    count), with a readable empty state when nothing is linked;
+  - "Link existing" opens a small modal listing same-project
+    SourceDocuments/ContextItems not yet linked to this task, with a title
+    filter; no create/edit here, that stays in ContextHUB;
+  - "Unlink" per linked record, and an "Open ContextHUB" shortcut that
+    switches Workspace to the ContextHUB tab;
+  - reuses the existing `linkSourceToTask` / `unlinkSourceFromTask` /
+    `linkContextItemToTask` / `unlinkContextItemFromTask` bridge commands
+    from the ContextHUB foundation - no new commands or snapshot fields were
+    needed, since the full `contextSources`/`contextItems` snapshot arrays
+    already carry `linkedTaskIds`;
+  - `ContextService.LinkItemToTask`/`LinkSourceToTask` now reject a task and
+    record from different projects (previously only checked that the task
+    existed); Task Details already only offers same-project candidates, this
+    is defense in depth against a direct cross-project link;
+  - MEET Context block is explicitly deferred to a later PR (not this one).
+- Later ContextHUB work, explicitly not in this PR:
+  - MEET Details Context block;
   - Project Context Pack export/copy (PR 3);
   - manual source import polish;
   - OpenAI meeting analysis writing drafts into ContextHUB after user review;

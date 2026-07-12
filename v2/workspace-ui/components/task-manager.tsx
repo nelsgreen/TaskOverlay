@@ -1631,6 +1631,10 @@ export function TaskManager() {
               onBridgeEdit={sendTaskEdit}
               onCheckpointCommand={sendCheckpointCommand}
               onClearBridgeError={bridge.clearError}
+              contextSources={contextSources}
+              contextItems={contextItems}
+              onContextCommand={handleContextHubCommand}
+              onOpenContextHub={() => setTab("contexthub")}
             />
           )}
         </div>
