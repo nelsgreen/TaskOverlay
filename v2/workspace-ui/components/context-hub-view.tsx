@@ -582,7 +582,7 @@ interface ContextHubDetailsPanelProps {
 export function ContextHubDetailsPanel(props: ContextHubDetailsPanelProps) {
   const { selection, item, source } = props
   return (
-    <aside className="flex h-full w-full flex-col border-l border-border bg-sidebar">
+    <aside className="flex h-full w-full min-w-0 flex-col overflow-x-hidden border-l border-border bg-sidebar">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">Details</h2>
         <span className="rounded-md bg-accent px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -632,14 +632,14 @@ function LinkEditor({
   const available = options.filter((option) => !linkedIds.includes(option.id))
   const labelOf = (id: string) => options.find((option) => option.id === id)?.label ?? "(missing)"
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-w-0 flex-col gap-1.5">
       <FieldLabel>{label}</FieldLabel>
       {linkedIds.length === 0 ? (
         <p className="text-[11px] text-muted-foreground">{emptyText}</p>
       ) : (
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           {linkedIds.map((id) => (
-            <div key={id} className="flex items-center gap-2 rounded-md border border-border bg-card/60 px-2 py-1.5">
+            <div key={id} className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-card/60 px-2 py-1.5">
               <Icon className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/90">{labelOf(id)}</span>
               {!disabled && (
@@ -732,11 +732,11 @@ function ContextItemEditor({
     .map((s) => ({ id: s.id, label: s.title }))
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <fieldset disabled={readOnly} className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 disabled:opacity-70">
-        <div className="flex flex-col gap-1.5">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <fieldset disabled={readOnly} className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 disabled:opacity-70">
+        <div className="flex min-w-0 flex-col gap-1.5">
           <FieldLabel>Type</FieldLabel>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex min-w-0 max-w-full flex-wrap gap-1">
             {CONTEXT_TYPES.map((t) => {
               const on = t === itemType
               const meta = contextTypeMeta[t]
@@ -746,12 +746,12 @@ function ContextItemEditor({
                   type="button"
                   onClick={() => setItemType(t)}
                   className={cn(
-                    "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold transition-colors",
+                    "inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-left text-[10px] font-semibold leading-tight transition-colors whitespace-normal",
                     on ? cn(meta.bg, meta.border, meta.text) : "border-border text-muted-foreground hover:text-foreground",
                   )}
                 >
                   <span className={cn("size-1.5 rounded-full", on ? meta.dot : "bg-muted-foreground/40")} />
-                  {meta.label}
+                  <span className="min-w-0 break-words">{meta.label}</span>
                 </button>
               )
             })}
@@ -773,9 +773,9 @@ function ContextItemEditor({
           />
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div className="flex min-w-0 flex-col gap-1.5">
           <FieldLabel>Status</FieldLabel>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex min-w-0 max-w-full flex-wrap gap-1.5">
             {CONTEXT_STATUSES.map((s) => {
               const on = s === status
               const meta = contextStatusMeta[s]
@@ -785,11 +785,11 @@ function ContextItemEditor({
                   type="button"
                   onClick={() => setStatus(s)}
                   className={cn(
-                    "rounded-md border px-2 py-1 font-mono text-[11px] font-medium transition-colors",
+                    "max-w-full rounded-md border px-2 py-1 text-left font-mono text-[11px] font-medium leading-tight transition-colors whitespace-normal",
                     on ? cn(meta.bg, meta.border, meta.text) : "border-border text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {meta.label}
+                  <span className="min-w-0 break-words">{meta.label}</span>
                 </button>
               )
             })}
@@ -949,8 +949,8 @@ function SourceEditor({
   const projectLabel = projects.find((p) => p.id === source.projectId)?.name ?? ""
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <fieldset disabled={readOnly} className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 disabled:opacity-70">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <fieldset disabled={readOnly} className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 disabled:opacity-70">
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
             <FieldLabel>Source type</FieldLabel>
@@ -1015,13 +1015,13 @@ function SourceEditor({
           {derived.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">No context items yet.</p>
           ) : (
-            <div className="flex flex-col gap-1">
+            <div className="flex min-w-0 flex-col gap-1">
               {derived.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => onOpenSelection({ kind: "item", id: item.id })}
-                  className="flex items-center gap-2 rounded-md border border-border bg-card/60 px-2 py-1.5 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+                  className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-card/60 px-2 py-1.5 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
                 >
                   <TypeBadge type={item.itemType} />
                   <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/90">{item.title}</span>
