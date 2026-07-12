@@ -155,7 +155,25 @@ item.
   status (see the ContextHUB entry above and the domain rules this repo
   already follows) - it is shown as a small indicator on a task row instead
   of being added as a fake status filter chip.
-- MEET picker/MEET Context block redesign stays out of scope for this PR.
+- MEET picker/MEET Context block redesign stays out of scope for this PR
+  (done in a follow-up PR, see below).
+- MEET Details Context block (done) intentionally reuses the Task Context
+  block's rendering/interaction logic rather than writing a parallel
+  implementation: `task-context-block.tsx` now exports a shared, owner-
+  agnostic `RecordContextBlock` plus two thin wrappers, `TaskContextBlock`
+  (unchanged props/behavior) and `MeetContextBlock`. The only difference
+  between them is which linked-id array a record is checked/mutated against
+  (`linkedTaskIds` vs `linkedMeetingIds`) and which bridge command family is
+  sent (`...ToTask` vs `...ToMeeting`).
+- The Core cross-project guard added for Task links in PR #58
+  (`LinkItemToTask`/`LinkSourceToTask` reject a task in a different project)
+  is now mirrored for MEET links (`LinkItemToMeeting`/`LinkSourceToMeeting`).
+  MEET Details only ever offers same-project candidates, but this closes the
+  same silent-failure gap the linked task picker PR (#59) fixed on the Task
+  side.
+- `MeetItem.linkedTaskId` (the single optional Task a MEET can point to) is
+  unrelated to ContextHUB linking and is not touched by this PR - it remains
+  metadata/navigation only, exactly as before.
 
 ## Telegram Capture
 

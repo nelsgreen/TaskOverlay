@@ -208,6 +208,11 @@ internal static class Program
             ("task context unlink missing link is safe", TaskContextUnlinkMissingLinkIsSafe),
             ("task context telegram capture source linkable", TaskContextTelegramCaptureSourceLinkable),
             ("task context done task can still link", TaskContextDoneTaskCanStillLink),
+            ("meet context same project link allowed", MeetContextSameProjectLinkAllowed),
+            ("meet context cross project link rejected", MeetContextCrossProjectLinkRejected),
+            ("meet context duplicate link not added twice", MeetContextDuplicateLinkNotAddedTwice),
+            ("meet context unlink missing link is safe", MeetContextUnlinkMissingLinkIsSafe),
+            ("meet context telegram capture source linkable", MeetContextTelegramCaptureSourceLinkable),
             ("workspace context delete meeting clears links", WorkspaceContextDeleteMeetingClearsLinks),
             ("workspace context command validation", WorkspaceContextCommandValidation),
             ("workspace context repair removes dangling links", WorkspaceContextRepairRemovesDanglingLinks),
@@ -6451,6 +6456,133 @@ internal static class Program
         Assert(service.LinkSourceToTask(source.Id, task.Id, now),
             "A DONE task must still be able to receive context links.");
         Assert(source.LinkedTaskIds.Contains(task.Id), "The link should be recorded regardless of task status.");
+    }
+
+    private static void MeetContextSameProjectLinkAllowed()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T13:15:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var meeting = new MeetingService(state).Create(new MeetingUpdate(
+            project.Id, "Sync", null, now.AddDays(1), 30, null, null, null), now)!;
+        var service = new ContextService(state);
+
+        var item = service.CreateItem(new ContextItemUpdate(
+            project.Id, ContextItemType.Note, ContextItemStatus.Active, "Same project item",
+            null, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+        var source = service.CreateSource(new SourceDocumentUpdate(
+            project.Id, ContextSourceType.ManualNote, null, "Same project source",
+            null, null, now, Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+        Assert(service.LinkItemToMeeting(item.Id, meeting.Id, now),
+            "Linking an item to a same-project MEET should succeed.");
+        Assert(service.LinkSourceToMeeting(source.Id, meeting.Id, now),
+            "Linking a source to a same-project MEET should succeed.");
+        Assert(item.LinkedMeetingIds.Contains(meeting.Id) && source.LinkedMeetingIds.Contains(meeting.Id),
+            "Same-project MEET links should be recorded on both records.");
+    }
+
+    private static void MeetContextCrossProjectLinkRejected()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T13:30:00Z");
+        var state = AppState.CreateDefault(now);
+        var defaultProject = state.Projects[0];
+        var meeting = new MeetingService(state).Create(new MeetingUpdate(
+            defaultProject.Id, "Sync", null, now.AddDays(1), 30, null, null, null), now)!;
+        var otherProject = new ProjectService(state).CreateProject("Other project", now)!;
+        var service = new ContextService(state);
+
+        var item = service.CreateItem(new ContextItemUpdate(
+            otherProject.Id, ContextItemType.Note, ContextItemStatus.Active, "Other project item",
+            null, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+        var source = service.CreateSource(new SourceDocumentUpdate(
+            otherProject.Id, ContextSourceType.ManualNote, null, "Other project source",
+            null, null, now, Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+        Assert(!service.LinkItemToMeeting(item.Id, meeting.Id, now),
+            "Linking an item to a MEET in a different project must be rejected.");
+        Assert(!service.LinkSourceToMeeting(source.Id, meeting.Id, now),
+            "Linking a source to a MEET in a different project must be rejected.");
+        Assert(item.LinkedMeetingIds.Count == 0 && source.LinkedMeetingIds.Count == 0,
+            "A rejected cross-project MEET link must not be recorded.");
+        Assert(meeting.ProjectId == defaultProject.Id, "Sanity: the MEET stayed in its original project.");
+    }
+
+    private static void MeetContextDuplicateLinkNotAddedTwice()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T13:45:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var meeting = new MeetingService(state).Create(new MeetingUpdate(
+            project.Id, "Sync", null, now.AddDays(1), 30, null, null, null), now)!;
+        var service = new ContextService(state);
+
+        var item = service.CreateItem(new ContextItemUpdate(
+            project.Id, ContextItemType.Note, ContextItemStatus.Active, "Repeatable link item",
+            null, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+        var source = service.CreateSource(new SourceDocumentUpdate(
+            project.Id, ContextSourceType.ManualNote, null, "Repeatable link source",
+            null, null, now, Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+        Assert(service.LinkItemToMeeting(item.Id, meeting.Id, now) && service.LinkItemToMeeting(item.Id, meeting.Id, now),
+            "Linking the same item to the same MEET twice should both report success.");
+        Assert(service.LinkSourceToMeeting(source.Id, meeting.Id, now) && service.LinkSourceToMeeting(source.Id, meeting.Id, now),
+            "Linking the same source to the same MEET twice should both report success.");
+        Assert(item.LinkedMeetingIds.Count == 1, "Duplicate item-MEET links must not be added twice.");
+        Assert(source.LinkedMeetingIds.Count == 1, "Duplicate source-MEET links must not be added twice.");
+    }
+
+    private static void MeetContextUnlinkMissingLinkIsSafe()
+    {
+        var now = DateTimeOffset.Parse("2026-07-12T14:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects[0];
+        var meeting = new MeetingService(state).Create(new MeetingUpdate(
+            project.Id, "Sync", null, now.AddDays(1), 30, null, null, null), now)!;
+        var service = new ContextService(state);
+
+        var item = service.CreateItem(new ContextItemUpdate(
+            project.Id, ContextItemType.Note, ContextItemStatus.Active, "Never linked item",
+            null, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+        var source = service.CreateSource(new SourceDocumentUpdate(
+            project.Id, ContextSourceType.ManualNote, null, "Never linked source",
+            null, null, now, Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+        Assert(service.UnlinkItemFromMeeting(item.Id, meeting.Id, now),
+            "Unlinking an item that was never linked to this MEET must be a safe no-op.");
+        Assert(service.UnlinkSourceFromMeeting(source.Id, meeting.Id, now),
+            "Unlinking a source that was never linked to this MEET must be a safe no-op.");
+        Assert(item.LinkedMeetingIds.Count == 0 && source.LinkedMeetingIds.Count == 0,
+            "Nothing should have been added by an unlink of a non-existent MEET link.");
+    }
+
+    private static void MeetContextTelegramCaptureSourceLinkable()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T14:15:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var meeting = new MeetingService(state).Create(new MeetingUpdate(
+                project.Id, "Sync", null, now.AddDays(1), 30, null, null, null), now)!;
+            var store = new AppStateStore(directory);
+            var service = new ContextService(state);
+
+            var telegramSource = service.CreateSource(new SourceDocumentUpdate(
+                project.Id, ContextSourceType.TelegramCapture, ContextSourceApp.Telegram, "Telegram capture",
+                "жду ответ от Мадины по sandbox credentials", null, now,
+                Array.Empty<Guid>(), Array.Empty<Guid>()), now)!;
+
+            Assert(service.LinkSourceToMeeting(telegramSource.Id, meeting.Id, now),
+                "A TelegramCapture SourceDocument should link to a MEET like any other source.");
+            store.Save(state);
+
+            var loaded = store.Load();
+            var reloaded = loaded.ContextSources.Single();
+            Assert(reloaded.SourceType == ContextSourceType.TelegramCapture &&
+                   reloaded.LinkedMeetingIds.Contains(meeting.Id),
+                "The Telegram capture MEET link should persist through save/load.");
+        });
     }
 
     private static void WorkspaceContextDeleteTaskClearsLinks()

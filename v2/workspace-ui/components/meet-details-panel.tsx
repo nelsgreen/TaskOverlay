@@ -2,8 +2,17 @@
 
 import { useEffect, useRef, useState } from "react"
 import { CalendarDays, Clock, ExternalLink, MapPin, Save, Trash2, UndoDot, Video } from "lucide-react"
-import type { MeetDuration, MeetItem, Project, Task } from "@/lib/types"
+import type {
+  MeetDuration,
+  MeetItem,
+  Project,
+  Task,
+  WorkspaceContextHubCommand,
+  WorkspaceContextItemSnapshot,
+  WorkspaceContextSourceSnapshot,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { MeetContextBlock } from "./task-context-block"
 
 interface Props {
   meet: MeetItem | null
@@ -14,6 +23,13 @@ interface Props {
   onDelete: (id: string) => void
   onOpenLinkedTask?: (taskId: string) => void
   readOnly?: boolean
+  /** ContextHUB records for the Context block. Absent/empty renders the block's empty state. */
+  contextSources?: WorkspaceContextSourceSnapshot[]
+  contextItems?: WorkspaceContextItemSnapshot[]
+  /** Sends a link/unlink ContextHUB command through the bridge (mock fallback handled by the caller). */
+  onContextCommand?: (command: WorkspaceContextHubCommand) => boolean
+  /** Switches Workspace to the ContextHUB tab. */
+  onOpenContextHub?: () => void
 }
 
 const durationOptions: { value: MeetDuration; label: string }[] = [
@@ -68,7 +84,19 @@ function computeEndTime(start: string, dur: MeetDuration): string {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`
 }
 
-export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete, onOpenLinkedTask, readOnly = false }: Props) {
+export function MeetDetailsPanel({
+  meet,
+  projects,
+  tasks,
+  onApply,
+  onDelete,
+  onOpenLinkedTask,
+  readOnly = false,
+  contextSources = [],
+  contextItems = [],
+  onContextCommand,
+  onOpenContextHub,
+}: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
   const sessionBaseRef = useRef<MeetItem | null>(meet)
 
@@ -316,6 +344,18 @@ export function MeetDetailsPanel({ meet, projects, tasks, onApply, onDelete, onO
             </p>
           )}
         </div>
+
+        {/* ── CONTEXT — linked ContextHUB SourceDocuments/ContextItems (MEET-only MVP) ── */}
+        {onContextCommand && onOpenContextHub && (
+          <MeetContextBlock
+            meet={draft}
+            contextSources={contextSources}
+            contextItems={contextItems}
+            onCommand={onContextCommand}
+            onOpenContextHub={onOpenContextHub}
+            locked={readOnly}
+          />
+        )}
 
         {/* ── Info note ── */}
         <p className="text-[11px] text-muted-foreground/70 text-pretty">

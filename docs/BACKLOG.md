@@ -462,9 +462,28 @@ Active product scope:
     `linkSourceToTask` / `unlinkSourceFromTask` / `linkContextItemToTask` /
     `unlinkContextItemFromTask` bridge commands unchanged - no new commands,
     no snapshot changes, no Core changes;
-  - MEET picker and MEET Context block remain explicitly out of scope.
+  - MEET picker and MEET Context block remain explicitly out of scope (see
+    below - now done in a follow-up PR).
+- MEET Details Context block (done):
+  - same compact "Context" card as Task Details, below the Linked task
+    section in MEET Details;
+  - shows SourceDocuments/ContextItems linked to the selected MEET,
+    "Link existing" (same-project only), "Unlink" per record, and
+    "Open ContextHUB";
+  - reuses the Task Context block UI: `RecordContextBlock` in
+    `task-context-block.tsx` is the owner-agnostic shared core (an id +
+    project + which linked-id array to read/mutate); `TaskContextBlock` and
+    `MeetContextBlock` are thin wrappers over it with unchanged public props,
+    so Task Details behavior/appearance is untouched;
+  - reuses the existing `linkSourceToMeeting` / `unlinkSourceFromMeeting` /
+    `linkContextItemToMeeting` / `unlinkContextItemFromMeeting` bridge
+    commands unchanged - no new commands, no snapshot changes;
+  - `ContextService.LinkItemToMeeting`/`LinkSourceToMeeting` now reject a
+    MEET and record from different projects, mirroring the Task-side guard
+    added for PR #58 (previously only checked that the MEET existed);
+  - MEET's linked task (`MeetItem.linkedTaskId`) stays untouched - still
+    metadata/navigation only, not part of ContextHUB linking.
 - Later ContextHUB work, explicitly not in this PR:
-  - MEET Details Context block;
   - Project Context Pack export/copy (PR 3);
   - manual source import polish;
   - OpenAI meeting analysis writing drafts into ContextHUB after user review;

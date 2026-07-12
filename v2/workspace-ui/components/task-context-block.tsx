@@ -6,6 +6,7 @@ import type {
   ContextItemStatus,
   ContextItemType,
   ContextSourceType,
+  MeetItem,
   Task,
   WorkspaceContextHubCommand,
   WorkspaceContextItemSnapshot,
@@ -15,12 +16,18 @@ import { cn } from "@/lib/utils"
 import { contextStatusMeta, contextTypeMeta, sourceAppMeta, sourceTypeMeta } from "./context-hub-view"
 
 /**
- * Task Details -> Context block (MVP). Shows SourceDocuments/ContextItems
- * already linked to this task and lets the user link an existing same-project
- * record or unlink one — no create/edit here, that stays in ContextHUB.
- * Read-only preview: no local optimistic state, this simply renders whatever
- * contextSources/contextItems the caller passes; after a link/unlink command
- * round-trips through the bridge, a fresh snapshot re-renders it.
+ * Task/MEET Details -> Context block (MVP). Shows SourceDocuments/ContextItems
+ * already linked to the selected task or MEET and lets the user link an
+ * existing same-project record or unlink one — no create/edit here, that
+ * stays in ContextHUB. Read-only preview: no local optimistic state, this
+ * simply renders whatever contextSources/contextItems the caller passes;
+ * after a link/unlink command round-trips through the bridge, a fresh
+ * snapshot re-renders it.
+ *
+ * RecordContextBlock is the shared core (owner-agnostic: an id + project +
+ * which linked-id array to read/mutate). TaskContextBlock and MeetContextBlock
+ * are thin, unchanged-behavior wrappers so Task Details keeps its original
+ * prop shape and command types while MEET Details reuses the same UI/logic.
  */
 interface TaskContextBlockProps {
   task: Task
@@ -31,10 +38,6 @@ interface TaskContextBlockProps {
   locked: boolean
 }
 
-type Candidate =
-  | { kind: "source"; record: WorkspaceContextSourceSnapshot }
-  | { kind: "item"; record: WorkspaceContextItemSnapshot }
-
 export function TaskContextBlock({
   task,
   contextSources,
@@ -43,16 +46,102 @@ export function TaskContextBlock({
   onOpenContextHub,
   locked,
 }: TaskContextBlockProps) {
+  return (
+    <RecordContextBlock
+      ownerId={task.id}
+      projectId={task.projectId}
+      contextSources={contextSources}
+      contextItems={contextItems}
+      getLinkedSourceIds={(source) => source.linkedTaskIds}
+      getLinkedItemIds={(item) => item.linkedTaskIds}
+      onLinkSource={(sourceId) => onCommand({ type: "linkSourceToTask", sourceId, taskId: task.id })}
+      onUnlinkSource={(sourceId) => onCommand({ type: "unlinkSourceFromTask", sourceId, taskId: task.id })}
+      onLinkItem={(itemId) => onCommand({ type: "linkContextItemToTask", itemId, taskId: task.id })}
+      onUnlinkItem={(itemId) => onCommand({ type: "unlinkContextItemFromTask", itemId, taskId: task.id })}
+      onOpenContextHub={onOpenContextHub}
+      locked={locked}
+    />
+  )
+}
+
+interface MeetContextBlockProps {
+  meet: MeetItem
+  contextSources: WorkspaceContextSourceSnapshot[]
+  contextItems: WorkspaceContextItemSnapshot[]
+  onCommand: (command: WorkspaceContextHubCommand) => boolean
+  onOpenContextHub: () => void
+  locked: boolean
+}
+
+export function MeetContextBlock({
+  meet,
+  contextSources,
+  contextItems,
+  onCommand,
+  onOpenContextHub,
+  locked,
+}: MeetContextBlockProps) {
+  return (
+    <RecordContextBlock
+      ownerId={meet.id}
+      projectId={meet.projectId}
+      contextSources={contextSources}
+      contextItems={contextItems}
+      getLinkedSourceIds={(source) => source.linkedMeetingIds}
+      getLinkedItemIds={(item) => item.linkedMeetingIds}
+      onLinkSource={(sourceId) => onCommand({ type: "linkSourceToMeeting", sourceId, meetingId: meet.id })}
+      onUnlinkSource={(sourceId) => onCommand({ type: "unlinkSourceFromMeeting", sourceId, meetingId: meet.id })}
+      onLinkItem={(itemId) => onCommand({ type: "linkContextItemToMeeting", itemId, meetingId: meet.id })}
+      onUnlinkItem={(itemId) => onCommand({ type: "unlinkContextItemFromMeeting", itemId, meetingId: meet.id })}
+      onOpenContextHub={onOpenContextHub}
+      locked={locked}
+    />
+  )
+}
+
+type Candidate =
+  | { kind: "source"; record: WorkspaceContextSourceSnapshot }
+  | { kind: "item"; record: WorkspaceContextItemSnapshot }
+
+interface RecordContextBlockProps {
+  ownerId: string
+  projectId: string
+  contextSources: WorkspaceContextSourceSnapshot[]
+  contextItems: WorkspaceContextItemSnapshot[]
+  getLinkedSourceIds: (source: WorkspaceContextSourceSnapshot) => string[]
+  getLinkedItemIds: (item: WorkspaceContextItemSnapshot) => string[]
+  onLinkSource: (sourceId: string) => void
+  onUnlinkSource: (sourceId: string) => void
+  onLinkItem: (itemId: string) => void
+  onUnlinkItem: (itemId: string) => void
+  onOpenContextHub: () => void
+  locked: boolean
+}
+
+function RecordContextBlock({
+  ownerId,
+  projectId,
+  contextSources,
+  contextItems,
+  getLinkedSourceIds,
+  getLinkedItemIds,
+  onLinkSource,
+  onUnlinkSource,
+  onLinkItem,
+  onUnlinkItem,
+  onOpenContextHub,
+  locked,
+}: RecordContextBlockProps) {
   const [modalOpen, setModalOpen] = useState(false)
   const [search, setSearch] = useState("")
 
   const linkedSources = useMemo(
-    () => contextSources.filter((source) => source.linkedTaskIds.includes(task.id)),
-    [contextSources, task.id],
+    () => contextSources.filter((source) => getLinkedSourceIds(source).includes(ownerId)),
+    [contextSources, getLinkedSourceIds, ownerId],
   )
   const linkedItems = useMemo(
-    () => contextItems.filter((item) => item.linkedTaskIds.includes(task.id)),
-    [contextItems, task.id],
+    () => contextItems.filter((item) => getLinkedItemIds(item).includes(ownerId)),
+    [contextItems, getLinkedItemIds, ownerId],
   )
   const totalLinked = linkedSources.length + linkedItems.length
 
@@ -63,21 +152,21 @@ export function TaskContextBlock({
     const query = search.trim().toLowerCase()
     const matchesQuery = (title: string) => !query || title.toLowerCase().includes(query)
     const sourceCandidates: Candidate[] = contextSources
-      .filter((source) => source.projectId === task.projectId && !source.linkedTaskIds.includes(task.id))
+      .filter((source) => source.projectId === projectId && !getLinkedSourceIds(source).includes(ownerId))
       .filter((source) => matchesQuery(source.title))
       .map((record) => ({ kind: "source" as const, record }))
     const itemCandidates: Candidate[] = contextItems
-      .filter((item) => item.projectId === task.projectId && !item.linkedTaskIds.includes(task.id))
+      .filter((item) => item.projectId === projectId && !getLinkedItemIds(item).includes(ownerId))
       .filter((item) => matchesQuery(item.title))
       .map((record) => ({ kind: "item" as const, record }))
     return [...sourceCandidates, ...itemCandidates]
-  }, [contextSources, contextItems, task.projectId, task.id, search])
+  }, [contextSources, contextItems, projectId, ownerId, search, getLinkedSourceIds, getLinkedItemIds])
 
   function linkCandidate(candidate: Candidate) {
     if (candidate.kind === "source") {
-      onCommand({ type: "linkSourceToTask", sourceId: candidate.record.id, taskId: task.id })
+      onLinkSource(candidate.record.id)
     } else {
-      onCommand({ type: "linkContextItemToTask", itemId: candidate.record.id, taskId: task.id })
+      onLinkItem(candidate.record.id)
     }
   }
 
@@ -108,7 +197,7 @@ export function TaskContextBlock({
                       key={source.id}
                       source={source}
                       locked={locked}
-                      onUnlink={() => onCommand({ type: "unlinkSourceFromTask", sourceId: source.id, taskId: task.id })}
+                      onUnlink={() => onUnlinkSource(source.id)}
                     />
                   ))}
                 </div>
@@ -123,7 +212,7 @@ export function TaskContextBlock({
                       key={item.id}
                       item={item}
                       locked={locked}
-                      onUnlink={() => onCommand({ type: "unlinkContextItemFromTask", itemId: item.id, taskId: task.id })}
+                      onUnlink={() => onUnlinkItem(item.id)}
                     />
                   ))}
                 </div>
