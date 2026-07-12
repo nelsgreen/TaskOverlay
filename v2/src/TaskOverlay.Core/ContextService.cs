@@ -194,14 +194,23 @@ public sealed class ContextService
     public bool UnlinkItemFromTask(Guid itemId, Guid taskId, DateTimeOffset? now = null) =>
         MutateLinks(FindItem(itemId), item => item.LinkedTaskIds, taskId, add: false, targetExists: true, now);
 
-    public bool LinkItemToMeeting(Guid itemId, Guid meetingId, DateTimeOffset? now = null) =>
-        MutateLinks(
-            FindItem(itemId),
-            item => item.LinkedMeetingIds,
+    /// <summary>
+    /// Links a context item to a MEET in the same project. MEET Details only ever
+    /// offers same-project candidates, but this is enforced here too so a
+    /// cross-project link can never be created even if attempted directly.
+    /// </summary>
+    public bool LinkItemToMeeting(Guid itemId, Guid meetingId, DateTimeOffset? now = null)
+    {
+        var item = FindItem(itemId);
+        var meeting = _state.Meetings.FirstOrDefault(candidate => candidate.Id == meetingId);
+        return MutateLinks(
+            item,
+            candidate => candidate.LinkedMeetingIds,
             meetingId,
             add: true,
-            targetExists: _state.Meetings.Any(meeting => meeting.Id == meetingId),
+            targetExists: item is not null && meeting is not null && meeting.ProjectId == item.ProjectId,
             now);
+    }
 
     public bool UnlinkItemFromMeeting(Guid itemId, Guid meetingId, DateTimeOffset? now = null) =>
         MutateLinks(FindItem(itemId), item => item.LinkedMeetingIds, meetingId, add: false, targetExists: true, now);
@@ -227,14 +236,23 @@ public sealed class ContextService
     public bool UnlinkSourceFromTask(Guid sourceId, Guid taskId, DateTimeOffset? now = null) =>
         MutateLinks(FindSource(sourceId), source => source.LinkedTaskIds, taskId, add: false, targetExists: true, now);
 
-    public bool LinkSourceToMeeting(Guid sourceId, Guid meetingId, DateTimeOffset? now = null) =>
-        MutateLinks(
-            FindSource(sourceId),
-            source => source.LinkedMeetingIds,
+    /// <summary>
+    /// Links a source document to a MEET in the same project. MEET Details only ever
+    /// offers same-project candidates, but this is enforced here too so a
+    /// cross-project link can never be created even if attempted directly.
+    /// </summary>
+    public bool LinkSourceToMeeting(Guid sourceId, Guid meetingId, DateTimeOffset? now = null)
+    {
+        var source = FindSource(sourceId);
+        var meeting = _state.Meetings.FirstOrDefault(candidate => candidate.Id == meetingId);
+        return MutateLinks(
+            source,
+            candidate => candidate.LinkedMeetingIds,
             meetingId,
             add: true,
-            targetExists: _state.Meetings.Any(meeting => meeting.Id == meetingId),
+            targetExists: source is not null && meeting is not null && meeting.ProjectId == source.ProjectId,
             now);
+    }
 
     public bool UnlinkSourceFromMeeting(Guid sourceId, Guid meetingId, DateTimeOffset? now = null) =>
         MutateLinks(FindSource(sourceId), source => source.LinkedMeetingIds, meetingId, add: false, targetExists: true, now);

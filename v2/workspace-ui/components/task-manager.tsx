@@ -1605,6 +1605,10 @@ export function TaskManager() {
               onDelete={handleDeleteMeet}
               onOpenLinkedTask={selectTask}
               readOnly={readOnly}
+              contextSources={contextSources}
+              contextItems={contextItems}
+              onContextCommand={handleContextHubCommand}
+              onOpenContextHub={() => setTab("contexthub")}
             />
           ) : tab === "workstreams" && !selectedTask && selectedWorkstreamSection && selectedWorkstreamProject ? (
             <WorkstreamDetailPanel
