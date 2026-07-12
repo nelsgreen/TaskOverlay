@@ -469,7 +469,32 @@ Active product scope:
     auto-creating a project;
   - the bot token stays in the PR 1 protected local store; polling never
     logs the token or a token-bearing URL.
-- Future, not PR 2:
+- Status/diagnostics (PR 3, done):
+  - a small, in-memory, non-secret `TelegramCaptureDiagnostics` snapshot
+    (`TaskOverlay.Core`) reports a single status - `NotConfigured`,
+    `Disabled`, `Running`, `WaitingForMessages`, `TokenError`,
+    `NetworkError`, or `Error` - plus last poll/success/captured timestamps,
+    the last processed update id, a redacted last-error summary, and a
+    consecutive-error count;
+  - `TelegramPollingService` updates this snapshot at every stage of the
+    poll loop (started, succeeded, failed, applied); the Settings ->
+    Telegram Capture section polls it every few seconds while open and
+    shows it as plain text, never the token;
+  - `TelegramCaptureDiagnosticsRedactor` strips anything shaped like a bot
+    token or a token-bearing `api.telegram.org` URL from any diagnostics
+    text before it can reach Settings or logs, as defense in depth on top
+    of the existing convention of only using HTTP status codes and
+    exception type names in error messages;
+  - a "Check now" button performs one immediate, non-long-poll getUpdates
+    cycle through the same client/token/cursor as the background loop; the
+    loop is stopped first and resynced afterward so there is never more
+    than one outstanding getUpdates request for the bot token at a time
+    (concurrent long polls can make Telegram terminate one of them) -
+    this keeps the manual check from destabilizing normal polling;
+  - an "Open ContextHUB" button opens/focuses Workspace on the ContextHUB
+    tab; diagnostics are volatile (reset on restart) by design, the
+    persisted cursor (`LastUpdateId`) is unchanged from PR 2.
+- Future, not PR 3:
   - voice;
   - transcription;
   - AI interpretation / LLM-proposed actions with review-before-apply;

@@ -112,7 +112,12 @@ meeting-provider APIs remain intentionally outside the Basic MEET MVP.
 3. Capture inbox / ContextHUB draft path: store raw text safely and let the
    user review before applying anything - captures land as ContextHUB
    SourceDocuments today; a dedicated review/apply inbox is later work.
-4. Later: voice, transcription, AI interpretation and LLM-proposed actions
+4. Status/diagnostics - done. Settings -> Telegram Capture shows whether
+   polling is configured, running, waiting for messages, or failing
+   (token/network/other), with last poll/success/captured times, the last
+   processed update id, and a redacted error summary; a "Check now" button
+   and an "Open ContextHUB" shortcut are available. No new capture behavior.
+5. Later: voice, transcription, AI interpretation and LLM-proposed actions
    with review-before-apply, automatic task/MEET creation, Context Pack
    workflows.
 
