@@ -973,7 +973,7 @@ export function DetailsPanel({
                   const active = draft.deadlineDate === p.value
                   return (
                     <button
-                      key={p.value}
+                      key={`${p.label}:${p.value}`}
                       onClick={() => applyDeadlinePatch({
                         deadlineDate: p.value,
                         deadline: p.label,
