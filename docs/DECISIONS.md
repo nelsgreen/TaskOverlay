@@ -136,12 +136,27 @@ item.
 - The bot token must never be stored in `state.json`, committed, or logged.
   Non-secret settings may live in `AppState`: enabled flag, bot username,
   allowed Telegram user id, default project, aliases, and future poll interval.
-- Polling will be implemented later with Bot API long polling inside WPF v2.
-  Future polling must accept messages only from the configured allowed user id
-  and ignore unknown users, groups, and channels.
-- Plain text capture should create raw capture / SourceDocument drafts for user
-  review. Voice, transcription, AI interpretation, and automatic task/MEET
-  creation are later work.
+- PR 2 (done) adds polling: `TelegramPollingService` in `TaskOverlay.App` runs
+  Bot API `getUpdates` long polling entirely inside the WPF process. No
+  webhook, no hosting, no cloud sync.
+- Polling accepts messages only from the configured allowed Telegram user id
+  and ignores unknown users, non-private chats (groups/channels), bot/self
+  messages, and non-text updates. Ignored updates still advance the stored
+  `LastUpdateId` cursor so the app never re-fetches the same update forever;
+  an allowed capture only advances the cursor once its `SourceDocument` is
+  saved, so a save failure is retried instead of losing the message.
+- Command parsing (`/capture`, `/source`, `/task`, `/meet`) is deterministic
+  and literal: no NLP, no date parsing. Commands are shortcuts, not the final
+  UX. `/task` and `/meet` create `TelegramCapture` `SourceDocument` drafts
+  ("Telegram task draft" / "Telegram MEET draft"); they never create a final
+  Task or MEET in this PR.
+- Project aliases resolve case-insensitively; an unresolved hint falls back to
+  the configured default project (else the app Default project) and is
+  recorded as unresolved in the stored body. Resolution never auto-creates a
+  project.
+- Plain text and command captures create raw capture / SourceDocument drafts
+  for user review. Voice, transcription, AI interpretation, and automatic
+  final task/MEET creation are later work.
 
 ## Sync And Platform
 
