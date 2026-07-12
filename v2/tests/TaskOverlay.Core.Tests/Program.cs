@@ -169,7 +169,8 @@ internal static class Program
             ("workspace context delete meeting clears links", WorkspaceContextDeleteMeetingClearsLinks),
             ("workspace context command validation", WorkspaceContextCommandValidation),
             ("workspace context repair removes dangling links", WorkspaceContextRepairRemovesDanglingLinks),
-            ("workspace snapshot includes context data", WorkspaceSnapshotIncludesContextData)
+            ("workspace snapshot includes context data", WorkspaceSnapshotIncludesContextData),
+            ("workspace context hub restart snapshot", WorkspaceContextHubRestartSnapshot)
         };
 
         foreach (var test in tests)
@@ -5935,6 +5936,80 @@ internal static class Program
             "Snapshot item should expose derived source ids.");
         Assert(item.LinkedTaskIds.Count == 0,
             "Snapshot must filter dangling task links.");
+    }
+
+    private static void WorkspaceContextHubRestartSnapshot()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-12T14:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var source = new SourceDocument
+            {
+                ProjectId = project.Id,
+                SourceType = ContextSourceType.ChatSummary,
+                SourceApp = ContextSourceApp.ChatGpt,
+                Title = "Restart source",
+                Body = "Persisted source body",
+                Summary = "Persisted summary",
+                SourceDateUtc = now,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            var item = new ContextItem
+            {
+                ProjectId = project.Id,
+                ItemType = ContextItemType.ProjectFact,
+                Status = ContextItemStatus.Active,
+                Title = "Restart context",
+                Body = "Persisted context body",
+                SourceDocumentIds = new List<Guid> { source.Id },
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.ContextSources.Add(source);
+            state.ContextItems.Add(item);
+            state.WorkspaceSettings.ActiveTab = WorkspaceTab.ContextHub;
+            state.WorkspaceSettings.SelectedProjectIds = new List<Guid> { project.Id };
+
+            var store = new AppStateStore(directory);
+            store.Save(state);
+
+            var savedJson = File.ReadAllText(store.StatePath);
+            Assert(savedJson.Contains("\"activeTab\": \"contextHub\""),
+                "State JSON should persist the ContextHub enum in camelCase form.");
+
+            var loaded = store.Load();
+            Assert(loaded.ContextSources.Count == 1 && loaded.ContextItems.Count == 1,
+                "Persisted ContextHUB records must survive restart load.");
+
+            var snapshot = WorkspaceSnapshotFactory.Create(
+                loaded,
+                now,
+                WorkspaceSnapshotFactory.ConnectedMode);
+            Assert(snapshot.Mode == WorkspaceSnapshotFactory.ConnectedMode,
+                "Restart snapshot should be connected for the WPF Workspace.");
+            Assert(snapshot.Context.ActiveTab == "contexthub",
+                "Workspace snapshot must expose the React ContextHUB tab id.");
+            Assert(snapshot.ContextSources.Single().SourceApp == "chatgpt" &&
+                   snapshot.ContextSources.Single().SourceType == "chatSummary",
+                "Restart snapshot should expose frontend source enum values.");
+            Assert(snapshot.ContextItems.Single().ItemType == "projectFact" &&
+                   snapshot.ContextItems.Single().SourceDocumentIds.Single() == source.Id.ToString("N"),
+                "Restart snapshot should expose frontend item enum values and source links.");
+
+            var snapshotJson = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+            var document = JsonDocument.Parse(snapshotJson);
+            Assert(document.RootElement.GetProperty("context").GetProperty("activeTab").GetString() == "contexthub",
+                "Serialized restart snapshot should carry the normalized ContextHUB tab id.");
+            Assert(document.RootElement.GetProperty("contextSources").GetArrayLength() == 1 &&
+                   document.RootElement.GetProperty("contextItems").GetArrayLength() == 1,
+                "Serialized restart snapshot should include ContextHUB arrays.");
+        });
     }
 
     private static string WorkspaceCommandJson(

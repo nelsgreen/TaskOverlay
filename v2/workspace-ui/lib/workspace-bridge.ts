@@ -5,6 +5,7 @@ import type {
   MeetItem,
   Project,
   Section,
+  TabKey,
   Task,
   TimelineItem,
   PendingWorkspaceCommand,
@@ -256,7 +257,7 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
 function isWorkspaceContext(value: unknown): value is WorkspaceContextSnapshot {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceContextSnapshot>
-  return ["tree", "status", "timeline", "calendar", "workstreams", "contexthub"].includes(candidate.activeTab ?? "") &&
+  return ["tree", "status", "timeline", "calendar", "workstreams", "contexthub", "contextHub"].includes(candidate.activeTab ?? "") &&
     Array.isArray(candidate.selectedProjectIds) &&
     candidate.selectedProjectIds.every((id) => typeof id === "string") &&
     (candidate.selectedTaskId === null || typeof candidate.selectedTaskId === "string") &&
@@ -307,8 +308,15 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     // a host built before ContextHUB from breaking the whole snapshot.
     contextSources: snapshot.contextSources ?? [],
     contextItems: snapshot.contextItems ?? [],
-    context: snapshot.context,
+    context: {
+      ...snapshot.context,
+      activeTab: normalizeWorkspaceTab(snapshot.context.activeTab),
+    },
   }
+}
+
+function normalizeWorkspaceTab(value: string): TabKey {
+  return value === "contextHub" ? "contexthub" : value as TabKey
 }
 
 function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): MeetItem {
