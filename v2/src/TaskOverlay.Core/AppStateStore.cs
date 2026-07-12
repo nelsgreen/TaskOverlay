@@ -227,6 +227,8 @@ public sealed class AppStateStore
             state.Projects is null ||
             state.Groups is null ||
             state.Meetings is null ||
+            state.ContextSources is null ||
+            state.ContextItems is null ||
             state.OverlaySettings is null ||
             state.WindowPlacement is null ||
             state.TreeManagerSettings is null ||
@@ -302,6 +304,43 @@ public sealed class AppStateStore
                 meeting.LinkedTaskId is Guid linkedTaskId && !taskIds.Contains(linkedTaskId))
             {
                 throw new InvalidDataException("State file contains an invalid meeting.");
+            }
+        }
+
+        var sourceIds = state.ContextSources.Select(source => source.Id).ToHashSet();
+        if (sourceIds.Count != state.ContextSources.Count ||
+            state.ContextItems.Select(item => item.Id).Distinct().Count() != state.ContextItems.Count)
+        {
+            throw new InvalidDataException("State file contains duplicate context IDs.");
+        }
+
+        foreach (var source in state.ContextSources)
+        {
+            if (source.Id == Guid.Empty ||
+                !projectIds.Contains(source.ProjectId) ||
+                string.IsNullOrWhiteSpace(source.Title) ||
+                source.LinkedTaskIds is null ||
+                source.LinkedMeetingIds is null ||
+                source.LinkedTaskIds.Any(id => !taskIds.Contains(id)) ||
+                source.LinkedMeetingIds.Any(id => !meetingIds.Contains(id)))
+            {
+                throw new InvalidDataException("State file contains an invalid context source.");
+            }
+        }
+
+        foreach (var item in state.ContextItems)
+        {
+            if (item.Id == Guid.Empty ||
+                !projectIds.Contains(item.ProjectId) ||
+                string.IsNullOrWhiteSpace(item.Title) ||
+                item.SourceDocumentIds is null ||
+                item.LinkedTaskIds is null ||
+                item.LinkedMeetingIds is null ||
+                item.SourceDocumentIds.Any(id => !sourceIds.Contains(id)) ||
+                item.LinkedTaskIds.Any(id => !taskIds.Contains(id)) ||
+                item.LinkedMeetingIds.Any(id => !meetingIds.Contains(id)))
+            {
+                throw new InvalidDataException("State file contains an invalid context item.");
             }
         }
     }

@@ -6,6 +6,8 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Database,
+  FileText,
   Flag,
   FolderTree,
   Layers,
@@ -53,6 +55,9 @@ interface Props {
   onAddWorkstream: () => void
   addWorkstreamDisabled?: boolean
   addWorkstreamHint?: string | null
+  onAddContextItem: () => void
+  onAddContextSource: () => void
+  addContextDisabled?: boolean
 }
 
 const tabs: { key: TabKey; label: string; icon: typeof FolderTree; later?: boolean }[] = [
@@ -61,6 +66,7 @@ const tabs: { key: TabKey; label: string; icon: typeof FolderTree; later?: boole
   { key: "timeline", label: "Timeline", icon: CalendarClock },
   { key: "calendar", label: "Calendar", icon: CalendarDays },
   { key: "workstreams", label: "Workstreams", icon: Layers },
+  { key: "contexthub", label: "ContextHUB", icon: Database },
 ]
 
 const treeFilters: { key: TreeFilter; label: string }[] = [
@@ -127,6 +133,9 @@ export function WorkspaceHeader({
   onAddWorkstream,
   addWorkstreamDisabled = false,
   addWorkstreamHint = null,
+  onAddContextItem,
+  onAddContextSource,
+  addContextDisabled = false,
 }: Props) {
   const searchDisabled = tab === "calendar"
 
@@ -236,8 +245,55 @@ export function WorkspaceHeader({
             addHint={addWorkstreamHint}
           />
         )}
+        {tab === "contexthub" && (
+          <ContextHubToolbar
+            onAddContextItem={onAddContextItem}
+            onAddContextSource={onAddContextSource}
+            addDisabled={addContextDisabled}
+          />
+        )}
       </div>
     </header>
+  )
+}
+
+function ContextHubToolbar({
+  onAddContextItem,
+  onAddContextSource,
+  addDisabled,
+}: {
+  onAddContextItem: () => void
+  onAddContextSource: () => void
+  addDisabled?: boolean
+}) {
+  return (
+    <>
+      <span className="hidden text-[11px] text-muted-foreground lg:inline">
+        Project memory: decisions, blockers, questions, and their sources
+      </span>
+      <div className="ml-auto flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onAddContextSource}
+          disabled={addDisabled}
+          title={addDisabled ? "Read-only: connect to add sources" : undefined}
+          className="flex h-6 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <FileText className="size-3.5" />
+          Source
+        </button>
+        <button
+          type="button"
+          onClick={onAddContextItem}
+          disabled={addDisabled}
+          title={addDisabled ? "Read-only: connect to add context" : undefined}
+          className="flex h-6 items-center gap-1.5 rounded-md bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Plus className="size-3.5" />
+          Context
+        </button>
+      </div>
+    </>
   )
 }
 

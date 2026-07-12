@@ -2,7 +2,21 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Folder, FolderTree } from "lucide-react"
-import type { MeetItem, Section, Status, StatusFilterKey, TabKey, Task, TimelineItem, TreeFilter, WorkspaceTaskCommand, WorkstreamFilter } from "@/lib/types"
+import type {
+  MeetItem,
+  Section,
+  Status,
+  StatusFilterKey,
+  TabKey,
+  Task,
+  TimelineItem,
+  TreeFilter,
+  WorkspaceContextHubCommand,
+  WorkspaceContextItemSnapshot,
+  WorkspaceContextSourceSnapshot,
+  WorkspaceTaskCommand,
+  WorkstreamFilter,
+} from "@/lib/types"
 import {
   initialMeetItems,
   initialTasks,
@@ -24,6 +38,12 @@ import { DetailsPanel } from "./details-panel"
 import { MeetDetailsPanel } from "./meet-details-panel"
 import { ActiveNowStrip } from "./active-now-strip"
 import { WorkstreamsView, WorkstreamDetailPanel, deriveWorkstreamState, isRootSection } from "./workstreams-view"
+import {
+  ContextHubDetailsPanel,
+  ContextHubView,
+  type ContextHubModal,
+  type ContextHubSelection,
+} from "./context-hub-view"
 
 type WorkspaceSelection =
   | { kind: "task"; id: string }
@@ -89,6 +109,12 @@ export function TaskManager() {
   const [hideDone, setHideDone] = useState(false)
   const [wsFilter, setWsFilter] = useState<WorkstreamFilter>("all")
   const [addingWorkstream, setAddingWorkstream] = useState(false)
+  // ContextHUB: selection/modal are session-local; records come from the snapshot.
+  const [contextHubSelection, setContextHubSelection] = useState<ContextHubSelection>(null)
+  const [contextHubModal, setContextHubModal] = useState<ContextHubModal>(null)
+  // Mock-only orientation data (empty by default; dev preview CRUD works locally).
+  const [mockContextSources, setMockContextSources] = useState<WorkspaceContextSourceSnapshot[]>([])
+  const [mockContextItems, setMockContextItems] = useState<WorkspaceContextItemSnapshot[]>([])
   const [addingTreeSection, setAddingTreeSection] = useState(false)
   const [newSectionName, setNewSectionName] = useState("")
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
@@ -121,6 +147,8 @@ export function TaskManager() {
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
   const timelineItems = bridge.data?.timelineItems ?? mockTimelineItems
   const activeNowTaskIds = bridge.data?.activeNowTaskIds
+  const contextSources = bridge.data?.contextSources ?? mockContextSources
+  const contextItems = bridge.data?.contextItems ?? mockContextItems
 
   // Drop an optimistic override once the authoritative snapshot reflects the same value.
   useEffect(() => {
@@ -739,6 +767,160 @@ export function TaskManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge.lastCreatedSectionId])
 
+  // ── ContextHUB: connected commands with a local mock fallback for
+  //    dev-preview orientation (mock lists start empty, never persist) ──
+  const handleContextHubCommand = (command: WorkspaceContextHubCommand): boolean => {
+    if (connected) return bridge.sendContextHubCommand(command)
+    if (bridged) return false
+    const nowIso = new Date().toISOString()
+    switch (command.type) {
+      case "createContextSource": {
+        const id = `local-cs-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        setMockContextSources((prev) => [{
+          id,
+          projectId: command.projectId,
+          sourceType: command.sourceType,
+          sourceApp: command.sourceApp ?? null,
+          title: command.title,
+          body: command.body ?? "",
+          summary: command.summary ?? "",
+          sourceDateUtc: command.sourceDateUtc ?? nowIso,
+          linkedTaskIds: command.linkedTaskIds ?? [],
+          linkedMeetingIds: command.linkedMeetingIds ?? [],
+          createdAtUtc: nowIso,
+          updatedAtUtc: nowIso,
+        }, ...prev])
+        setContextHubSelection({ kind: "source", id })
+        return true
+      }
+      case "updateContextSource": {
+        setMockContextSources((prev) => prev.map((source) => source.id === command.sourceId
+          ? {
+              ...source,
+              ...(command.title !== undefined ? { title: command.title } : null),
+              ...(command.body !== undefined ? { body: command.body } : null),
+              ...(command.summary !== undefined ? { summary: command.summary } : null),
+              ...(command.sourceType !== undefined ? { sourceType: command.sourceType } : null),
+              ...(command.sourceApp !== undefined ? { sourceApp: command.sourceApp } : null),
+              ...(command.linkedTaskIds !== undefined ? { linkedTaskIds: command.linkedTaskIds } : null),
+              ...(command.linkedMeetingIds !== undefined ? { linkedMeetingIds: command.linkedMeetingIds } : null),
+              updatedAtUtc: nowIso,
+            }
+          : source))
+        return true
+      }
+      case "deleteContextSource":
+        setMockContextSources((prev) => prev.filter((source) => source.id !== command.sourceId))
+        setMockContextItems((prev) => prev.map((item) => ({
+          ...item,
+          sourceDocumentIds: item.sourceDocumentIds.filter((id) => id !== command.sourceId),
+        })))
+        return true
+      case "createContextItem": {
+        const id = `local-ci-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        setMockContextItems((prev) => [{
+          id,
+          projectId: command.projectId,
+          itemType: command.itemType,
+          status: command.status ?? "active",
+          title: command.title,
+          body: command.body ?? "",
+          sourceDocumentIds: command.sourceDocumentIds ?? [],
+          linkedTaskIds: command.linkedTaskIds ?? [],
+          linkedMeetingIds: command.linkedMeetingIds ?? [],
+          createdAtUtc: nowIso,
+          updatedAtUtc: nowIso,
+          resolvedAtUtc: (command.status ?? "active") === "active" ? null : nowIso,
+        }, ...prev])
+        setContextHubSelection({ kind: "item", id })
+        return true
+      }
+      case "updateContextItem": {
+        setMockContextItems((prev) => prev.map((item) => item.id === command.itemId
+          ? {
+              ...item,
+              ...(command.title !== undefined ? { title: command.title } : null),
+              ...(command.body !== undefined ? { body: command.body } : null),
+              ...(command.itemType !== undefined ? { itemType: command.itemType } : null),
+              ...(command.sourceDocumentIds !== undefined ? { sourceDocumentIds: command.sourceDocumentIds } : null),
+              ...(command.status !== undefined && command.status !== item.status
+                ? { status: command.status, resolvedAtUtc: command.status === "active" ? null : nowIso }
+                : null),
+              updatedAtUtc: nowIso,
+            }
+          : item))
+        return true
+      }
+      case "deleteContextItem":
+        setMockContextItems((prev) => prev.filter((item) => item.id !== command.itemId))
+        return true
+      case "linkContextItemToTask":
+      case "unlinkContextItemFromTask":
+      case "linkContextItemToMeeting":
+      case "unlinkContextItemFromMeeting": {
+        const link = command.type.startsWith("link")
+        const key = command.type.endsWith("Task") ? "linkedTaskIds" as const : "linkedMeetingIds" as const
+        const target = "taskId" in command ? command.taskId : command.meetingId
+        setMockContextItems((prev) => prev.map((item) => item.id === command.itemId
+          ? {
+              ...item,
+              [key]: link
+                ? [...new Set([...item[key], target])]
+                : item[key].filter((id) => id !== target),
+              updatedAtUtc: nowIso,
+            }
+          : item))
+        return true
+      }
+      case "linkSourceToTask":
+      case "unlinkSourceFromTask":
+      case "linkSourceToMeeting":
+      case "unlinkSourceFromMeeting": {
+        const link = command.type.startsWith("link")
+        const key = command.type.endsWith("Task") ? "linkedTaskIds" as const : "linkedMeetingIds" as const
+        const target = "taskId" in command ? command.taskId : command.meetingId
+        setMockContextSources((prev) => prev.map((source) => source.id === command.sourceId
+          ? {
+              ...source,
+              [key]: link
+                ? [...new Set([...source[key], target])]
+                : source[key].filter((id) => id !== target),
+              updatedAtUtc: nowIso,
+            }
+          : source))
+        return true
+      }
+    }
+  }
+
+  // Select a bridge-created record so its editor opens immediately.
+  useEffect(() => {
+    const sourceId = bridge.lastCreatedContextSourceId
+    const itemId = bridge.lastCreatedContextItemId
+    if (!sourceId && !itemId) return
+    setContextHubSelection(itemId ? { kind: "item", id: itemId } : { kind: "source", id: sourceId! })
+    bridge.clearLastCreatedContextIds()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge.lastCreatedContextSourceId, bridge.lastCreatedContextItemId])
+
+  // Drop a stale selection once its record disappears (deleted here or elsewhere).
+  useEffect(() => {
+    setContextHubSelection((current) => {
+      if (!current) return current
+      const exists = current.kind === "item"
+        ? contextItems.some((item) => item.id === current.id)
+        : contextSources.some((source) => source.id === current.id)
+      return exists ? current : null
+    })
+  }, [contextItems, contextSources])
+
+  const selectedContextItem = contextHubSelection?.kind === "item"
+    ? contextItems.find((item) => item.id === contextHubSelection.id) ?? null
+    : null
+  const selectedContextSource = contextHubSelection?.kind === "source"
+    ? contextSources.find((source) => source.id === contextHubSelection.id) ?? null
+    : null
+
   // Toolbar summary counts for the Workstreams filter chips (real rollups).
   const wsSummary = useMemo(() => {
     const scoped = sections.filter((section) =>
@@ -1189,6 +1371,9 @@ export function TaskManager() {
             onAddWorkstream={() => setAddingWorkstream(true)}
             addWorkstreamDisabled={!canCreateWorkstream}
             addWorkstreamHint={createWorkstreamHint}
+            onAddContextItem={() => setContextHubModal("context")}
+            onAddContextSource={() => setContextHubModal("source")}
+            addContextDisabled={readOnly}
           />
           <ProjectScopeBar
             projects={projects}
@@ -1368,6 +1553,23 @@ export function TaskManager() {
                 addProjectName={treeProject.name}
               />
             )}
+            {tab === "contexthub" && (
+              <ContextHubView
+                projects={projects}
+                tasks={tasks}
+                meetItems={meetItems}
+                contextSources={contextSources}
+                contextItems={contextItems}
+                selectedProjectIds={selectedProjectIds}
+                search={search}
+                selection={contextHubSelection}
+                onSelect={setContextHubSelection}
+                modal={contextHubModal}
+                onModalChange={setContextHubModal}
+                onCommand={handleContextHubCommand}
+                readOnly={readOnly}
+              />
+            )}
           </div>
         </main>
 
@@ -1379,7 +1581,21 @@ export function TaskManager() {
             title="Drag to resize"
             className="absolute left-0 top-0 z-20 h-full w-1.5 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40"
           />
-          {selection?.kind === "meet" && selectedMeet ? (
+          {tab === "contexthub" ? (
+            <ContextHubDetailsPanel
+              selection={contextHubSelection}
+              item={selectedContextItem}
+              source={selectedContextSource}
+              projects={projects}
+              tasks={tasks}
+              meetItems={meetItems}
+              contextSources={contextSources}
+              contextItems={contextItems}
+              onCommand={handleContextHubCommand}
+              onOpenSelection={setContextHubSelection}
+              readOnly={readOnly}
+            />
+          ) : selection?.kind === "meet" && selectedMeet ? (
             <MeetDetailsPanel
               meet={selectedMeet}
               projects={projects}

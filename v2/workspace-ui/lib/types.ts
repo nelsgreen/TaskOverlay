@@ -136,7 +136,41 @@ export type SelectionMode = "task" | "meet" | "none"
 
 export type TreeFilter = "all" | "active" | "active-path"
 export type StatusFilterKey = "all" | "panel" | Status | "remind"
-export type TabKey = "tree" | "status" | "timeline" | "calendar" | "workstreams"
+export type TabKey = "tree" | "status" | "timeline" | "calendar" | "workstreams" | "contexthub"
+
+// ─── ContextHUB (project memory) ────────────────────────────────────────────
+
+export type ContextSourceType =
+  | "meetingSummary"
+  | "meetingTranscript"
+  | "chatSummary"
+  | "manualNote"
+  | "clientRequest"
+  | "documentSummary"
+  | "statusUpdate"
+  | "telegramCapture"
+  | "other"
+
+export type ContextSourceApp =
+  | "chatgpt"
+  | "claude"
+  | "codex"
+  | "telegram"
+  | "manual"
+  | "other"
+
+export type ContextItemType =
+  | "decision"
+  | "requirement"
+  | "constraint"
+  | "blocker"
+  | "openQuestion"
+  | "actionItem"
+  | "projectFact"
+  | "risk"
+  | "note"
+
+export type ContextItemStatus = "active" | "resolved" | "deprecated" | "superseded"
 
 /**
  * Derived workstream activity state, computed from the real tasks in the
@@ -160,9 +194,43 @@ export interface WorkspaceSnapshotContract {
   sections: WorkspaceSectionSnapshot[]
   tasks: WorkspaceTaskSnapshot[]
   meetings: WorkspaceMeetingSnapshot[]
+  contextSources?: WorkspaceContextSourceSnapshot[]
+  contextItems?: WorkspaceContextItemSnapshot[]
   activeNow: WorkspaceActiveNowSnapshot[]
   timelineItems: WorkspaceTimelineSnapshot[]
   context: WorkspaceContextSnapshot
+}
+
+/** ContextHUB source document as exposed by the snapshot. Ids are snapshot-format ("N" guids). */
+export interface WorkspaceContextSourceSnapshot {
+  id: string
+  projectId: string
+  sourceType: ContextSourceType
+  sourceApp: ContextSourceApp | null
+  title: string
+  body: string
+  summary: string
+  sourceDateUtc: string
+  linkedTaskIds: string[]
+  linkedMeetingIds: string[]
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
+/** ContextHUB context item as exposed by the snapshot. */
+export interface WorkspaceContextItemSnapshot {
+  id: string
+  projectId: string
+  itemType: ContextItemType
+  status: ContextItemStatus
+  title: string
+  body: string
+  sourceDocumentIds: string[]
+  linkedTaskIds: string[]
+  linkedMeetingIds: string[]
+  createdAtUtc: string
+  updatedAtUtc: string
+  resolvedAtUtc: string | null
 }
 
 export interface WorkspaceContextSnapshot {
@@ -339,6 +407,70 @@ export type WorkspaceCreateSectionCommand = {
   projectId: string
 }
 
+/**
+ * ContextHUB commands. create/update payloads are patches on the C# side:
+ * absent fields keep existing values. Link/unlink commands are idempotent.
+ */
+export type WorkspaceContextHubCommand =
+  | {
+      type: "createContextSource"
+      projectId: string
+      sourceType: ContextSourceType
+      sourceApp?: ContextSourceApp | null
+      title: string
+      body?: string
+      summary?: string
+      sourceDateUtc?: string
+      linkedTaskIds?: string[]
+      linkedMeetingIds?: string[]
+    }
+  | {
+      type: "updateContextSource"
+      sourceId: string
+      projectId?: string
+      sourceType?: ContextSourceType
+      sourceApp?: ContextSourceApp | null
+      title?: string
+      body?: string
+      summary?: string
+      sourceDateUtc?: string
+      linkedTaskIds?: string[]
+      linkedMeetingIds?: string[]
+    }
+  | { type: "deleteContextSource"; sourceId: string }
+  | {
+      type: "createContextItem"
+      projectId: string
+      itemType: ContextItemType
+      status?: ContextItemStatus
+      title: string
+      body?: string
+      sourceDocumentIds?: string[]
+      linkedTaskIds?: string[]
+      linkedMeetingIds?: string[]
+    }
+  | {
+      type: "updateContextItem"
+      itemId: string
+      projectId?: string
+      itemType?: ContextItemType
+      status?: ContextItemStatus
+      title?: string
+      body?: string
+      sourceDocumentIds?: string[]
+      linkedTaskIds?: string[]
+      linkedMeetingIds?: string[]
+    }
+  | { type: "deleteContextItem"; itemId: string }
+  | { type: "linkContextItemToTask"; itemId: string; taskId: string }
+  | { type: "unlinkContextItemFromTask"; itemId: string; taskId: string }
+  | { type: "linkContextItemToMeeting"; itemId: string; meetingId: string }
+  | { type: "unlinkContextItemFromMeeting"; itemId: string; meetingId: string }
+  | { type: "linkSourceToTask"; sourceId: string; taskId: string }
+  | { type: "unlinkSourceFromTask"; sourceId: string; taskId: string }
+  | { type: "linkSourceToMeeting"; sourceId: string; meetingId: string }
+  | { type: "unlinkSourceFromMeeting"; sourceId: string; meetingId: string }
+
 export type WorkspaceCommand =
   | WorkspaceTaskCommand
   | WorkspaceSectionCommand
@@ -346,6 +478,7 @@ export type WorkspaceCommand =
   | WorkspaceCreateTaskCommand
   | WorkspaceCreateSectionCommand
   | WorkspaceMeetingCommand
+  | WorkspaceContextHubCommand
 
 export type WorkspaceCommandPayload = WorkspaceCommand extends infer Command
   ? Command extends { type: string }
@@ -370,6 +503,8 @@ export interface WorkspaceCommandResult {
   createdTaskId?: string | null
   createdSectionId?: string | null
   createdMeetingId?: string | null
+  createdContextSourceId?: string | null
+  createdContextItemId?: string | null
 }
 
 export interface PendingWorkspaceCommand {

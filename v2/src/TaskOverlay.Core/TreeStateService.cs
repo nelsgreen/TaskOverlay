@@ -210,6 +210,7 @@ public sealed class TreeStateService
                 }
 
                 new MeetingService(_state).ClearLinkedTask(task.Id, timestamp);
+                new ContextService(_state).ClearTaskLinks(task.Id, timestamp);
 
                 break;
             }

@@ -413,6 +413,29 @@ Active product scope:
 - Low-stimulus / reduced motion.
 - Undo/archive/autosave/draft recovery; hard delete only with confirmation.
 
+## ContextHUB
+
+- Foundation is implemented (ContextHUB foundation PR):
+  - `SourceDocument` + `ContextItem` persisted in `AppState` / `state.json`;
+  - connected CRUD and link/unlink commands through the WebView2 bridge;
+  - ContextHUB Workspace tab after Workstreams: left filters, center memory
+    list with overview cards, right details editor, Add Source / Add Context
+    modals;
+  - repair/migration for old states and dangling links;
+  - deleting tasks/MEETs/sources repairs context links without deleting
+    memory.
+- Later ContextHUB work, explicitly not in the foundation:
+  - Task Details Context block (PR 2);
+  - MEET Details Context block (PR 2);
+  - Project Context Pack export/copy (PR 3);
+  - manual source import polish;
+  - OpenAI meeting analysis writing drafts into ContextHUB after user review;
+  - transcription provider output as `SourceDocument`;
+  - Telegram voice/text capture channel;
+  - suggested tasks from transcripts with review-before-create;
+  - moving very large transcript bodies out of `state.json` into external
+    files with path references (`Body` is bounded in the foundation).
+
 ## Notes
 
 - Short important notes module.

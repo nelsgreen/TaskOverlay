@@ -13,6 +13,8 @@ public sealed class AppState
     public List<ProjectItem> Projects { get; set; } = new();
     public List<GroupItem> Groups { get; set; } = new();
     public List<MeetingItem> Meetings { get; set; } = new();
+    public List<SourceDocument> ContextSources { get; set; } = new();
+    public List<ContextItem> ContextItems { get; set; } = new();
     public OverlaySettings OverlaySettings { get; set; } = new();
     public WindowPlacement WindowPlacement { get; set; } = new();
     public TreeManagerSettings TreeManagerSettings { get; set; } = new();
@@ -102,6 +104,103 @@ public sealed class MeetingItem
     public Guid? LinkedTaskId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// ContextHUB source: raw captured/imported text with provenance (meeting
+/// notes, chat summary, client request, Telegram capture, ...). It is the
+/// "where did this come from" layer of project memory. Links to tasks and
+/// meetings are navigation pointers only; the reverse "context items derived
+/// from this source" list is derived in snapshot/UI from
+/// <see cref="ContextItem.SourceDocumentIds"/> and never stored here.
+/// </summary>
+public sealed class SourceDocument
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProjectId { get; set; }
+    public ContextSourceType SourceType { get; set; } = ContextSourceType.ManualNote;
+    /// <summary>Optional provenance app (ChatGPT/Claude/Codex/Telegram/...).</summary>
+    public ContextSourceApp? SourceApp { get; set; }
+    public string Title { get; set; } = string.Empty;
+    /// <summary>Raw pasted text. Bounded; large transcripts move to external files later.</summary>
+    public string Body { get; set; } = string.Empty;
+    /// <summary>Optional one-line recap for scanning.</summary>
+    public string Summary { get; set; } = string.Empty;
+    /// <summary>When the source content actually happened (meeting date etc.).</summary>
+    public DateTimeOffset SourceDateUtc { get; set; } = DateTimeOffset.UtcNow;
+    public List<Guid> LinkedTaskIds { get; set; } = new();
+    public List<Guid> LinkedMeetingIds { get; set; } = new();
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// ContextHUB item: the durable unit of project memory (decision, blocker,
+/// open question, requirement, ...). It can be derived from source documents
+/// but exists independently: deleting a source clears the reference, never the
+/// item. Not a task: no TODO/FOCUS/WAIT/DONE, no REMIND, no DEADLINE.
+/// </summary>
+public sealed class ContextItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProjectId { get; set; }
+    public ContextItemType ItemType { get; set; } = ContextItemType.Note;
+    public ContextItemStatus Status { get; set; } = ContextItemStatus.Active;
+    public string Title { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+    /// <summary>Sources this item was derived from. Single direction of truth;
+    /// the source side never stores a reverse list.</summary>
+    public List<Guid> SourceDocumentIds { get; set; } = new();
+    public List<Guid> LinkedTaskIds { get; set; } = new();
+    public List<Guid> LinkedMeetingIds { get; set; } = new();
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    /// <summary>Set when the item leaves Active; cleared when it returns to Active.</summary>
+    public DateTimeOffset? ResolvedAtUtc { get; set; }
+}
+
+public enum ContextSourceType
+{
+    MeetingSummary,
+    MeetingTranscript,
+    ChatSummary,
+    ManualNote,
+    ClientRequest,
+    DocumentSummary,
+    StatusUpdate,
+    TelegramCapture,
+    Other
+}
+
+public enum ContextSourceApp
+{
+    ChatGpt,
+    Claude,
+    Codex,
+    Telegram,
+    Manual,
+    Other
+}
+
+public enum ContextItemType
+{
+    Decision,
+    Requirement,
+    Constraint,
+    Blocker,
+    OpenQuestion,
+    ActionItem,
+    ProjectFact,
+    Risk,
+    Note
+}
+
+public enum ContextItemStatus
+{
+    Active,
+    Resolved,
+    Deprecated,
+    Superseded
 }
 
 public sealed class TaskItem
@@ -417,7 +516,8 @@ public enum WorkspaceTab
     Status,
     Timeline,
     Calendar,
-    Workstreams
+    Workstreams,
+    ContextHub
 }
 
 public enum WorkspaceFilter
