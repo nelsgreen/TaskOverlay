@@ -256,7 +256,7 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
 function isWorkspaceContext(value: unknown): value is WorkspaceContextSnapshot {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceContextSnapshot>
-  return ["tree", "status", "timeline", "calendar", "workstreams"].includes(candidate.activeTab ?? "") &&
+  return ["tree", "status", "timeline", "calendar", "workstreams", "contexthub"].includes(candidate.activeTab ?? "") &&
     Array.isArray(candidate.selectedProjectIds) &&
     candidate.selectedProjectIds.every((id) => typeof id === "string") &&
     (candidate.selectedTaskId === null || typeof candidate.selectedTaskId === "string") &&
