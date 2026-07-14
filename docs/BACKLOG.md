@@ -83,6 +83,10 @@ Active product scope:
   - compact collapsed (Notes ~2 lines, Waiting for ~1 line), expand on
     hover/focus with scroll for long text;
   - delivered by PR #48; revisit only if a manual resize handle is wanted.
+- Details scroll container reserves scrollbar gutter (`scrollbar-gutter:
+  stable`) on both Task Details and MEET Details, so hovering/expanding a
+  compact card (Reminder/Deadline/Location/Steps/Context) no longer shifts
+  the panel's content width when the scrollbar appears.
 
 ## Timeline, Reminder, And Deadline
 
@@ -378,6 +382,13 @@ Active product scope:
   - parent DONE/reopen does not mutate Step states;
   - all Steps done surfaces an explicit Complete task action, not
     auto-complete;
+  - Enter on the "+ Next step..." input adds the step and keeps focus there
+    for the next one (including restoring focus after the brief disabled
+    state while the checkpoint command is in flight); Enter on an empty add
+    input does not create a blank step and blurs out of the Steps area
+    instead of no-op'ing in place; empty/whitespace-only titles are already
+    rejected both client-side (`addSteps`/`commitStepEdit`) and server-side
+    (`CheckpointService.NormalizeTitle`, `updateTaskCheckpointTitle`);
   - remaining: promote a Step to a real child task, Step templates, step-level
     reminders/deadlines, AI step breakdown, and overlay parent progress.
 - Attachments:
@@ -426,6 +437,10 @@ Active product scope:
     memory.
 - Task Details Context block (done):
   - compact "Context" card in Task Details, below Steps;
+  - collapsed by default when nothing is linked, expanded by default once
+    something is linked; header click always overrides the default until a
+    different task/MEET is selected (shared by MEET Details via the same
+    `RecordContextBlock`);
   - shows SourceDocuments and ContextItems already linked to the selected
     task (type/status/source-app badges, short summary/body preview, linked
     count), with a readable empty state when nothing is linked;

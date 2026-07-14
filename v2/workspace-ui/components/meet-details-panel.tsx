@@ -146,7 +146,9 @@ export function MeetDetailsPanel({
         </span>
       </div>
 
-      <fieldset disabled={readOnly} className="flex-1 space-y-3 overflow-y-auto px-4 py-4 disabled:opacity-70">
+      {/* scrollbar-gutter:stable — same fix as Task Details: reserve the scrollbar's
+          width so hovering/expanding a card never reflows the panel horizontally. */}
+      <fieldset disabled={readOnly} className="flex-1 space-y-3 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable] disabled:opacity-70">
 
         {/* ── Title ── */}
         <div>

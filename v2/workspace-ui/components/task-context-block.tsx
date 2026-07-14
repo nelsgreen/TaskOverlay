@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { ClipboardList, Layers, Link2, Plus, X } from "lucide-react"
+import { ChevronRight, ClipboardList, Layers, Link2, Plus, X } from "lucide-react"
 import type {
   ContextItemStatus,
   ContextItemType,
@@ -173,6 +173,11 @@ function RecordContextBlock({
   const [modalOpen, setModalOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [packMarkdown, setPackMarkdown] = useState<string | null>(null)
+  // null = no manual override yet, so the card's open/closed state follows
+  // totalLinked (collapsed when empty, expanded once something is linked).
+  // Once the user clicks the header, their explicit choice wins until they
+  // switch to a different task/MEET (see the ownerId reset effect below).
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null)
 
   const linkedSources = useMemo(
     () => contextSources.filter((source) => getLinkedSourceIds(source).includes(ownerId)),
@@ -183,6 +188,11 @@ function RecordContextBlock({
     [contextItems, getLinkedItemIds, ownerId],
   )
   const totalLinked = linkedSources.length + linkedItems.length
+  const open = manualOpen ?? totalLinked > 0
+
+  useEffect(() => {
+    setManualOpen(null)
+  }, [ownerId])
 
   // Same-project only, already-linked records are excluded rather than shown disabled —
   // there is nothing useful to do with them here besides unlink, which is already
@@ -212,81 +222,92 @@ function RecordContextBlock({
   return (
     <>
       <div className="group/card mt-3 rounded-lg border border-border bg-card/40">
-        <div className="flex items-center gap-2.5 px-3 py-2.5">
+        {/* Header — collapsed by default when nothing is linked; expanded by
+            default once something is, so the user isn't shown a large empty
+            card. Always click-to-toggle regardless of the default. */}
+        <button
+          type="button"
+          onClick={() => setManualOpen(!open)}
+          className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
+          aria-expanded={open}
+        >
           <Layers className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">Context</span>
           <span className="flex-1" />
           {totalLinked > 0 && (
             <span className="text-[11px] tabular-nums text-muted-foreground">{totalLinked} linked</span>
           )}
-        </div>
+          <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        </button>
 
-        <div className="space-y-2.5 border-t border-border/50 px-3 pb-3 pt-2.5">
-          {totalLinked === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No context linked yet.</p>
-          ) : (
-            <>
-              {linkedSources.length > 0 && (
-                <div className="space-y-1">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Sources ({linkedSources.length})
-                  </span>
-                  {linkedSources.map((source) => (
-                    <LinkedSourceRow
-                      key={source.id}
-                      source={source}
-                      locked={locked}
-                      onUnlink={() => onUnlinkSource(source.id)}
-                    />
-                  ))}
-                </div>
-              )}
-              {linkedItems.length > 0 && (
-                <div className="space-y-1">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Context items ({linkedItems.length})
-                  </span>
-                  {linkedItems.map((item) => (
-                    <LinkedItemRow
-                      key={item.id}
-                      item={item}
-                      locked={locked}
-                      onUnlink={() => onUnlinkItem(item.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
+        {open && (
+          <div className="space-y-2.5 border-t border-border/50 px-3 pb-3 pt-2.5">
+            {totalLinked === 0 ? (
+              <p className="text-[12px] text-muted-foreground">No context linked yet.</p>
+            ) : (
+              <>
+                {linkedSources.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Sources ({linkedSources.length})
+                    </span>
+                    {linkedSources.map((source) => (
+                      <LinkedSourceRow
+                        key={source.id}
+                        source={source}
+                        locked={locked}
+                        onUnlink={() => onUnlinkSource(source.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+                {linkedItems.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Context items ({linkedItems.length})
+                    </span>
+                    {linkedItems.map((item) => (
+                      <LinkedItemRow
+                        key={item.id}
+                        item={item}
+                        locked={locked}
+                        onUnlink={() => onUnlinkItem(item.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
 
-          <div className="flex items-center gap-2 pt-0.5">
-            <button
-              type="button"
-              disabled={locked}
-              onClick={() => setModalOpen(true)}
-              className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Plus className="size-3" aria-hidden />
-              Link existing
-            </button>
-            <button
-              type="button"
-              onClick={onOpenContextHub}
-              className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <Link2 className="size-3" aria-hidden />
-              Open ContextHUB
-            </button>
-            <button
-              type="button"
-              onClick={() => setPackMarkdown(contextPack.buildMarkdown())}
-              className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <ClipboardList className="size-3" aria-hidden />
-              Context Pack
-            </button>
+            <div className="flex items-center gap-2 pt-0.5">
+              <button
+                type="button"
+                disabled={locked}
+                onClick={() => setModalOpen(true)}
+                className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="size-3" aria-hidden />
+                Link existing
+              </button>
+              <button
+                type="button"
+                onClick={onOpenContextHub}
+                className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Link2 className="size-3" aria-hidden />
+                Open ContextHUB
+              </button>
+              <button
+                type="button"
+                onClick={() => setPackMarkdown(contextPack.buildMarkdown())}
+                className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <ClipboardList className="size-3" aria-hidden />
+                Context Pack
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {modalOpen && (
@@ -439,14 +460,13 @@ function LinkExistingModal({
   }, [onClose])
 
   return (
+    // Backdrop intentionally has no onClick: closing happens only via Cancel/Close/X (or Escape above), never an outside click.
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
         className="flex max-h-[70vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl shadow-black/50"
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">

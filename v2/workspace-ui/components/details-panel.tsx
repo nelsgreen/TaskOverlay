@@ -333,11 +333,15 @@ export function DetailsPanel({
   const [newStepText, setNewStepText] = useState("")
   const [editingStepId, setEditingStepId] = useState<string | null>(null)
   const [editingStepText, setEditingStepText] = useState("")
+  // Set right after adding a step so the add input can be refocused once the
+  // in-flight checkpoint command clears — see the pendingStepFocus effect below.
+  const [pendingStepFocus, setPendingStepFocus] = useState(false)
 
   // Track the snapshot at the start of the editing session for "Revert"
   const sessionBaseRef = useRef<Task | null>(task)
   const titleInputRef = useRef<HTMLInputElement>(null)
   const notesInputRef = useRef<HTMLTextAreaElement>(null)
+  const newStepInputRef = useRef<HTMLInputElement>(null)
   // Last task id this panel rendered for — distinguishes "selection changed"
   // (full reset) from "same task, fresh snapshot" (merge) below.
   const lastTaskIdRef = useRef<string | null>(task?.id ?? null)
@@ -367,6 +371,7 @@ export function DetailsPanel({
       setNewStepText("")
       setEditingStepId(null)
       setEditingStepText("")
+      setPendingStepFocus(false)
       return
     }
 
@@ -407,6 +412,18 @@ export function DetailsPanel({
       : task)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridgeError, task])
+
+  // The add-step input is disabled while its checkpoint command is in flight
+  // (see checkpointsPending below), which the browser blurs on its own — so
+  // once the round trip clears, restore focus so the user can keep typing the
+  // next step without re-clicking. pendingFields (not the post-guard
+  // checkpointsPending const) is used here since this effect must stay above
+  // the `if (!draft) return` below to satisfy rules-of-hooks.
+  useEffect(() => {
+    if (!pendingStepFocus || pendingFields.has("checkpoints")) return
+    newStepInputRef.current?.focus()
+    setPendingStepFocus(false)
+  }, [pendingStepFocus, pendingFields])
 
   if (!draft) {
     return (
@@ -669,7 +686,10 @@ export function DetailsPanel({
           {bridgeError}
         </div>
       )}
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      {/* scrollbar-gutter:stable reserves the scrollbar's width whether or not it's
+          currently showing, so hovering/expanding a card that pushes content past
+          the viewport doesn't reflow everything else horizontally. */}
+      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]">
 
         {/* ── Title ── */}
         <div>
@@ -1375,14 +1395,24 @@ export function DetailsPanel({
                 </div>
               ))}
 
-              {/* Add input — Enter adds one step; pasting a multiline list adds them all */}
+              {/* Add input — Enter adds one step and stays focused for the next one;
+                  Enter on an empty input leaves the Steps area instead of no-op'ing in
+                  place; pasting a multiline list adds them all in order. */}
               <input
+                ref={newStepInputRef}
                 value={newStepText}
                 onChange={(e) => setNewStepText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault()
+                    if (!newStepText.trim()) {
+                      // Empty step: do not create another blank row — finish
+                      // editing and move focus out of the Steps module.
+                      e.currentTarget.blur()
+                      return
+                    }
                     addSteps([newStepText])
+                    setPendingStepFocus(true)
                   } else if (e.key === "Escape") {
                     setNewStepText("")
                   }
