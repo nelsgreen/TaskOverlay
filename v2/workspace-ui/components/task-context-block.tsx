@@ -235,8 +235,8 @@ function RecordContextBlock({
           <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">Context</span>
           <span className="flex-1" />
           {totalLinked > 0 && (
-            <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-primary">
-              {totalLinked} linked context{totalLinked === 1 ? "" : " records"}
+            <span className="text-[11px] font-semibold tabular-nums text-primary">
+              {totalLinked} linked
             </span>
           )}
           <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
