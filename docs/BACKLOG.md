@@ -299,10 +299,58 @@ Active product scope:
   - Monday-Sunday week;
   - deterministic Show done;
   - no dead buttons.
-- Planning pool:
-  - unscheduled focus tasks;
-  - drag to grid creates planned WORK block;
-  - clearing block removes planned work, not task.
+- Planning pool holds Tasks, not calendar blocks:
+  - dragging a task from Planning Pool to Calendar creates a new calendar
+    block/work session linked to that task, not a move;
+  - the task stays in Planning Pool after being scheduled once - it does not
+    disappear, since long-running tasks may need multiple blocks across a
+    day;
+  - a task remains in Planning Pool until DONE; DONE tasks are hidden by
+    default;
+  - later scheduling indicators per task: Unscheduled / Scheduled today / N
+    blocks today / Total today: 1h 15m;
+  - later filters: Active / Unscheduled / Today / All;
+  - clearing a block removes the planned block, not the task.
+- Calendar empty-slot context menu:
+  - right-click an empty area of Day/Week view opens Create task / Create
+    MEET;
+  - created record uses the clicked date/time; default duration (e.g. 30
+    minutes) unless an existing default already applies;
+  - Create task opens Task Details/draft scheduled at that slot; Create MEET
+    opens MEET Details/draft scheduled at that slot;
+  - right-click on an existing task/MEET block shows that block's own
+    context menu instead, never the empty-slot menu;
+  - implementation must go through connected bridge/service/AppState/
+    state.json/fresh snapshot; no mock-only UI, no `localStorage` production
+    persistence.
+- Multi-segment task scheduling / work sessions (design, not implemented):
+  - problem: moving a long-running task around Calendar loses work history
+    when the user works on it across several separate time periods;
+  - decision: the task remains one logical record; Calendar displays
+    separate block/work-session records linked to the same task instead of
+    moving the task itself;
+  - future model idea, `TaskCalendarBlock` / `TaskWorkSession`: `id`,
+    `taskId`, `startUtc`, `endUtc`, optional note, `createdAtUtc`,
+    `updatedAtUtc`, and possibly a later Planned/Actual `kind`;
+  - one task can have multiple blocks; dragging from Planning Pool creates a
+    new block linked to the task; moving/resizing a block changes only that
+    block; past blocks stay visible and are never overwritten; the user can
+    add another block for the same task;
+  - Task Details should show linked blocks/work sessions and total duration;
+    Day and Week Calendar should show all blocks under the same task title;
+  - blocks are time/work metadata, not task status - status stays TODO /
+    FOCUS / WAIT / DONE only;
+  - this is a model/design item for a future PR, not implemented here.
+- Calendar block usability (MEET and task blocks):
+  - MEET blocks resizable by mouse like task blocks;
+  - rename "+Meeting" to "+MEET"; first click on +MEET immediately opens
+    MEET Details/draft, not a menu;
+  - short (15-30 minute) task/MEET blocks still show their title;
+  - empty-title fallback reads "Untitled MEET" / "Untitled task" - never a
+    bare "--";
+  - adjacent scheduled blocks have usable resize handles at their shared
+    boundary, in both Day and Week, for task/task, MEET/MEET, and task/MEET
+    combinations.
 - Duration chips / resize handles:
   - 15/30/45/60/90/120.
 - Gantt-like future planning view.
@@ -391,6 +439,20 @@ Active product scope:
     (`CheckpointService.NormalizeTitle`, `updateTaskCheckpointTitle`);
   - remaining: promote a Step to a real child task, Step templates, step-level
     reminders/deadlines, AI step breakdown, and overlay parent progress.
+- Completed-subtasks review-needed indicator:
+  - soft attention signal (not a task status) shown when a task is not DONE,
+    has Steps/subtasks, and all of them are complete;
+  - suggested actions: Complete task / Add subtask / Create follow-up task /
+    Dismiss (Snooze);
+  - a dismissed indicator must reappear if the task's subtasks change again -
+    not a permanent mute;
+  - suggested UX: badge in Task Details, compact badge in Tree/Planning
+    Pool/task lists where applicable; avoid noisy repeated popups.
+- FUCKUP marker MVP:
+  - a separate marker/flag on a task, not a status - does not replace or
+    extend TODO / FOCUS / WAIT / DONE;
+  - model, UI, and bridge/persistence shape to be decided when this reaches
+    implementation.
 - Attachments:
   - images/documents attached to a task;
   - connected through AppState/state.json/fresh snapshot;
@@ -540,6 +602,10 @@ Active product scope:
   - suggested tasks from transcripts with review-before-create;
   - moving very large transcript bodies out of `state.json` into external
     files with path references (`Body` is bounded in the foundation).
+- AI ProposedActions (not started yet): raw input -> SourceDocument/Capture ->
+  `AIAnalysisRun` -> `ProposedAction[]` -> Review UI -> apply through existing
+  services only after explicit user confirmation; AI must never mutate
+  tasks/MEET/context directly (see DECISIONS "ContextHUB").
 
 ## Telegram Capture
 
@@ -712,6 +778,12 @@ Active product scope:
   - Task Details uses compact/collapsible Reminder, Deadline, Location, and
     Steps cards, compact auto-sizing Waiting for and Notes, and keeps Pin to
     panel hidden from Details while preserving the command/semantics.
+- PR #62 Task Details micro-UX polish is merged: Steps "+ Next step..." Enter
+  focus flow, `scrollbar-gutter: stable` on Task/MEET Details, the shared
+  Context block (`RecordContextBlock`) collapses by default when empty and
+  expands by default when linked with clearer "Link existing context"
+  wording and a compact accent linked-count indicator, and every shared
+  Workspace modal stops closing on an outside/backdrop click.
 - Long Go v1 history in prompts is obsolete for WPF v2 planning.
 
 ## Needs Clarification

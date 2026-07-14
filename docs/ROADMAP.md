@@ -5,12 +5,24 @@ the backlog into a full release plan.
 
 ## Immediate
 
-1. PR #48 Steps/Checkpoints MVP is merged; treat the lightweight connected
-   Steps model as implemented and verify UX details when touching it.
-2. Continue connected Tree productivity slices: section actions, fast task and
-   subtask capture, safe delete, and Details Location moves.
-3. Do not start drag/drop or major features until connected Tree operations are
-   stable.
+1. Docs/backlog consolidation for the Calendar/task planning decisions
+   discussed after PR #62 (this PR): Calendar empty-slot context menu,
+   Planning Pool tasks-not-blocks, multi-segment task scheduling design,
+   the completed-subtasks review-needed indicator, and the remaining
+   Calendar/MEET usability backlog.
+2. Calendar / MEET usability PR: resize, +MEET rename/behavior, short-block
+   titles, Untitled fallback, adjacent shared-boundary resize handles.
+3. Multi-segment task scheduling model/design PR (`TaskCalendarBlock` /
+   `TaskWorkSession`) - design first; no code was added in the docs PR.
+4. Working hours / evening deadline presets.
+5. Calendar visual links for deadline/reminder markers.
+6. FUCKUP marker MVP.
+7. Global Ctrl+Z later, as architecture-level work - not a quick add-on.
+
+Do not start AI ProposedActions yet. AI later must follow: raw input ->
+SourceDocument/Capture -> `AIAnalysisRun` -> `ProposedAction[]` -> Review UI ->
+apply through existing services, never a direct mutation without explicit
+user confirmation (see DECISIONS "ContextHUB").
 
 ## Near-Term Reliability / Polish
 
@@ -51,9 +63,17 @@ the backlog into a full release plan.
 3. Calendar/Timeline MVP.
 4. Timeline Now marker.
 5. Calendar day/week planner.
-6. Planning pool.
-7. Duration chips/resize.
-8. Reminder action system.
+6. Planning pool - tasks, not blocks; scheduling indicators (Unscheduled /
+   Scheduled today / N blocks today / Total today); later Active/
+   Unscheduled/Today/All filters.
+7. Duration chips/resize; MEET blocks resizable like task blocks; adjacent
+   shared-boundary resize handles for task/task, MEET/MEET, and task/MEET.
+8. Calendar empty-slot context menu (Create task / Create MEET at the
+   clicked date/time; existing blocks keep their own context menu).
+9. Multi-segment task scheduling (`TaskCalendarBlock`/`TaskWorkSession`
+   design) - one task, multiple linked calendar blocks/work sessions.
+10. Reminder action system.
+11. Calendar visual links for deadline/reminder markers.
 
 ## MEET
 
@@ -76,12 +96,19 @@ meeting-provider APIs remain intentionally outside the Basic MEET MVP.
 2. Checklist / Steps — checkpoints MVP done in PR #48; follow-ups: promote a
    Step to a child task, Step templates, step-level reminders/deadlines, AI
    step breakdown, and overlay parent progress.
+2a. Completed-subtasks review-needed indicator - soft attention signal (not
+    a status) when all Steps/subtasks are done but the parent task isn't;
+    suggested actions Complete task / Add subtask / Create follow-up /
+    Dismiss (reappears if subtasks change again).
 3. Attachments.
-4. Undo/archive/draft recovery.
+4. Undo/archive/draft recovery. Global Ctrl+Z is separate, later,
+   architecture-level work - not a quick add-on to this item.
 5. Templates/routines.
 6. Chunking helper beyond the implemented lightweight Steps MVP.
 7. Focus mode.
 8. Low-stimulus/reduced motion.
+9. FUCKUP marker MVP - a separate marker/flag, not a task status; does not
+   replace or extend TODO / FOCUS / WAIT / DONE.
 
 ## Reporting / Analytics
 

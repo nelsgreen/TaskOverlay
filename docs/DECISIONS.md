@@ -26,7 +26,11 @@ item.
 - Use REMIND, not DUE.
 - Use FOCUS, not IN WORK.
 - Use Focus, not Acknowledge.
-- Statuses are TODO / FOCUS / WAIT / DONE.
+- Statuses are TODO / FOCUS / WAIT / DONE. REMIND is not a task status; it is
+  reminder/scheduling metadata. Deadline is separate metadata. Pin is a
+  separate visibility flag. FUCKUP is a separate marker/flag (see BACKLOG/
+  ROADMAP "FUCKUP marker MVP"). None of these extend or replace the four
+  statuses above.
 
 ## State And Persistence
 
@@ -75,6 +79,11 @@ item.
 - Waiting for and Notes are compact auto-sizing fields.
 - Pin to panel is hidden in Task Details for now; the field, bridge command,
   and pinned/overlay semantics are unchanged.
+- Completed-subtasks review-needed is a soft attention signal, not a task
+  status: when a task is not DONE, has Steps/subtasks, and all of them are
+  complete, it may show a review indicator suggesting Complete task / Add
+  subtask / Create follow-up task / Dismiss. Dismissing is not a permanent
+  mute - the indicator must reappear if the task's subtasks change again.
 - Workstream = top-level section/group is the MVP simplification.
 - Cross-sectional Workstream is deferred.
 - No permanent left Projects sidebar in Workspace; use the horizontal Project
@@ -102,6 +111,19 @@ item.
 - No embedded ChatGPT window inside the app.
 - Reminder repeat is a flat minute interval (`remindEveryMinutes`). Monthly
   repeat is not connected until a calendar-aware recurrence model exists.
+- Calendar empty-slot right-click opens a context menu with Create task /
+  Create MEET, using the clicked date/time as the new record's schedule.
+  Right-clicking an existing task/MEET block shows that block's own context
+  menu instead - it never falls back to the empty-slot menu.
+- Planning Pool holds logical Tasks, not calendar blocks. Scheduling a task
+  onto Calendar does not remove it from Planning Pool - a task stays visible
+  there until it is DONE (hidden by default once DONE), since a long-running
+  task may need several scheduled blocks across a day.
+- A task remains one logical record. Calendar time allocation for that task
+  is tracked as separate linked block/work-session records (see BACKLOG
+  "Multi-segment task scheduling / work sessions"), not by moving the task
+  itself around the grid. Calendar blocks are time/work metadata, never a
+  task status - the status model stays TODO / FOCUS / WAIT / DONE only.
 
 ## ContextHUB
 
@@ -121,6 +143,13 @@ item.
 - Future OpenAI meeting analysis, transcription, and Telegram capture will
   write into this layer as drafts that require explicit user review before
   anything is created.
+- Future AI-assisted analysis (meeting analysis, capture interpretation,
+  suggested tasks, etc.) follows one pipeline: raw input -> SourceDocument/
+  Capture -> `AIAnalysisRun` -> `ProposedAction[]` -> a Review UI -> apply
+  through the existing connected services, only after explicit user
+  confirmation. AI must never mutate tasks/MEET/context directly. AI
+  ProposedActions are not started yet - this records the intended shape for
+  when that work begins.
 - Context Pack is a read-only export generated from stored TaskOverlay data;
   deprecated/superseded items are excluded by default. Not shipped in the
   foundation PR (expanded export shipped later - see the Context Pack entry
