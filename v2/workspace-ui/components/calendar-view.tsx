@@ -51,6 +51,9 @@ interface Marker { key: string; kind: "REMIND" | "DEADLINE"; title: string; proj
 type DragState =
   | { kind: "TASK"; taskId: string; source: "pool" | "block"; duration: number }
   | { kind: "MEET"; meetId: string; duration: number }
+type CalendarMenuState =
+  | { kind: "slot"; x: number; y: number; dateKey: string; startMin: number }
+  | { kind: "block"; x: number; y: number; block: Block }
 
 const STATUS_STYLES: Record<Status, { bg: string; text: string; label: string }> = {
   FOCUS: { bg: "bg-status-focus/15", text: "text-status-focus", label: "Focus" },
@@ -84,6 +87,8 @@ interface CalendarViewProps {
   showDone: boolean; canSchedule: boolean
   onSelectTask: (taskId: string) => void; onSelectMeet: (meetId: string) => void
   onPickDay: (dateKey: string) => void
+  onCreateTaskAtSlot: (dateKey: string, startMin: number) => void
+  onCreateMeetAtSlot: (dateKey: string, startMin: number) => void
   onPlanTask: (taskId: string, plannedStartAtUtc: string, plannedDurationMinutes: number) => void
   onMoveMeet: (meetId: string, startsAtUtc: string, durationMinutes: number) => void
   onClearPlanned: (taskId: string) => void
@@ -92,7 +97,8 @@ interface CalendarViewProps {
 export function CalendarView({
   viewMode, selectedDate, projects, sections, tasks, meetItems,
   selectedProjectIds, selectedTaskId, selectedMeetId, showDone, canSchedule,
-  onSelectTask, onSelectMeet, onPickDay, onPlanTask, onMoveMeet, onClearPlanned,
+  onSelectTask, onSelectMeet, onPickDay, onCreateTaskAtSlot, onCreateMeetAtSlot,
+  onPlanTask, onMoveMeet, onClearPlanned,
 }: CalendarViewProps) {
   const today = todayKey()
   const [nowMin, setNowMin] = useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes() })
@@ -106,6 +112,7 @@ export function CalendarView({
   const [ghost, setGhost] = useState<{ startMin: number; endMin: number } | null>(null)
   const [weekGhost, setWeekGhost] = useState<{ dayIso: string; startMin: number; endMin: number } | null>(null)
   const [newBlock, setNewBlock] = useState<{ taskId: string; startMin: number } | null>(null)
+  const [menu, setMenu] = useState<CalendarMenuState | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
 
@@ -145,6 +152,7 @@ export function CalendarView({
   }, [tasks, allSelected, selectedProjectIds])
 
   const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i)
+  const displayTitle = (block: Block) => block.title.trim() || (block.kind === "MEET" ? "Untitled MEET" : "Untitled task")
 
   // ─── Drag model ───────────────────────────────────────────────────────────
   const startPoolDrag = (e: React.DragEvent, taskId: string) => {
@@ -164,6 +172,31 @@ export function CalendarView({
     e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", block.taskId)
   }
   const minFromRect = (rect: DOMRect, clientY: number) => clamp(snapTo(START_MIN + (clientY - rect.top) / PX_PER_MIN, SNAP_MIN), START_MIN, END_MIN - MIN_DURATION)
+  const openSlotMenu = (event: React.MouseEvent<HTMLElement>, dateKey: string) => {
+    if (!canSchedule || (event.target as HTMLElement).closest("[data-calendar-block='true']")) return
+    event.preventDefault()
+    event.stopPropagation()
+    const startMin = minFromRect(event.currentTarget.getBoundingClientRect(), event.clientY)
+    setMenu({ kind: "slot", x: event.clientX, y: event.clientY, dateKey, startMin })
+  }
+  const openBlockMenu = (event: React.MouseEvent, block: Block) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setMenu({ kind: "block", x: event.clientX, y: event.clientY, block })
+  }
+  const resizeBlock = (block: Block, dateKey: string, startMin: number, endMin: number) => {
+    const startsAtUtc = isoFromLocalDateTime(dateKey, Math.floor(startMin / 60), startMin % 60)
+    const duration = Math.max(MIN_DURATION, endMin - startMin)
+    if (block.kind === "MEET" && block.meetId) {
+      onMoveMeet(block.meetId, startsAtUtc, duration)
+      onSelectMeet(block.meetId)
+      return
+    }
+    if (block.taskId) {
+      onPlanTask(block.taskId, startsAtUtc, duration)
+      onSelectTask(block.taskId)
+    }
+  }
 
   const onDayDragOver = (e: React.DragEvent) => {
     if (!dragRef.current || !gridRef.current) return
@@ -221,14 +254,20 @@ export function CalendarView({
     window.addEventListener("click", handler, { capture: true, once: true })
     return () => window.removeEventListener("click", handler, { capture: true })
   }, [newBlock])
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    window.addEventListener("click", close)
+    window.addEventListener("blur", close)
+    return () => {
+      window.removeEventListener("click", close)
+      window.removeEventListener("blur", close)
+    }
+  }, [menu])
 
   const applyDuration = (taskId: string, startMin: number, durMin: number) => {
     onPlanTask(taskId, isoFromLocalDateTime(selectedDate, Math.floor(startMin / 60), startMin % 60), clamp(durMin, MIN_DURATION, TOTAL_MIN)); setNewBlock(null)
   }
-  const applyResize = (taskId: string, startMin: number, endMin: number) => {
-    onPlanTask(taskId, isoFromLocalDateTime(selectedDate, Math.floor(startMin / 60), startMin % 60), Math.max(MIN_DURATION, endMin - startMin))
-  }
-
   const startPoolResize = (event: React.MouseEvent) => {
     event.preventDefault()
     const onMove = (e: MouseEvent) => setPoolWidth(clamp(e.clientX - (gridRef.current?.closest("[data-cal-root]")?.getBoundingClientRect().left ?? 0), 168, 380))
@@ -302,8 +341,12 @@ export function CalendarView({
             ghost={ghost} newBlock={newBlock} gridRef={gridRef}
             onDayDragOver={onDayDragOver} onDayDragLeave={() => setGhost(null)} onDayDrop={onDayDrop}
             onStartBlockDrag={startBlockDrag} onDragCleanup={onDragCleanup}
+            onEmptyContextMenu={(e) => openSlotMenu(e, selectedDate)}
+            onBlockContextMenu={openBlockMenu}
             onSelectTask={onSelectTask} onSelectMeet={onSelectMeet} onClearPlanned={onClearPlanned}
-            onResize={applyResize} onApplyDuration={applyDuration}
+            onResizeBlock={(block, startMin, endMin) => resizeBlock(block, selectedDate, startMin, endMin)}
+            onApplyDuration={applyDuration}
+            displayTitle={displayTitle}
           />
         ) : (
           <WeekGrid
@@ -312,19 +355,132 @@ export function CalendarView({
             weekGhost={weekGhost}
             onColumnDragOver={onColumnDragOver} onColumnDrop={onColumnDrop}
             onStartBlockDrag={startBlockDrag} onDragCleanup={onDragCleanup}
+            onEmptyContextMenu={openSlotMenu}
+            onBlockContextMenu={openBlockMenu}
+            onResizeBlock={resizeBlock}
             onSelectTask={onSelectTask} onSelectMeet={onSelectMeet} onPickDay={onPickDay}
+            displayTitle={displayTitle}
           />
         )}
       </div>
+      {menu && (
+        <CalendarContextMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          onCreateTask={() => {
+            if (menu.kind !== "slot") return
+            onCreateTaskAtSlot(menu.dateKey, menu.startMin)
+            setMenu(null)
+          }}
+          onCreateMeet={() => {
+            if (menu.kind !== "slot") return
+            onCreateMeetAtSlot(menu.dateKey, menu.startMin)
+            setMenu(null)
+          }}
+          onOpenBlock={() => {
+            if (menu.kind !== "block") return
+            if (menu.block.kind === "MEET" && menu.block.meetId) onSelectMeet(menu.block.meetId)
+            else if (menu.block.taskId) onSelectTask(menu.block.taskId)
+            setMenu(null)
+          }}
+          onClearPlanned={() => {
+            if (menu.kind === "block" && menu.block.kind === "WORK" && menu.block.taskId) onClearPlanned(menu.block.taskId)
+            setMenu(null)
+          }}
+          canSchedule={canSchedule}
+        />
+      )}
     </div>
   )
 }
 
 // ─── Day grid ─────────────────────────────────────────────────────────────────
+function CalendarContextMenu({
+  menu,
+  onClose,
+  onCreateTask,
+  onCreateMeet,
+  onOpenBlock,
+  onClearPlanned,
+  canSchedule,
+}: {
+  menu: CalendarMenuState
+  onClose: () => void
+  onCreateTask: () => void
+  onCreateMeet: () => void
+  onOpenBlock: () => void
+  onClearPlanned: () => void
+  canSchedule: boolean
+}) {
+  return (
+    <div
+      role="menu"
+      className="fixed z-[100] min-w-40 rounded-lg border border-border bg-popover p-1.5 text-[12px] shadow-xl"
+      style={{ left: menu.x, top: menu.y }}
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {menu.kind === "slot" ? (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onCreateTask}
+            disabled={!canSchedule}
+            className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Create task
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onCreateMeet}
+            disabled={!canSchedule}
+            className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Create MEET
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onOpenBlock}
+            className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            Open {menu.block.kind === "MEET" ? "MEET" : "task"} details
+          </button>
+          {menu.block.kind === "WORK" && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={onClearPlanned}
+              disabled={!canSchedule}
+              className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Remove from calendar
+            </button>
+          )}
+        </>
+      )}
+      <button
+        type="button"
+        role="menuitem"
+        onClick={onClose}
+        className="mt-1 flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
 function DayGrid({
   hours, blocks, markers, isToday, nowMin, projectMap, sectionMap, canSchedule,
   ghost, newBlock, gridRef, onDayDragOver, onDayDragLeave, onDayDrop, onStartBlockDrag, onDragCleanup,
-  onSelectTask, onSelectMeet, onClearPlanned, onResize, onApplyDuration,
+  onEmptyContextMenu, onBlockContextMenu, onSelectTask, onSelectMeet, onClearPlanned, onResizeBlock, onApplyDuration,
+  displayTitle,
 }: {
   hours: number[]; blocks: Block[]; markers: Marker[]; isToday: boolean; nowMin: number
   projectMap: Map<string, Project>; sectionMap: Map<string, Section>; canSchedule: boolean
@@ -332,9 +488,12 @@ function DayGrid({
   gridRef: React.RefObject<HTMLDivElement | null>
   onDayDragOver: (e: React.DragEvent) => void; onDayDragLeave: () => void; onDayDrop: (e: React.DragEvent) => void
   onStartBlockDrag: (e: React.DragEvent, block: Block) => void; onDragCleanup: () => void
+  onEmptyContextMenu: (event: React.MouseEvent<HTMLElement>) => void
+  onBlockContextMenu: (event: React.MouseEvent, block: Block) => void
   onSelectTask: (id: string) => void; onSelectMeet: (id: string) => void; onClearPlanned: (taskId: string) => void
-  onResize: (taskId: string, startMin: number, endMin: number) => void
+  onResizeBlock: (block: Block, startMin: number, endMin: number) => void
   onApplyDuration: (taskId: string, startMin: number, durMin: number) => void
+  displayTitle: (block: Block) => string
 }) {
   const laid = layoutColumns(blocks)
   const showNow = isToday && nowMin >= START_MIN && nowMin <= END_MIN
@@ -350,10 +509,10 @@ function DayGrid({
     return out
   }, [blocks])
 
-  const [resizing, setResizing] = useState<{ taskId: string; edge: "top" | "bottom"; startMouseY: number; origStart: number; origEnd: number; curStart: number; curEnd: number } | null>(null)
-  const startResize = (e: React.MouseEvent, taskId: string, edge: "top" | "bottom", origStart: number, origEnd: number) => {
+  const [resizing, setResizing] = useState<{ block: Block; edge: "top" | "bottom"; startMouseY: number; origStart: number; origEnd: number; curStart: number; curEnd: number } | null>(null)
+  const startResize = (e: React.MouseEvent, block: Block, edge: "top" | "bottom", origStart: number, origEnd: number) => {
     e.stopPropagation(); e.preventDefault()
-    setResizing({ taskId, edge, startMouseY: e.clientY, origStart, origEnd, curStart: origStart, curEnd: origEnd })
+    setResizing({ block, edge, startMouseY: e.clientY, origStart, origEnd, curStart: origStart, curEnd: origEnd })
     document.body.style.cursor = "ns-resize"; document.body.style.userSelect = "none"
   }
   useEffect(() => {
@@ -362,11 +521,11 @@ function DayGrid({
       const deltaMin = snapTo((e.clientY - resizing.startMouseY) / PX_PER_MIN, SNAP_MIN)
       setResizing((r) => !r ? r : r.edge === "bottom" ? { ...r, curEnd: clamp(r.origEnd + deltaMin, r.curStart + MIN_DURATION, END_MIN) } : { ...r, curStart: clamp(r.origStart + deltaMin, START_MIN, r.curEnd - MIN_DURATION) })
     }
-    const onUp = () => { setResizing((r) => { if (r) onResize(r.taskId, r.curStart, r.curEnd); return null }); document.body.style.cursor = ""; document.body.style.userSelect = "" }
+    const onUp = () => { setResizing((r) => { if (r) onResizeBlock(r.block, r.curStart, r.curEnd); return null }); document.body.style.cursor = ""; document.body.style.userSelect = "" }
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp)
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp) }
-  }, [resizing, onResize])
-  const laidResized = laid.map((b) => resizing && b.taskId === resizing.taskId ? { ...b, startMin: resizing.curStart, endMin: resizing.curEnd } : b)
+  }, [resizing, onResizeBlock])
+  const laidResized = laid.map((b) => resizing && b.key === resizing.block.key ? { ...b, startMin: resizing.curStart, endMin: resizing.curEnd } : b)
 
   return (
     <div className="flex px-4 py-4">
@@ -374,7 +533,7 @@ function DayGrid({
         {hours.map((h) => (<div key={h} className="absolute -translate-y-1/2 pr-2 text-right text-[10px] font-medium tabular-nums text-muted-foreground" style={{ top: (h * 60 - START_MIN) * PX_PER_MIN, right: 0 }}>{String(h).padStart(2, "0")}:00</div>))}
       </div>
 
-      <div ref={gridRef} className="relative flex-1 rounded-lg border border-border/40 bg-card/10" style={{ height: GRID_HEIGHT }} onDragOver={onDayDragOver} onDragLeave={onDayDragLeave} onDrop={onDayDrop}>
+      <div ref={gridRef} className="relative flex-1 rounded-lg border border-border/40 bg-card/10" style={{ height: GRID_HEIGHT }} onContextMenu={onEmptyContextMenu} onDragOver={onDayDragOver} onDragLeave={onDayDragLeave} onDrop={onDayDrop}>
         {hours.map((h) => (<div key={h} className="absolute inset-x-0 border-t border-border/40" style={{ top: (h * 60 - START_MIN) * PX_PER_MIN }} />))}
         {hours.slice(0, -1).map((h) => (<div key={`${h}h`} className="absolute inset-x-0 border-t border-dashed border-border/20" style={{ top: (h * 60 + 30 - START_MIN) * PX_PER_MIN }} />))}
 
@@ -415,9 +574,11 @@ function DayGrid({
               <div key={b.key} className="group absolute" style={{ top, height, left: `calc(${b.col * widthPct}% + ${b.col * 4}px)`, width: `calc(${widthPct}% - 4px)` }}>
                 <button
                   type="button"
+                  data-calendar-block="true"
                   draggable={draggable}
                   onDragStart={(e) => onStartBlockDrag(e, b)}
                   onDragEnd={onDragCleanup}
+                  onContextMenu={(e) => onBlockContextMenu(e, b)}
                   onClick={() => (isMeet ? onSelectMeet(b.meetId!) : onSelectTask(b.taskId!))}
                   className={cn("absolute inset-0 overflow-hidden rounded-lg border text-left transition-colors",
                     isMeet ? (b.selected ? "border-status-meet/70 bg-status-meet/20 ring-2 ring-status-meet/40" : "border-status-meet/40 bg-status-meet/12 hover:bg-status-meet/22")
@@ -426,8 +587,8 @@ function DayGrid({
                   style={{ borderLeftWidth: isMeet ? undefined : 3, borderLeftColor: isMeet ? undefined : p?.color }}
                 >
                   <div className="flex h-full flex-col gap-0.5 px-2 py-1.5">
-                    <div className="flex items-center gap-1.5"><span className="text-[9px] font-semibold tabular-nums text-muted-foreground">{fmtMin(b.startMin)}–{fmtMin(b.endMin)}</span><span className="text-[9px] text-muted-foreground/70">· {fmtDur(b.endMin - b.startMin)}</span></div>
-                    <span className={cn("font-semibold leading-snug text-foreground", height < 52 ? "line-clamp-1 text-[11px]" : "line-clamp-2 text-[12px]")}>{b.title}</span>
+                    {height >= 42 && <div className="flex items-center gap-1.5"><span className="text-[9px] font-semibold tabular-nums text-muted-foreground">{fmtMin(b.startMin)}–{fmtMin(b.endMin)}</span><span className="text-[9px] text-muted-foreground/70">· {fmtDur(b.endMin - b.startMin)}</span></div>}
+                    <span className={cn("font-semibold leading-snug text-foreground", height < 52 ? "line-clamp-1 text-[11px]" : "line-clamp-2 text-[12px]")}>{displayTitle(b)}</span>
                     {height > 50 && (
                       <div className="mt-auto flex items-center gap-1.5">
                         {!isMeet && (<><span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: p?.color }} /><span className="truncate text-[10px] text-muted-foreground">{p?.name}{sec ? ` / ${sec.name}` : ""}</span></>)}
@@ -439,11 +600,11 @@ function DayGrid({
                   </div>
                 </button>
 
-                {b.kind === "WORK" && canSchedule && (
+                {canSchedule && (b.kind === "WORK" || b.kind === "MEET") && (
                   <>
-                    <div onMouseDown={(e) => startResize(e, b.taskId!, "top", b.startMin, b.endMin)} className="absolute inset-x-2 top-0 z-30 h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-primary/20 group-hover:opacity-100" />
-                    <div onMouseDown={(e) => startResize(e, b.taskId!, "bottom", b.startMin, b.endMin)} className="absolute inset-x-2 bottom-0 z-30 h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-primary/20 group-hover:opacity-100" />
-                    <button type="button" onClick={(e) => { e.stopPropagation(); onClearPlanned(b.taskId!) }} title="Remove from calendar (unplan)" className="absolute right-1 top-1 z-30 flex size-4 items-center justify-center rounded bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"><X className="size-3" /></button>
+                    <div onMouseDown={(e) => startResize(e, b, "top", b.startMin, b.endMin)} className="absolute inset-x-2 top-0 z-30 h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-primary/20 group-hover:opacity-100" />
+                    <div onMouseDown={(e) => startResize(e, b, "bottom", b.startMin, b.endMin)} className="absolute inset-x-2 bottom-0 z-30 h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-primary/20 group-hover:opacity-100" />
+                    {b.kind === "WORK" && <button type="button" onClick={(e) => { e.stopPropagation(); onClearPlanned(b.taskId!) }} title="Remove from calendar (unplan)" className="absolute right-1 top-1 z-30 flex size-4 items-center justify-center rounded bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"><X className="size-3" /></button>}
                   </>
                 )}
 
@@ -479,7 +640,9 @@ function DayGrid({
 // ─── Week grid ────────────────────────────────────────────────────────────────
 function WeekGrid({
   hours, selectedDate, today, nowMin, buildDay, projectMap, canSchedule, weekGhost,
-  onColumnDragOver, onColumnDrop, onStartBlockDrag, onDragCleanup, onSelectTask, onSelectMeet, onPickDay,
+  onColumnDragOver, onColumnDrop, onStartBlockDrag, onDragCleanup,
+  onEmptyContextMenu, onBlockContextMenu, onResizeBlock, onSelectTask, onSelectMeet, onPickDay,
+  displayTitle,
 }: {
   hours: number[]; selectedDate: string; today: string; nowMin: number
   buildDay: (dateKey: string) => { blocks: Block[]; markers: Marker[] }
@@ -488,10 +651,45 @@ function WeekGrid({
   onColumnDragOver: (e: React.DragEvent, dayIso: string) => void
   onColumnDrop: (e: React.DragEvent, dayIso: string) => void
   onStartBlockDrag: (e: React.DragEvent, block: Block) => void; onDragCleanup: () => void
+  onEmptyContextMenu: (event: React.MouseEvent<HTMLElement>, dateKey: string) => void
+  onBlockContextMenu: (event: React.MouseEvent, block: Block) => void
+  onResizeBlock: (block: Block, dateKey: string, startMin: number, endMin: number) => void
   onSelectTask: (id: string) => void; onSelectMeet: (id: string) => void; onPickDay: (dateKey: string) => void
+  displayTitle: (block: Block) => string
 }) {
   const days = weekDayKeys(mondayOfWeekKey(selectedDate))
   const weekHasItems = days.some((d) => { const { blocks, markers } = buildDay(d); return blocks.length > 0 || markers.length > 0 })
+  const [resizing, setResizing] = useState<{ block: Block; dateKey: string; edge: "top" | "bottom"; startMouseY: number; origStart: number; origEnd: number; curStart: number; curEnd: number } | null>(null)
+  const startResize = (event: React.MouseEvent, block: Block, dateKey: string, edge: "top" | "bottom") => {
+    event.stopPropagation()
+    event.preventDefault()
+    setResizing({ block, dateKey, edge, startMouseY: event.clientY, origStart: block.startMin, origEnd: block.endMin, curStart: block.startMin, curEnd: block.endMin })
+    document.body.style.cursor = "ns-resize"
+    document.body.style.userSelect = "none"
+  }
+  useEffect(() => {
+    if (!resizing) return
+    const onMove = (event: MouseEvent) => {
+      const deltaMin = snapTo((event.clientY - resizing.startMouseY) / PX_PER_MIN, SNAP_MIN)
+      setResizing((current) => !current ? current : current.edge === "bottom"
+        ? { ...current, curEnd: clamp(current.origEnd + deltaMin, current.curStart + MIN_DURATION, END_MIN) }
+        : { ...current, curStart: clamp(current.origStart + deltaMin, START_MIN, current.curEnd - MIN_DURATION) })
+    }
+    const onUp = () => {
+      setResizing((current) => {
+        if (current) onResizeBlock(current.block, current.dateKey, current.curStart, current.curEnd)
+        return null
+      })
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+    }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+    return () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+    }
+  }, [resizing, onResizeBlock])
 
   return (
     <div className="relative flex px-4 py-4">
@@ -508,7 +706,7 @@ function WeekGrid({
 
       <div className="grid flex-1 grid-cols-7 gap-1.5">
         {days.map((iso) => {
-          const { blocks, markers } = buildDay(iso); const laid = layoutColumns(blocks)
+          const { blocks, markers } = buildDay(iso); const laid = layoutColumns(blocks).map((b) => resizing && resizing.dateKey === iso && resizing.block.key === b.key ? { ...b, startMin: resizing.curStart, endMin: resizing.curEnd } : b)
           const isToday = iso === today; const isSelected = iso === selectedDate
           const showNow = isToday && nowMin >= START_MIN && nowMin <= END_MIN
           return (
@@ -518,6 +716,7 @@ function WeekGrid({
                 {formatWeekdayShort(iso)}<span className="tabular-nums">{formatDayNumber(iso)}</span>
               </button>
               <div className={cn("relative rounded-md border bg-card/20", isSelected ? "border-primary/30" : "border-border/50")} style={{ height: GRID_HEIGHT }}
+                onContextMenu={(e) => onEmptyContextMenu(e, iso)}
                 onDragOver={(e) => onColumnDragOver(e, iso)} onDrop={(e) => onColumnDrop(e, iso)}>
                 {hours.map((h) => (<div key={h} className="absolute inset-x-0 border-t border-border/30" style={{ top: (h * 60 - START_MIN) * PX_PER_MIN }} />))}
                 {showNow && (<div className="pointer-events-none absolute inset-x-0 z-20 h-px bg-now-marker" style={{ top: (nowMin - START_MIN) * PX_PER_MIN }} />)}
@@ -530,16 +729,24 @@ function WeekGrid({
                   const p = projectMap.get(b.projectId); const isMeet = b.kind === "MEET"
                   const top = (clamp(b.startMin, START_MIN, END_MIN) - START_MIN) * PX_PER_MIN
                   const height = Math.max(16, (clamp(b.endMin, START_MIN, END_MIN) - clamp(b.startMin, START_MIN, END_MIN)) * PX_PER_MIN)
-                  const widthPct = 100 / b.cols; const draggable = canSchedule && (b.kind === "WORK" || b.kind === "MEET")
+                  const widthPct = 100 / b.cols; const draggable = canSchedule && !resizing && (b.kind === "WORK" || b.kind === "MEET")
                   return (
-                    <button key={b.key} type="button" draggable={draggable} onDragStart={(e) => onStartBlockDrag(e, b)} onDragEnd={onDragCleanup} onClick={() => (isMeet ? onSelectMeet(b.meetId!) : onSelectTask(b.taskId!))} title={`${b.title} · ${fmtMin(b.startMin)}–${fmtMin(b.endMin)}`}
-                      className={cn("absolute overflow-hidden rounded border px-1 py-0.5 text-left transition-colors",
+                    <div key={b.key} className="group absolute" style={{ top, height, left: `calc(${b.col * widthPct}% + ${b.col * 2}px)`, width: `calc(${widthPct}% - 2px)` }}>
+                    <button type="button" data-calendar-block="true" draggable={draggable} onDragStart={(e) => onStartBlockDrag(e, b)} onDragEnd={onDragCleanup} onContextMenu={(e) => onBlockContextMenu(e, b)} onClick={() => (isMeet ? onSelectMeet(b.meetId!) : onSelectTask(b.taskId!))} title={`${displayTitle(b)} · ${fmtMin(b.startMin)}–${fmtMin(b.endMin)}`}
+                      className={cn("absolute inset-0 overflow-hidden rounded border px-1 py-0.5 text-left transition-colors",
                         isMeet ? (b.selected ? "border-status-meet/70 bg-status-meet/25 ring-1 ring-status-meet/50" : "border-status-meet/40 bg-status-meet/15 hover:bg-status-meet/25") : (b.selected ? "bg-card ring-1 ring-primary/50" : "bg-card hover:bg-accent/60"),
                         draggable && "cursor-grab active:cursor-grabbing", b.status === "DONE" && "opacity-60")}
-                      style={{ top, height, left: `calc(${b.col * widthPct}% + ${b.col * 2}px)`, width: `calc(${widthPct}% - 2px)`, borderLeftWidth: isMeet ? undefined : 2, borderLeftColor: isMeet ? undefined : p?.color }}>
-                      <span className="block truncate text-[9px] font-semibold leading-tight text-foreground">{b.title}</span>
+                      style={{ borderLeftWidth: isMeet ? undefined : 2, borderLeftColor: isMeet ? undefined : p?.color }}>
+                      <span className="block truncate text-[9px] font-semibold leading-tight text-foreground">{displayTitle(b)}</span>
                       {height > 26 && <span className="block truncate text-[8px] tabular-nums text-muted-foreground">{fmtMin(b.startMin)}</span>}
                     </button>
+                    {canSchedule && (
+                      <>
+                        <div onMouseDown={(e) => startResize(e, b, iso, "top")} className="absolute inset-x-1 top-0 z-30 h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-primary/20 group-hover:opacity-100" />
+                        <div onMouseDown={(e) => startResize(e, b, iso, "bottom")} className="absolute inset-x-1 bottom-0 z-30 h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-primary/20 group-hover:opacity-100" />
+                      </>
+                    )}
+                    </div>
                   )
                 })}
                 {markers.map((mk) => {

@@ -628,13 +628,68 @@ public static class WorkspaceCommandProcessor
             return Fail(commandId, "invalidPayload", "A valid projectId or sectionId is required.");
         }
 
+        if (!TryReadOptionalPlannedWork(payload, out var plannedStartAtUtc, out var plannedDurationMinutes))
+        {
+            return Fail(
+                commandId,
+                "invalidPayload",
+                $"plannedStartAtUtc must be an ISO-8601 timestamp and plannedDurationMinutes must be an integer between {MinimumPlannedDurationMinutes} and {MaximumPlannedDurationMinutes}.");
+        }
+
         var treeService = new TreeStateService(state);
         var created = isDraft
             ? treeService.CreateDraftTask(parentId, timestamp)
             : treeService.CreateTask(parentId, title, timestamp);
-        return created is not null
-            ? WorkspaceCommandResult.Succeeded(commandId, created.Id.ToString("N"))
-            : Fail(commandId, "mutationRejected", "Task could not be created in the given location.");
+        if (created is null)
+        {
+            return Fail(commandId, "mutationRejected", "Task could not be created in the given location.");
+        }
+
+        if (plannedStartAtUtc is not null)
+        {
+            treeService.SetPlannedWork(created.Id, plannedStartAtUtc, plannedDurationMinutes, timestamp);
+        }
+
+        return WorkspaceCommandResult.Succeeded(commandId, created.Id.ToString("N"));
+    }
+
+    private static bool TryReadOptionalPlannedWork(
+        JsonElement payload,
+        out DateTimeOffset? plannedStartAtUtc,
+        out int? plannedDurationMinutes)
+    {
+        plannedStartAtUtc = null;
+        plannedDurationMinutes = null;
+        var hasStart = payload.TryGetProperty("plannedStartAtUtc", out var startElement);
+        var hasDuration = payload.TryGetProperty("plannedDurationMinutes", out var durationElement);
+        if (!hasStart && !hasDuration)
+        {
+            return true;
+        }
+
+        if (!hasStart ||
+            startElement.ValueKind != JsonValueKind.String ||
+            !DateTimeOffset.TryParse(
+                startElement.GetString(),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var parsedStart))
+        {
+            return false;
+        }
+
+        if (!hasDuration ||
+            durationElement.ValueKind != JsonValueKind.Number ||
+            !durationElement.TryGetInt32(out var parsedDuration) ||
+            parsedDuration < MinimumPlannedDurationMinutes ||
+            parsedDuration > MaximumPlannedDurationMinutes)
+        {
+            return false;
+        }
+
+        plannedStartAtUtc = parsedStart;
+        plannedDurationMinutes = parsedDuration;
+        return true;
     }
 
     private static WorkspaceCommandResult MoveTask(

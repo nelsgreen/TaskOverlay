@@ -4870,7 +4870,13 @@ internal static class Program
             var result = dispatcher.Dispatch(WorkspaceCommandJson(
                 "create-1",
                 "createTask",
-                new { title = "  New task from Workspace  ", projectId = project.Id.ToString("N") }),
+                new
+                {
+                    title = "  New task from Workspace  ",
+                    projectId = project.Id.ToString("N"),
+                    plannedStartAtUtc = "2026-07-06T10:15:00Z",
+                    plannedDurationMinutes = 45
+                }),
                 now);
 
             Assert(result.Success, "createTask should succeed with a valid project.");
@@ -4884,6 +4890,9 @@ internal static class Program
             Assert(created.ProjectId == project.Id, "Created task should be assigned to the requested project.");
             Assert(created.GroupId is null, "Created task without a section should have no group.");
             Assert(created.Status == TaskStatus.Todo, "Created task should default to TODO.");
+            Assert(created.PlannedStartAtUtc == DateTimeOffset.Parse("2026-07-06T10:15:00Z") &&
+                   created.PlannedDurationMinutes == 45,
+                "Created task should persist initial planned work when created from a calendar slot.");
         });
     }
 

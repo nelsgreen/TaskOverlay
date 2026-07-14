@@ -54,16 +54,17 @@ type WorkspaceSelection =
 
 const MEETING_DRAFT_ID = "meeting-draft"
 
-function createMeetingDraft(projectId: string, dateKey?: string): MeetItem {
+function createMeetingDraft(projectId: string, dateKey?: string, startMin?: number): MeetItem {
   const now = new Date()
   now.setMinutes(Math.ceil(now.getMinutes() / 30) * 30, 0, 0)
   const pad = (value: number) => String(value).padStart(2, "0")
+  const draftStartMin = startMin ?? (now.getHours() * 60 + now.getMinutes())
   return {
     id: MEETING_DRAFT_ID,
     projectId,
     title: "",
     date: dateKey ?? `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
-    startTime: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
+    startTime: `${pad(Math.floor(draftStartMin / 60))}:${pad(draftStartMin % 60)}`,
     duration: "30m",
   }
 }
@@ -679,6 +680,45 @@ export function TaskManager() {
     }
   }
 
+  const handleCreateCalendarTask = (dateKey: string, startMin: number) => {
+    const projectId = selectedProjectIds[0] ?? projects[0]?.id
+    if (!projectId || readOnly) return
+    const rootSectionId = sections.find((s) => s.projectId === projectId && s.isProjectRoot)?.id ?? `project:${projectId}:root`
+    const plannedStartAtUtc = isoFromLocalDateTime(dateKey, Math.floor(startMin / 60), startMin % 60)
+    const plannedDurationMinutes = 60
+    setCalendarSelectedDate(dateKey)
+    setTab("calendar")
+    if (connected) {
+      bridge.sendCreateTask({
+        title: "",
+        draft: true,
+        projectId,
+        sectionId: rootSectionId,
+        plannedStartAtUtc,
+        plannedDurationMinutes,
+      })
+      return
+    }
+    if (!bridged) {
+      const id = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      const created: Task = {
+        id,
+        projectId,
+        sectionId: rootSectionId,
+        parentId: null,
+        title: "",
+        status: "TODO",
+        pinned: false,
+        reminder: "none",
+        plannedStartAtUtc,
+        plannedDurationMinutes,
+      }
+      setMockTasks((prev) => [...prev, created])
+      setSelection({ kind: "task", id })
+      setPendingTitleFocusTaskId(id)
+    }
+  }
+
   // Once the bridge confirms a created task, select it so Details opens on it immediately.
   useEffect(() => {
     if (!bridge.lastCreatedTaskId) return
@@ -1249,11 +1289,13 @@ export function TaskManager() {
     selectMeet(meetId)
   }
 
-  const handleCreateMeeting = (dateKey?: string) => {
+  const handleCreateMeeting = (dateKey?: string, startMin?: number) => {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId) return
-    const draft = createMeetingDraft(projectId, dateKey)
     if (readOnly) return
+    const draft = createMeetingDraft(projectId, dateKey, startMin)
+    if (dateKey) setCalendarSelectedDate(dateKey)
+    setTab("calendar")
     setMeetingDraft(draft)
     setSelection({ kind: "meet", id: draft.id })
     setSelectedTimelineItemId(null)
@@ -1548,6 +1590,8 @@ export function TaskManager() {
                 onSelectTask={selectTask}
                 onSelectMeet={selectMeet}
                 onPickDay={handleCalendarPickDay}
+                onCreateTaskAtSlot={handleCreateCalendarTask}
+                onCreateMeetAtSlot={handleCreateMeeting}
                 onPlanTask={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
                 onMoveMeet={handleMoveMeet}
                 onClearPlanned={(taskId) => handlePlannedWork(taskId, null, null)}
