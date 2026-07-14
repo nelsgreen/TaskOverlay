@@ -1,12 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Layers, Link2, Plus, X } from "lucide-react"
+import { ClipboardList, Layers, Link2, Plus, X } from "lucide-react"
 import type {
   ContextItemStatus,
   ContextItemType,
   ContextSourceType,
   MeetItem,
+  Project,
+  Section,
   Task,
   WorkspaceContextHubCommand,
   WorkspaceContextItemSnapshot,
@@ -14,6 +16,8 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { contextStatusMeta, contextTypeMeta, sourceAppMeta, sourceTypeMeta } from "./context-hub-view"
+import { buildMeetingContextPack, buildTaskContextPack } from "@/lib/context-pack-builder"
+import { ContextPackModal } from "./context-pack-modal"
 
 /**
  * Task/MEET Details -> Context block (MVP). Shows SourceDocuments/ContextItems
@@ -31,6 +35,10 @@ import { contextStatusMeta, contextTypeMeta, sourceAppMeta, sourceTypeMeta } fro
  */
 interface TaskContextBlockProps {
   task: Task
+  projects: Project[]
+  sections: Section[]
+  tasks: Task[]
+  meetItems: MeetItem[]
   contextSources: WorkspaceContextSourceSnapshot[]
   contextItems: WorkspaceContextItemSnapshot[]
   onCommand: (command: WorkspaceContextHubCommand) => boolean
@@ -40,6 +48,10 @@ interface TaskContextBlockProps {
 
 export function TaskContextBlock({
   task,
+  projects,
+  sections,
+  tasks,
+  meetItems,
   contextSources,
   contextItems,
   onCommand,
@@ -60,12 +72,21 @@ export function TaskContextBlock({
       onUnlinkItem={(itemId) => onCommand({ type: "unlinkContextItemFromTask", itemId, taskId: task.id })}
       onOpenContextHub={onOpenContextHub}
       locked={locked}
+      contextPack={{
+        subtitle: `Task: ${task.title || "(untitled)"}`,
+        buildMarkdown: () =>
+          buildTaskContextPack({ task, projects, sections, tasks, meetItems, contextSources, contextItems }),
+      }}
     />
   )
 }
 
 interface MeetContextBlockProps {
   meet: MeetItem
+  projects: Project[]
+  sections: Section[]
+  tasks: Task[]
+  meetItems: MeetItem[]
   contextSources: WorkspaceContextSourceSnapshot[]
   contextItems: WorkspaceContextItemSnapshot[]
   onCommand: (command: WorkspaceContextHubCommand) => boolean
@@ -75,6 +96,10 @@ interface MeetContextBlockProps {
 
 export function MeetContextBlock({
   meet,
+  projects,
+  sections,
+  tasks,
+  meetItems,
   contextSources,
   contextItems,
   onCommand,
@@ -95,6 +120,11 @@ export function MeetContextBlock({
       onUnlinkItem={(itemId) => onCommand({ type: "unlinkContextItemFromMeeting", itemId, meetingId: meet.id })}
       onOpenContextHub={onOpenContextHub}
       locked={locked}
+      contextPack={{
+        subtitle: `MEET: ${meet.title || "(untitled)"}`,
+        buildMarkdown: () =>
+          buildMeetingContextPack({ meet, projects, sections, tasks, meetItems, contextSources, contextItems }),
+      }}
     />
   )
 }
@@ -102,6 +132,12 @@ export function MeetContextBlock({
 type Candidate =
   | { kind: "source"; record: WorkspaceContextSourceSnapshot }
   | { kind: "item"; record: WorkspaceContextItemSnapshot }
+
+/** Read-only export/copy for the owning task/MEET — never a mutation, so it stays available even when locked. */
+interface ContextPackAction {
+  subtitle: string
+  buildMarkdown: () => string
+}
 
 interface RecordContextBlockProps {
   ownerId: string
@@ -116,6 +152,7 @@ interface RecordContextBlockProps {
   onUnlinkItem: (itemId: string) => void
   onOpenContextHub: () => void
   locked: boolean
+  contextPack: ContextPackAction
 }
 
 function RecordContextBlock({
@@ -131,9 +168,11 @@ function RecordContextBlock({
   onUnlinkItem,
   onOpenContextHub,
   locked,
+  contextPack,
 }: RecordContextBlockProps) {
   const [modalOpen, setModalOpen] = useState(false)
   const [search, setSearch] = useState("")
+  const [packMarkdown, setPackMarkdown] = useState<string | null>(null)
 
   const linkedSources = useMemo(
     () => contextSources.filter((source) => getLinkedSourceIds(source).includes(ownerId)),
@@ -238,6 +277,14 @@ function RecordContextBlock({
               <Link2 className="size-3" aria-hidden />
               Open ContextHUB
             </button>
+            <button
+              type="button"
+              onClick={() => setPackMarkdown(contextPack.buildMarkdown())}
+              className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ClipboardList className="size-3" aria-hidden />
+              Context Pack
+            </button>
           </div>
         </div>
       </div>
@@ -249,6 +296,14 @@ function RecordContextBlock({
           onSearchChange={setSearch}
           onLink={(candidate) => linkCandidate(candidate)}
           onClose={() => setModalOpen(false)}
+        />
+      )}
+
+      {packMarkdown !== null && (
+        <ContextPackModal
+          subtitle={contextPack.subtitle}
+          markdown={packMarkdown}
+          onClose={() => setPackMarkdown(null)}
         />
       )}
     </>

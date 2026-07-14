@@ -6,6 +6,7 @@ import type {
   MeetDuration,
   MeetItem,
   Project,
+  Section,
   Task,
   WorkspaceContextHubCommand,
   WorkspaceContextItemSnapshot,
@@ -30,6 +31,9 @@ interface Props {
   onContextCommand?: (command: WorkspaceContextHubCommand) => boolean
   /** Switches Workspace to the ContextHUB tab. */
   onOpenContextHub?: () => void
+  /** Sections + all MEETs, for the Context block's Context Pack export (linked task path, related MEETs). */
+  sections?: Section[]
+  meetItems?: MeetItem[]
 }
 
 const durationOptions: { value: MeetDuration; label: string }[] = [
@@ -96,6 +100,8 @@ export function MeetDetailsPanel({
   contextItems = [],
   onContextCommand,
   onOpenContextHub,
+  sections = [],
+  meetItems = [],
 }: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
   const sessionBaseRef = useRef<MeetItem | null>(meet)
@@ -349,6 +355,10 @@ export function MeetDetailsPanel({
         {onContextCommand && onOpenContextHub && (
           <MeetContextBlock
             meet={draft}
+            projects={projects}
+            sections={sections}
+            tasks={tasks}
+            meetItems={meetItems}
             contextSources={contextSources}
             contextItems={contextItems}
             onCommand={onContextCommand}

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, Bell, Check, ChevronRight, Flag, ListChecks, MapPin, Pin, Repeat, Trash2, UndoDot, X } from "lucide-react"
 import type {
+  MeetItem,
   Project,
   ReminderPreset,
   ReminderState,
@@ -57,6 +58,9 @@ interface Props {
   onContextCommand?: (command: WorkspaceContextHubCommand) => boolean
   /** Switches Workspace to the ContextHUB tab. */
   onOpenContextHub?: () => void
+  /** All tasks/MEETs, for the Context block's Context Pack export (linked-record title lookups). */
+  allTasks?: Task[]
+  meetItems?: MeetItem[]
 }
 
 /** Combines local date+time fields into a UTC ISO instant, or null when incomplete/absent. */
@@ -303,6 +307,8 @@ export function DetailsPanel({
   contextItems = [],
   onContextCommand,
   onOpenContextHub,
+  allTasks = [],
+  meetItems = [],
 }: Props) {
   const [draft, setDraft] = useState<Task | null>(task)
   // Reminder/Deadline/Location cards are collapsed to one row and expand on hover
@@ -1427,6 +1433,10 @@ export function DetailsPanel({
         {onContextCommand && onOpenContextHub && (
           <TaskContextBlock
             task={draft}
+            projects={projects}
+            sections={sections}
+            tasks={allTasks}
+            meetItems={meetItems}
             contextSources={contextSources}
             contextItems={contextItems}
             onCommand={onContextCommand}

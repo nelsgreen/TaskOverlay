@@ -28,7 +28,9 @@ import { cn } from "@/lib/utils"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { addDaysKey, isoFromLocalDateTime, localSlotFromIso, todayKey } from "@/lib/calendar-date"
+import { buildProjectContextPack } from "@/lib/context-pack-builder"
 import { WorkspaceHeader } from "./workspace-header"
+import { ContextPackModal } from "./context-pack-modal"
 import { ProjectScopeBar } from "./project-scope-bar"
 import { TreeView } from "./tree-view"
 import { StatusBoard } from "./status-board"
@@ -112,6 +114,8 @@ export function TaskManager() {
   // ContextHUB: selection/modal are session-local; records come from the snapshot.
   const [contextHubSelection, setContextHubSelection] = useState<ContextHubSelection>(null)
   const [contextHubModal, setContextHubModal] = useState<ContextHubModal>(null)
+  // Context Pack preview: pure export/copy, no persistence — built on demand from the current snapshot.
+  const [contextPackModal, setContextPackModal] = useState<{ subtitle: string; markdown: string } | null>(null)
   // Mock-only orientation data (empty by default; dev preview CRUD works locally).
   const [mockContextSources, setMockContextSources] = useState<WorkspaceContextSourceSnapshot[]>([])
   const [mockContextItems, setMockContextItems] = useState<WorkspaceContextItemSnapshot[]>([])
@@ -692,6 +696,17 @@ export function TaskManager() {
     : readOnly
       ? "Read-only: connect to add workstreams."
       : null
+
+  // Context Pack is read-only export/copy (no persistence), so it stays available even in
+  // read-only mode — it only needs a single concrete project selected, same gating as Workstreams.
+  const contextPackHint = !singleProjectScope ? "Select a project first." : null
+  const handleProjectContextPack = () => {
+    if (!singleProjectScope) return
+    const project = projects.find((p) => p.id === selectedProjectIds[0])
+    if (!project) return
+    const markdown = buildProjectContextPack({ project, tasks, sections, meetItems, contextSources, contextItems })
+    setContextPackModal({ subtitle: `Project: ${project.name}`, markdown })
+  }
 
   const handleSelectWorkstream = (id: string) => {
     setSelectedWorkstreamId(id)
@@ -1374,6 +1389,9 @@ export function TaskManager() {
             onAddContextItem={() => setContextHubModal("context")}
             onAddContextSource={() => setContextHubModal("source")}
             addContextDisabled={readOnly}
+            onContextPack={handleProjectContextPack}
+            contextPackDisabled={!singleProjectScope}
+            contextPackHint={contextPackHint}
           />
           <ProjectScopeBar
             projects={projects}
@@ -1609,6 +1627,8 @@ export function TaskManager() {
               contextItems={contextItems}
               onContextCommand={handleContextHubCommand}
               onOpenContextHub={() => setTab("contexthub")}
+              sections={sections}
+              meetItems={meetItems}
             />
           ) : tab === "workstreams" && !selectedTask && selectedWorkstreamSection && selectedWorkstreamProject ? (
             <WorkstreamDetailPanel
@@ -1640,6 +1660,8 @@ export function TaskManager() {
               contextItems={contextItems}
               onContextCommand={handleContextHubCommand}
               onOpenContextHub={() => setTab("contexthub")}
+              allTasks={tasks}
+              meetItems={meetItems}
             />
           )}
         </div>
@@ -1655,6 +1677,14 @@ export function TaskManager() {
         collapsed={activeNowCollapsed}
         onCollapsedChange={setActiveNowCollapsed}
       />
+
+      {contextPackModal && (
+        <ContextPackModal
+          subtitle={contextPackModal.subtitle}
+          markdown={contextPackModal.markdown}
+          onClose={() => setContextPackModal(null)}
+        />
+      )}
 
       {pendingDeleteTask && (
         <div
