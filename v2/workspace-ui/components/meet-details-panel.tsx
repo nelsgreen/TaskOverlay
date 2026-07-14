@@ -23,6 +23,8 @@ interface Props {
   onApply: (meet: MeetItem) => void
   onDelete: (id: string) => void
   onOpenLinkedTask?: (taskId: string) => void
+  focusTitle?: boolean
+  onTitleFocused?: () => void
   readOnly?: boolean
   /** ContextHUB records for the Context block. Absent/empty renders the block's empty state. */
   contextSources?: WorkspaceContextSourceSnapshot[]
@@ -95,6 +97,8 @@ export function MeetDetailsPanel({
   onApply,
   onDelete,
   onOpenLinkedTask,
+  focusTitle = false,
+  onTitleFocused,
   readOnly = false,
   contextSources = [],
   contextItems = [],
@@ -105,11 +109,21 @@ export function MeetDetailsPanel({
 }: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
   const sessionBaseRef = useRef<MeetItem | null>(meet)
+  const titleInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setDraft(meet)
     sessionBaseRef.current = meet
   }, [meet])
+
+  useEffect(() => {
+    if (!focusTitle || !meet || meet.id !== draft?.id) return
+    window.requestAnimationFrame(() => {
+      titleInputRef.current?.focus()
+      titleInputRef.current?.select()
+      onTitleFocused?.()
+    })
+  }, [focusTitle, meet, draft?.id, onTitleFocused])
 
   if (!draft) {
     return (
@@ -156,8 +170,10 @@ export function MeetDetailsPanel({
             Meeting title
           </label>
           <input
+            ref={titleInputRef}
             value={draft.title}
             onChange={(e) => set("title", e.target.value)}
+            placeholder="Untitled MEET"
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-status-meet/50 focus:ring-2 focus:ring-status-meet/15"
           />
         </div>
