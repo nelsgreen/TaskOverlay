@@ -14,23 +14,35 @@ public static class StateMigrator
         state.Projects ??= new List<ProjectItem>();
         state.Groups ??= new List<GroupItem>();
         state.Meetings ??= new List<MeetingItem>();
+        state.TaskWorkSessions ??= new List<TaskWorkSession>();
         state.ContextSources ??= new List<SourceDocument>();
         state.ContextItems ??= new List<ContextItem>();
         state.WorkspaceSettings ??= new WorkspaceSettings();
         state.TelegramCapture ??= new TelegramCaptureSettings();
 
-        if (state.SchemaVersion == AppState.CurrentSchemaVersion)
-        {
-            return state;
-        }
-
-        if (state.SchemaVersion != 1)
-        {
-            throw new InvalidDataException($"Unsupported schema version: {state.SchemaVersion}.");
-        }
-
         state.Tasks ??= new List<TaskItem>();
+        while (state.SchemaVersion != AppState.CurrentSchemaVersion)
+        {
+            switch (state.SchemaVersion)
+            {
+                case 1:
+                    MigrateV1ToV2(state);
+                    break;
+                case 2:
+                    MigrateLegacyPlannedWork(state);
+                    state.SchemaVersion = 3;
+                    break;
+                default:
+                    throw new InvalidDataException(
+                        $"Unsupported schema version: {state.SchemaVersion}.");
+            }
+        }
 
+        return state;
+    }
+
+    private static void MigrateV1ToV2(AppState state)
+    {
         var defaultProject = state.Projects.FirstOrDefault(project =>
             string.Equals(project.Name, ProjectItem.DefaultName, StringComparison.OrdinalIgnoreCase));
 
@@ -53,8 +65,7 @@ public static class StateMigrator
             task.GroupId = null;
         }
 
-        state.SchemaVersion = AppState.CurrentSchemaVersion;
-        return state;
+        state.SchemaVersion = 2;
     }
 
     public static bool RepairCurrentState(AppState state)
@@ -83,6 +94,12 @@ public static class StateMigrator
         if (state.Meetings is null)
         {
             state.Meetings = new List<MeetingItem>();
+            changed = true;
+        }
+
+        if (state.TaskWorkSessions is null)
+        {
+            state.TaskWorkSessions = new List<TaskWorkSession>();
             changed = true;
         }
 
@@ -220,6 +237,54 @@ public static class StateMigrator
 
             if (CheckpointService.Normalize(task))
             {
+                changed = true;
+            }
+        }
+
+        if (MigrateLegacyPlannedWork(state))
+        {
+            changed = true;
+        }
+
+        var workSessionIds = new HashSet<Guid>();
+        foreach (var session in state.TaskWorkSessions.ToList())
+        {
+            if (!tasksById.ContainsKey(session.TaskId) ||
+                !TaskWorkSessionService.IsValidRange(session.StartUtc, session.EndUtc))
+            {
+                state.TaskWorkSessions.Remove(session);
+                changed = true;
+                continue;
+            }
+
+            if (session.Id == Guid.Empty || !workSessionIds.Add(session.Id))
+            {
+                session.Id = Guid.NewGuid();
+                workSessionIds.Add(session.Id);
+                changed = true;
+            }
+
+            var note = session.Note?.Trim() ?? string.Empty;
+            if (note.Length > TaskWorkSessionService.MaximumNoteLength)
+            {
+                note = note[..TaskWorkSessionService.MaximumNoteLength];
+            }
+
+            if (session.Note != note)
+            {
+                session.Note = note;
+                changed = true;
+            }
+
+            if (session.CreatedAtUtc == default)
+            {
+                session.CreatedAtUtc = session.StartUtc;
+                changed = true;
+            }
+
+            if (session.UpdatedAtUtc == default)
+            {
+                session.UpdatedAtUtc = session.CreatedAtUtc;
                 changed = true;
             }
         }
@@ -547,5 +612,55 @@ public static class StateMigrator
                 changed = true;
             }
         }
+    }
+
+    private static bool MigrateLegacyPlannedWork(AppState state)
+    {
+        state.TaskWorkSessions ??= new List<TaskWorkSession>();
+        var changed = false;
+        foreach (var task in state.Tasks)
+        {
+            if (task.PlannedStartAtUtc is DateTimeOffset legacyStart)
+            {
+                var duration = task.PlannedDurationMinutes is >=
+                                   TaskWorkSessionService.MinimumDurationMinutes and <=
+                                   TaskWorkSessionService.MaximumDurationMinutes
+                    ? task.PlannedDurationMinutes.Value
+                    : TaskWorkSessionService.LegacyDefaultDurationMinutes;
+                var startUtc = legacyStart.ToUniversalTime();
+                var endUtc = startUtc.AddMinutes(duration);
+                if (!state.TaskWorkSessions.Any(session =>
+                        session.TaskId == task.Id &&
+                        session.StartUtc == startUtc &&
+                        session.EndUtc == endUtc))
+                {
+                    var timestamp = task.UpdatedAtUtc != default
+                        ? task.UpdatedAtUtc
+                        : task.CreatedAtUtc != default
+                            ? task.CreatedAtUtc
+                            : startUtc;
+                    state.TaskWorkSessions.Add(new TaskWorkSession
+                    {
+                        Id = Guid.NewGuid(),
+                        TaskId = task.Id,
+                        StartUtc = startUtc,
+                        EndUtc = endUtc,
+                        CreatedAtUtc = timestamp,
+                        UpdatedAtUtc = timestamp
+                    });
+                }
+
+                changed = true;
+            }
+            else if (task.PlannedDurationMinutes is not null)
+            {
+                changed = true;
+            }
+
+            task.PlannedStartAtUtc = null;
+            task.PlannedDurationMinutes = null;
+        }
+
+        return changed;
     }
 }

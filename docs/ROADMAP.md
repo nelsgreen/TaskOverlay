@@ -5,15 +5,12 @@ the backlog into a full release plan.
 
 ## Immediate
 
-1. Docs/backlog consolidation for the Calendar/task planning decisions
-   discussed after PR #62 (this PR): Calendar empty-slot context menu,
-   Planning Pool tasks-not-blocks, multi-segment task scheduling design,
-   the completed-subtasks review-needed indicator, and the remaining
-   Calendar/MEET usability backlog.
-2. Calendar / MEET usability PR: resize, +MEET rename/behavior, short-block
-   titles, Untitled fallback, adjacent shared-boundary resize handles.
-3. Multi-segment task scheduling model/design PR (`TaskCalendarBlock` /
-   `TaskWorkSession`) - design first; no code was added in the docs PR.
+1. Manually verify schema-2 planned-work -> schema-3 `TaskWorkSession`
+   migration against the user's real work-computer state and artifact; the
+   development environment had no copy of that state.
+2. Planning Pool filters: Active / Unscheduled / Today / All (the real
+   per-task scheduling indicators are implemented).
+3. Task Details work-session history and total-duration summary.
 4. Working hours / evening deadline presets.
 5. Calendar visual links for deadline/reminder markers.
 6. FUCKUP marker MVP.
@@ -63,15 +60,16 @@ user confirmation (see DECISIONS "ContextHUB").
 3. Calendar/Timeline MVP.
 4. Timeline Now marker.
 5. Calendar day/week planner.
-6. Planning pool - tasks, not blocks; scheduling indicators (Unscheduled /
-   Scheduled today / N blocks today / Total today); later Active/
-   Unscheduled/Today/All filters.
-7. Duration chips/resize; MEET blocks resizable like task blocks; adjacent
-   shared-boundary resize handles for task/task, MEET/MEET, and task/MEET.
-8. Calendar empty-slot context menu (Create task / Create MEET at the
-   clicked date/time; existing blocks keep their own context menu).
-9. Multi-segment task scheduling (`TaskCalendarBlock`/`TaskWorkSession`
-   design) - one task, multiple linked calendar blocks/work sessions.
+6. Planning pool - tasks, not blocks - implemented; tasks remain until DONE
+   and real scheduling indicators show Unscheduled / Scheduled today / N
+   blocks today / Total today. Active/Unscheduled/Today/All filters remain.
+7. Duration chips/resize, MEET resize, and adjacent shared-boundary handles -
+   implemented; preserve for task/task, MEET/MEET, and task/MEET.
+8. Calendar empty-slot context menu - implemented with connected Create task /
+   Create MEET at the clicked date/time; existing blocks keep their own menu.
+9. Multi-segment task scheduling - implemented with `TaskWorkSession`: one
+   logical task, multiple linked calendar placements, connected CRUD,
+   schema-2 migration, and Day/Week rendering. Task Details history remains.
 10. Reminder action system.
 11. Calendar visual links for deadline/reminder markers.
 

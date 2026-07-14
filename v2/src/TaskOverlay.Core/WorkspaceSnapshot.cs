@@ -11,6 +11,7 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceProjectSnapshot> Projects,
     IReadOnlyList<WorkspaceSectionSnapshot> Sections,
     IReadOnlyList<WorkspaceTaskSnapshot> Tasks,
+    IReadOnlyList<WorkspaceTaskWorkSessionSnapshot> TaskWorkSessions,
     IReadOnlyList<WorkspaceMeetingSnapshot> Meetings,
     IReadOnlyList<WorkspaceContextSourceSnapshot> ContextSources,
     IReadOnlyList<WorkspaceContextItemSnapshot> ContextItems,
@@ -57,9 +58,21 @@ public sealed record WorkspaceTaskSnapshot(
     int? ReminderEveryMinutes,
     bool ReminderActive,
     DateTimeOffset? DeadlineAtUtc,
-    DateTimeOffset? PlannedStartAtUtc,
-    int? PlannedDurationMinutes,
     IReadOnlyList<WorkspaceCheckpointSnapshot>? Checkpoints = null);
+
+public sealed record WorkspaceTaskWorkSessionSnapshot(
+    string Id,
+    string TaskId,
+    DateTimeOffset StartUtc,
+    DateTimeOffset EndUtc,
+    string Note,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    string TaskTitle,
+    string TaskStatus,
+    string ProjectId,
+    string SectionId,
+    string ProjectColor);
 
 public sealed record WorkspaceCheckpointSnapshot(
     string Id,
@@ -126,7 +139,7 @@ public sealed record WorkspaceTimelineItemSnapshot(
 
 public static class WorkspaceSnapshotFactory
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
     public const string ReadOnlyMode = "readonly";
     public const string ConnectedMode = "connected";
 
@@ -141,6 +154,7 @@ public static class WorkspaceSnapshotFactory
         var sourceProjects = state.Projects ?? new List<ProjectItem>();
         var sourceGroups = state.Groups ?? new List<GroupItem>();
         var sourceTasks = state.Tasks ?? new List<TaskItem>();
+        var sourceTaskWorkSessions = state.TaskWorkSessions ?? new List<TaskWorkSession>();
         var sourceMeetings = state.Meetings ?? new List<MeetingItem>();
         var projects = sourceProjects
             .OrderBy(project => project.SortOrder)
@@ -216,6 +230,36 @@ public static class WorkspaceSnapshotFactory
             .ThenBy(context => context.Snapshot.CreatedAtUtc)
             .ToList();
         var tasks = taskContexts.Select(context => context.Snapshot).ToList();
+        var taskContextById = taskContexts.ToDictionary(context => context.Source.Id);
+        var taskWorkSessions = sourceTaskWorkSessions
+            .Where(session =>
+                taskContextById.ContainsKey(session.TaskId) &&
+                TaskWorkSessionService.IsValidRange(session.StartUtc, session.EndUtc))
+            .OrderBy(session => session.StartUtc)
+            .ThenBy(session => session.EndUtc)
+            .ThenBy(session => session.Id)
+            .Select(session =>
+            {
+                var taskContext = taskContextById[session.TaskId];
+                var project = ResolveProject(
+                    projectById,
+                    fallbackProject,
+                    taskContext.Source.ProjectId);
+                return new WorkspaceTaskWorkSessionSnapshot(
+                    FormatId(session.Id),
+                    FormatId(session.TaskId),
+                    session.StartUtc,
+                    session.EndUtc,
+                    session.Note,
+                    session.CreatedAtUtc,
+                    session.UpdatedAtUtc,
+                    taskContext.Snapshot.Title,
+                    taskContext.Snapshot.Status,
+                    taskContext.Snapshot.ProjectId,
+                    taskContext.Snapshot.SectionId,
+                    project.ColorHex);
+            })
+            .ToList();
         var meetings = sourceMeetings
             .Where(meeting => projectById.ContainsKey(meeting.ProjectId))
             .OrderBy(meeting => meeting.StartsAtUtc)
@@ -329,6 +373,7 @@ public static class WorkspaceSnapshotFactory
             projects,
             sections,
             tasks,
+            taskWorkSessions,
             meetings,
             contextSources,
             contextItems,
@@ -389,8 +434,6 @@ public static class WorkspaceSnapshotFactory
             task.RemindEveryMinutes,
             reminderActive,
             task.DueAtUtc,
-            task.PlannedStartAtUtc,
-            task.PlannedDurationMinutes,
             ToCheckpointSnapshots(task.Checkpoints));
         var projectPath = group is null
             ? project.Name

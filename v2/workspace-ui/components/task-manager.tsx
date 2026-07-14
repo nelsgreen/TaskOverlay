@@ -9,6 +9,7 @@ import type {
   StatusFilterKey,
   TabKey,
   Task,
+  TaskWorkSession,
   TimelineItem,
   TreeFilter,
   WorkspaceContextHubCommand,
@@ -99,6 +100,7 @@ function meetDurationFields(startMinutes: number, durationMinutes: number): Pick
 export function TaskManager() {
   const bridge = useWorkspaceBridge()
   const [mockTasks, setMockTasks] = useState<Task[]>(initialTasks)
+  const [mockTaskWorkSessions, setMockTaskWorkSessions] = useState<TaskWorkSession[]>([])
   const [mockMeetItems, setMockMeetItems] = useState<MeetItem[]>(initialMeetItems)
   const [meetingDraft, setMeetingDraft] = useState<MeetItem | null>(null)
   // Sections need local state in mock mode so "Add workstream" stays usable for
@@ -115,9 +117,9 @@ export function TaskManager() {
   const [calendarShowDone, setCalendarShowDone] = useState(false)
   // Session-only Details panel width (no persistence yet — follow-up).
   const [detailsWidth, setDetailsWidth] = useState(288)
-  // Optimistic planned-work overrides: reflect duration/time immediately in the
-  // grid, then reconciled by the authoritative C# snapshot (does not persist).
-  const [plannedOverrides, setPlannedOverrides] = useState<Record<string, { plannedStartAtUtc: string | null; plannedDurationMinutes: number | null }>>({})
+  const [pendingCalendarDelete, setPendingCalendarDelete] = useState<
+    { kind: "session"; id: string } | { kind: "meet"; id: string } | null
+  >(null)
   const [filter, setFilter] = useState<TreeFilter>("all")
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all")
   const [hideDone, setHideDone] = useState(false)
@@ -153,14 +155,8 @@ export function TaskManager() {
   const readOnly = bridged && !connected
   const projects = bridge.data?.projects ?? mockProjects
   const sections = bridge.data?.sections ?? mockSectionList
-  const rawTasks = bridge.data?.tasks ?? mockTasks
-  const tasks = useMemo(() => {
-    if (Object.keys(plannedOverrides).length === 0) return rawTasks
-    return rawTasks.map((t) => {
-      const o = plannedOverrides[t.id]
-      return o ? { ...t, plannedStartAtUtc: o.plannedStartAtUtc ?? undefined, plannedDurationMinutes: o.plannedDurationMinutes ?? undefined } : t
-    })
-  }, [rawTasks, plannedOverrides])
+  const tasks = bridge.data?.tasks ?? mockTasks
+  const taskWorkSessions = bridge.data?.taskWorkSessions ?? mockTaskWorkSessions
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
   const calendarMeetItems = useMemo(
     () => meetingDraft ? [...meetItems.filter((meeting) => meeting.id !== meetingDraft.id), meetingDraft] : meetItems,
@@ -170,30 +166,6 @@ export function TaskManager() {
   const activeNowTaskIds = bridge.data?.activeNowTaskIds
   const contextSources = bridge.data?.contextSources ?? mockContextSources
   const contextItems = bridge.data?.contextItems ?? mockContextItems
-
-  // Drop an optimistic override once the authoritative snapshot reflects the same value.
-  useEffect(() => {
-    const data = bridge.data
-    if (!data) return
-    setPlannedOverrides((prev) => {
-      if (Object.keys(prev).length === 0) return prev
-      const sameStart = (a: string | null, b?: string) => {
-        if (a === null) return !b
-        return !!b && new Date(a).getTime() === new Date(b).getTime()
-      }
-      let changed = false
-      const next = { ...prev }
-      for (const t of data.tasks) {
-        const o = next[t.id]
-        if (o && sameStart(o.plannedStartAtUtc, t.plannedStartAtUtc) &&
-            (o.plannedDurationMinutes ?? null) === (t.plannedDurationMinutes ?? null)) {
-          delete next[t.id]
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-  }, [bridge.data])
 
   useEffect(() => {
     const bridgedData = bridge.data
@@ -643,24 +615,52 @@ export function TaskManager() {
     window.addEventListener("mousemove", onMove)
     window.addEventListener("mouseup", onUp)
   }
-  // Planned work: persists through the C# bridge when connected; local-only in dev mock mode.
-  const handlePlannedWork = (
+  // Calendar placements are separate records. Creating another placement never
+  // moves or duplicates the logical task.
+  const handleCreateTaskWorkSession = (
     taskId: string,
-    plannedStartAtUtc: string | null,
-    plannedDurationMinutes: number | null,
+    startUtc: string,
+    endUtc: string,
   ) => {
     if (connected) {
-      // Optimistic: reflect immediately, then the snapshot reconciles this override.
-      setPlannedOverrides((prev) => ({ ...prev, [taskId]: { plannedStartAtUtc, plannedDurationMinutes } }))
-      bridge.sendCommand({ type: "updateTaskPlannedWork", taskId, plannedStartAtUtc, plannedDurationMinutes })
+      bridge.sendTaskWorkSessionCommand({ type: "createTaskWorkSession", taskId, startUtc, endUtc })
       return
     }
     if (!bridged) {
-      setMockTasks((prev) => prev.map((t) => (t.id === taskId
-        ? { ...t, plannedStartAtUtc: plannedStartAtUtc ?? undefined, plannedDurationMinutes: plannedDurationMinutes ?? undefined }
-        : t)))
+      const task = tasks.find((candidate) => candidate.id === taskId)
+      if (!task) return
+      const project = projects.find((candidate) => candidate.id === task.projectId)
+      setMockTaskWorkSessions((prev) => [...prev, {
+        id: `local-session-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        taskId,
+        startUtc,
+        endUtc,
+        taskTitle: task.title,
+        taskStatus: task.status,
+        projectId: task.projectId,
+        sectionId: task.sectionId,
+        projectColor: project?.color ?? "",
+      }])
     }
   }
+
+  const handleUpdateTaskWorkSession = (
+    sessionId: string,
+    startUtc: string,
+    endUtc: string,
+  ) => {
+    if (connected) {
+      bridge.sendTaskWorkSessionCommand({ type: "updateTaskWorkSession", sessionId, startUtc, endUtc })
+      return
+    }
+    if (!bridged) {
+      setMockTaskWorkSessions((prev) => prev.map((session) =>
+        session.id === sessionId ? { ...session, startUtc, endUtc } : session))
+    }
+  }
+
+  const requestDeleteTaskWorkSession = (sessionId: string) =>
+    setPendingCalendarDelete({ kind: "session", id: sessionId })
 
   // Add task from Workspace: defaults to the current Tree project, and to the
   // selected task's section when that task is in the same project.
@@ -701,8 +701,9 @@ export function TaskManager() {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId || readOnly) return
     const rootSectionId = sections.find((s) => s.projectId === projectId && s.isProjectRoot)?.id ?? `project:${projectId}:root`
-    const plannedStartAtUtc = isoFromLocalDateTime(dateKey, Math.floor(startMin / 60), startMin % 60)
-    const plannedDurationMinutes = 60
+    const workSessionStartUtc = isoFromLocalDateTime(dateKey, Math.floor(startMin / 60), startMin % 60)
+    const endMin = startMin + 60
+    const workSessionEndUtc = isoFromLocalDateTime(dateKey, Math.floor(endMin / 60), endMin % 60)
     setCalendarSelectedDate(dateKey)
     setTab("calendar")
     if (connected) {
@@ -711,8 +712,8 @@ export function TaskManager() {
         draft: true,
         projectId,
         sectionId: rootSectionId,
-        plannedStartAtUtc,
-        plannedDurationMinutes,
+        workSessionStartUtc,
+        workSessionEndUtc,
       })
       return
     }
@@ -727,10 +728,19 @@ export function TaskManager() {
         status: "TODO",
         pinned: false,
         reminder: "none",
-        plannedStartAtUtc,
-        plannedDurationMinutes,
       }
       setMockTasks((prev) => [...prev, created])
+      setMockTaskWorkSessions((prev) => [...prev, {
+        id: `local-session-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        taskId: id,
+        startUtc: workSessionStartUtc,
+        endUtc: workSessionEndUtc,
+        taskTitle: "",
+        taskStatus: "TODO",
+        projectId,
+        sectionId: rootSectionId,
+        projectColor: projects.find((project) => project.id === projectId)?.color ?? "",
+      }])
       setSelection({ kind: "task", id })
       setPendingTitleFocusTaskId(id)
     }
@@ -1055,6 +1065,7 @@ export function TaskManager() {
       setMockTasks((prev) => prev
         .filter((t) => t.id !== id)
         .map((t) => (t.parentId === id ? { ...t, parentId: newParent } : t)))
+      setMockTaskWorkSessions((prev) => prev.filter((session) => session.taskId !== id))
       clearSelectionAfterRemoval(id)
     }
   }
@@ -1331,6 +1342,24 @@ export function TaskManager() {
     setSelectedTimelineItemId(null)
   }
 
+  const confirmCalendarDelete = () => {
+    if (!pendingCalendarDelete) return
+    if (pendingCalendarDelete.kind === "session") {
+      if (connected) {
+        bridge.sendTaskWorkSessionCommand({
+          type: "deleteTaskWorkSession",
+          sessionId: pendingCalendarDelete.id,
+        })
+      } else if (!bridged) {
+        setMockTaskWorkSessions((items) =>
+          items.filter((session) => session.id !== pendingCalendarDelete.id))
+      }
+    } else {
+      handleDeleteMeet(pendingCalendarDelete.id)
+    }
+    setPendingCalendarDelete(null)
+  }
+
   useEffect(() => {
     const id = bridge.lastCreatedMeetingId
     if (!id || !meetItems.some((meeting) => meeting.id === id)) return
@@ -1394,7 +1423,6 @@ export function TaskManager() {
     updateTaskPinToPanel: "pinToPanel",
     updateTaskNotes: "notes",
     updateTaskTitle: "title",
-    updateTaskPlannedWork: "plannedWork",
     updateTaskWaitingFor: "waitingFor",
     updateTaskReminder: "reminder",
     updateTaskDeadline: "deadline",
@@ -1411,6 +1439,15 @@ export function TaskManager() {
       .filter((command) => command.taskId === selectedTaskId)
       .map((command) => pendingFieldOf[command.type]),
   )
+
+  const handleCalendarTaskStatus = (taskId: string, status: Status) => {
+    if (connected) return sendTaskEdit(taskId, "status", status)
+    if (!bridged) {
+      setMockTasks((items) => items.map((task) =>
+        task.id === taskId ? { ...task, status } : task))
+    }
+    return false
+  }
 
   if (bridge.status === "loading" || (bridged && !contextReady)) {
     return (
@@ -1611,6 +1648,7 @@ export function TaskManager() {
                 projects={projects}
                 sections={sections}
                 tasks={tasks}
+                taskWorkSessions={taskWorkSessions}
                 meetItems={calendarMeetItems}
                 selectedProjectIds={selectedProjectIds}
                 selectedTaskId={selectedTaskId}
@@ -1622,9 +1660,12 @@ export function TaskManager() {
                 onPickDay={handleCalendarPickDay}
                 onCreateTaskAtSlot={handleCreateCalendarTask}
                 onCreateMeetAtSlot={handleCreateMeeting}
-                onPlanTask={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
+                onCreateTaskWorkSession={handleCreateTaskWorkSession}
+                onUpdateTaskWorkSession={handleUpdateTaskWorkSession}
+                onRequestDeleteTaskWorkSession={requestDeleteTaskWorkSession}
+                onSetTaskStatus={handleCalendarTaskStatus}
                 onMoveMeet={handleMoveMeet}
-                onClearPlanned={(taskId) => handlePlannedWork(taskId, null, null)}
+                onRequestDeleteMeet={(meetId) => setPendingCalendarDelete({ kind: "meet", id: meetId })}
               />
             )}
             {tab === "workstreams" && (
@@ -1760,6 +1801,41 @@ export function TaskManager() {
           markdown={contextPackModal.markdown}
           onClose={() => setContextPackModal(null)}
         />
+      )}
+
+      {pendingCalendarDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-xl">
+            <h2 className="text-sm font-semibold text-foreground">
+              {pendingCalendarDelete.kind === "session" ? "Remove calendar block?" : "Delete MEET?"}
+            </h2>
+            <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+              {pendingCalendarDelete.kind === "session"
+                ? "Вы уверены, что хотите удалить этот блок из календаря? Удалится только рабочая сессия; сама задача останется."
+                : "This MEET will be deleted. This action does not delete linked tasks."}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingCalendarDelete(null)}
+                className="rounded-md border border-border px-3 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmCalendarDelete}
+                className="rounded-md bg-destructive px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-destructive/90"
+              >
+                {pendingCalendarDelete.kind === "session" ? "Remove block" : "Delete MEET"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {pendingDeleteTask && (

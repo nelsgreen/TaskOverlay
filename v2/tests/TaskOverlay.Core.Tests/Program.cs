@@ -160,9 +160,11 @@ internal static class Program
             ("workspace command notes persistence", WorkspaceCommandNotesPersistence),
             ("workspace command title persistence", WorkspaceCommandTitlePersistence),
             ("workspace command contract rejection", WorkspaceCommandContractRejection),
-            ("workspace command planned work persistence", WorkspaceCommandPlannedWorkPersistence),
-            ("workspace command planned work validation", WorkspaceCommandPlannedWorkValidation),
-            ("workspace planned work snapshot and migration", WorkspacePlannedWorkSnapshotAndMigration),
+            ("workspace task work session commands and persistence", WorkspaceTaskWorkSessionCommandsAndPersistence),
+            ("workspace task work session validation", WorkspaceTaskWorkSessionValidation),
+            ("workspace task work session migration fixtures", WorkspaceTaskWorkSessionMigrationFixtures),
+            ("workspace task work session isolation and delete", WorkspaceTaskWorkSessionIsolationAndDelete),
+            ("workspace task work session repair and snapshot", WorkspaceTaskWorkSessionRepairAndSnapshot),
             ("workspace command create task persistence", WorkspaceCommandCreateTaskPersistence),
             ("workspace command create task in section", WorkspaceCommandCreateTaskInSection),
             ("workspace command create task validation", WorkspaceCommandCreateTaskValidation),
@@ -346,7 +348,8 @@ internal static class Program
         var task = migrated.Tasks.Single();
 
         Assert(ReferenceEquals(migrated, state), "Migration should update the loaded state.");
-        Assert(migrated.SchemaVersion == 2, "Migration should advance schemaVersion to 2.");
+        Assert(migrated.SchemaVersion == AppState.CurrentSchemaVersion,
+            "Migration should advance to the current schemaVersion.");
         Assert(migrated.Projects.Count == 1, "Migration should create exactly one Default project.");
         Assert(task.ProjectId == defaultProject.Id, "Existing tasks should join the Default project.");
         Assert(task.GroupId is null, "Migrated v1 tasks should not belong to a group.");
@@ -413,9 +416,11 @@ internal static class Program
             var rewrittenJson = File.ReadAllText(store.StatePath);
             var backupJson = File.ReadAllText(store.BackupPath);
 
-            Assert(loaded.SchemaVersion == 2, "Loaded v1 state should migrate to schemaVersion 2.");
+            Assert(loaded.SchemaVersion == AppState.CurrentSchemaVersion,
+                "Loaded v1 state should migrate to the current schemaVersion.");
             Assert(loaded.Tasks[0].ProjectId == loaded.Projects.Single().Id, "Loaded task should be assigned.");
-            Assert(rewrittenJson.Contains("\"schemaVersion\": 2"), "Migrated state should be persisted.");
+            Assert(rewrittenJson.Contains($"\"schemaVersion\": {AppState.CurrentSchemaVersion}"),
+                "Migrated state should be persisted.");
             Assert(backupJson.Contains("\"schemaVersion\": 1"), "The original v1 state should be backed up.");
         });
     }
@@ -448,7 +453,8 @@ internal static class Program
             store.Save(state);
             var loaded = store.Load();
 
-            Assert(loaded.SchemaVersion == 2, "Roundtrip should retain schemaVersion 2.");
+            Assert(loaded.SchemaVersion == AppState.CurrentSchemaVersion,
+                "Roundtrip should retain the current schemaVersion.");
             Assert(loaded.Projects.Single(item => item.Id == project.Id).Name == "Release", "Project should roundtrip.");
             Assert(loaded.Groups.Single(item => item.Id == group.Id).ProjectId == project.Id, "Group should roundtrip.");
             var loadedTask = loaded.Tasks.Single(item => item.Id == task.Id);
@@ -1331,7 +1337,8 @@ internal static class Program
             var service = new TreeStateService(loaded);
             var taskNode = service.GetNode(taskId);
 
-            Assert(loaded.SchemaVersion == 2, "Additive tree fields should not require schema migration.");
+            Assert(loaded.SchemaVersion == AppState.CurrentSchemaVersion,
+                "Legacy flat state should migrate to the current schema safely.");
             Assert(taskNode?.ParentId == projectId, "Legacy flat task should resolve under its project.");
             Assert(taskNode?.Active == true, "Legacy InWork should map to Active.");
             Assert(taskNode?.Status == TreeNodeStatus.Focus, "Legacy InWork should map to FOCUS status.");
@@ -4305,7 +4312,7 @@ internal static class Program
         var waitingSnapshot = snapshot.Tasks.Single(task =>
             task.Id == waiting.Id.ToString("N"));
 
-        Assert(snapshot.SchemaVersion == 1, "Workspace contract version should be 1.");
+        Assert(snapshot.SchemaVersion == 2, "Workspace contract version should be 2.");
         Assert(snapshot.Mode == "readonly", "Workspace contract should be read-only.");
         Assert(
             WorkspaceSnapshotFactory.Create(
@@ -4339,7 +4346,7 @@ internal static class Program
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
         var document = JsonDocument.Parse(json);
-        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 1,
+        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 2,
             "Serialized workspace contract should use camelCase fields.");
         Assert(document.RootElement.GetProperty("mode").GetString() == "readonly",
             "Serialized workspace contract mode mismatch.");
@@ -4740,7 +4747,7 @@ internal static class Program
         Assert(task.Title != "No change", "Rejected contract must not mutate state.");
     }
 
-    private static void WorkspaceCommandPlannedWorkPersistence()
+    private static void WorkspaceTaskWorkSessionCommandsAndPersistence()
     {
         WithTemporaryDirectory(directory =>
         {
@@ -4753,105 +4760,320 @@ internal static class Program
                 () => store.Save(state),
                 () => { });
 
-            var plannedStart = "2026-07-06T09:00:00Z";
-            var setResult = dispatcher.Dispatch(WorkspaceCommandJson(
-                "plan-set",
-                "updateTaskPlannedWork",
-                new { taskId = task.Id.ToString("N"), plannedStartAtUtc = plannedStart, plannedDurationMinutes = 60 }),
-                now);
-            Assert(setResult.Success, "Setting a planned block should succeed.");
+            var create = dispatcher.Dispatch(WorkspaceCommandJson(
+                "session-create",
+                "createTaskWorkSession",
+                new
+                {
+                    taskId = task.Id.ToString("N"),
+                    startUtc = "2026-07-06T09:00:00Z",
+                    endUtc = "2026-07-06T10:00:00Z",
+                    note = "  Deep work  "
+                }), now);
+            Assert(create.Success && !string.IsNullOrWhiteSpace(create.CreatedTaskWorkSessionId),
+                "Creating a task work session should return its id.");
 
-            var afterSet = store.Load().Tasks.Single(item => item.Id == task.Id);
-            Assert(afterSet.PlannedStartAtUtc == DateTimeOffset.Parse(plannedStart),
-                "Planned start should persist through state.json.");
-            Assert(afterSet.PlannedDurationMinutes == 60,
-                "Planned duration should persist through state.json.");
+            var sessionId = Guid.Parse(create.CreatedTaskWorkSessionId!);
+            var loaded = store.Load();
+            var persisted = loaded.TaskWorkSessions.Single(session => session.Id == sessionId);
+            Assert(persisted.TaskId == task.Id && persisted.Note == "Deep work",
+                "Created session should persist its task link and normalized note.");
 
-            var clearResult = dispatcher.Dispatch(WorkspaceCommandJson(
-                "plan-clear",
-                "updateTaskPlannedWork",
-                new { taskId = task.Id.ToString("N"), plannedStartAtUtc = (string?)null, plannedDurationMinutes = (int?)null }),
-                now);
-            Assert(clearResult.Success, "Clearing a planned block should succeed.");
+            var update = dispatcher.Dispatch(WorkspaceCommandJson(
+                "session-update",
+                "updateTaskWorkSession",
+                new
+                {
+                    sessionId = sessionId.ToString("N"),
+                    startUtc = "2026-07-06T08:30:00Z",
+                    endUtc = "2026-07-06T10:15:00Z"
+                }), now.AddMinutes(1));
+            Assert(update.Success, "Updating a task work session should succeed.");
+            var updated = store.Load().TaskWorkSessions.Single(session => session.Id == sessionId);
+            Assert(updated.StartUtc == DateTimeOffset.Parse("2026-07-06T08:30:00Z") &&
+                   updated.EndUtc == DateTimeOffset.Parse("2026-07-06T10:15:00Z"),
+                "Moved/resized session should persist through state.json.");
 
-            var afterClear = store.Load().Tasks.Single(item => item.Id == task.Id);
-            Assert(afterClear.PlannedStartAtUtc is null && afterClear.PlannedDurationMinutes is null,
-                "Clearing planned work should null both fields in state.json.");
+            var delete = dispatcher.Dispatch(WorkspaceCommandJson(
+                "session-delete",
+                "deleteTaskWorkSession",
+                new { sessionId = sessionId.ToString("N") }), now.AddMinutes(2));
+            Assert(delete.Success, "Deleting a task work session should succeed.");
+            loaded = store.Load();
+            Assert(loaded.TaskWorkSessions.Count == 0,
+                "Deleted work session should stay deleted after reload.");
+            Assert(loaded.Tasks.Any(candidate => candidate.Id == task.Id),
+                "Deleting a calendar block must not delete its parent task.");
         });
     }
 
-    private static void WorkspaceCommandPlannedWorkValidation()
+    private static void WorkspaceTaskWorkSessionValidation()
     {
         var now = DateTimeOffset.Parse("2026-07-06T08:00:00Z");
         var state = AppState.CreateDefault(now);
         var task = state.Tasks[0];
 
+        var missingTaskId = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "session-no-task-id",
+            "createTaskWorkSession",
+            new { startUtc = "2026-07-06T09:00:00Z", endUtc = "2026-07-06T10:00:00Z" }), now);
+        Assert(!missingTaskId.Success && missingTaskId.ErrorCode == "invalidTaskId",
+            "Creating a session without taskId should return a clear error.");
+
         var missingTask = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
-            "plan-missing",
-            "updateTaskPlannedWork",
-            new { taskId = Guid.NewGuid().ToString("N"), plannedStartAtUtc = "2026-07-06T09:00:00Z", plannedDurationMinutes = 60 }),
-            now);
+            "session-missing-task",
+            "createTaskWorkSession",
+            new
+            {
+                taskId = Guid.NewGuid().ToString("N"),
+                startUtc = "2026-07-06T09:00:00Z",
+                endUtc = "2026-07-06T10:00:00Z"
+            }), now);
         Assert(!missingTask.Success && missingTask.ErrorCode == "taskNotFound",
-            "Planned work on an unknown task should be rejected.");
+            "A session for an unknown task should be rejected.");
+
+        var invalidRange = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "session-invalid-range",
+            "createTaskWorkSession",
+            new
+            {
+                taskId = task.Id.ToString("N"),
+                startUtc = "2026-07-06T10:00:00Z",
+                endUtc = "2026-07-06T09:00:00Z"
+            }), now);
+        Assert(!invalidRange.Success && invalidRange.ErrorCode == "invalidPayload",
+            "end <= start should be rejected.");
 
         var tooShort = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
-            "plan-short",
-            "updateTaskPlannedWork",
-            new { taskId = task.Id.ToString("N"), plannedStartAtUtc = "2026-07-06T09:00:00Z", plannedDurationMinutes = 0 }),
-            now);
+            "session-too-short",
+            "createTaskWorkSession",
+            new
+            {
+                taskId = task.Id.ToString("N"),
+                startUtc = "2026-07-06T09:00:00Z",
+                endUtc = "2026-07-06T09:01:00Z"
+            }), now);
         Assert(!tooShort.Success && tooShort.ErrorCode == "invalidPayload",
-            "Zero duration should be rejected as unreasonable.");
+            "A session shorter than the existing minimum should be rejected.");
 
-        var tooLong = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
-            "plan-long",
-            "updateTaskPlannedWork",
-            new { taskId = task.Id.ToString("N"), plannedStartAtUtc = "2026-07-06T09:00:00Z", plannedDurationMinutes = 5000 }),
-            now);
-        Assert(!tooLong.Success && tooLong.ErrorCode == "invalidPayload",
-            "Excessive duration should be rejected as unreasonable.");
+        var missingSession = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "session-update-missing",
+            "updateTaskWorkSession",
+            new { sessionId = Guid.NewGuid().ToString("N"), note = "No" }), now);
+        Assert(!missingSession.Success && missingSession.ErrorCode == "sessionNotFound",
+            "Updating an unknown session should return a clear error.");
 
-        var badStart = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
-            "plan-bad-start",
-            "updateTaskPlannedWork",
-            new { taskId = task.Id.ToString("N"), plannedStartAtUtc = "not-a-date", plannedDurationMinutes = 60 }),
-            now);
-        Assert(!badStart.Success && badStart.ErrorCode == "invalidPayload",
-            "Non-ISO planned start should be rejected.");
+        var missingSessionId = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "session-update-no-id",
+            "updateTaskWorkSession",
+            new { note = "No" }), now);
+        Assert(!missingSessionId.Success && missingSessionId.ErrorCode == "invalidSessionId",
+            "Updating without sessionId should return a clear error.");
 
-        Assert(task.PlannedStartAtUtc is null && task.PlannedDurationMinutes is null,
-            "Rejected planned-work commands must not mutate the task.");
+        var missingDelete = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "session-delete-missing",
+            "deleteTaskWorkSession",
+            new { sessionId = Guid.NewGuid().ToString("N") }), now);
+        Assert(!missingDelete.Success && missingDelete.ErrorCode == "sessionNotFound",
+            "Deleting an unknown session should return a clear error.");
+        var missingDeleteId = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "session-delete-no-id",
+            "deleteTaskWorkSession",
+            new { }), now);
+        Assert(!missingDeleteId.Success && missingDeleteId.ErrorCode == "invalidSessionId",
+            "Deleting without sessionId should return a clear error.");
+        Assert(state.TaskWorkSessions.Count == 0,
+            "Rejected session commands must not mutate state.");
     }
 
-    private static void WorkspacePlannedWorkSnapshotAndMigration()
+    private static void WorkspaceTaskWorkSessionMigrationFixtures()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var projectId = Guid.NewGuid();
+            var validTaskId = Guid.NewGuid();
+            var noPlanTaskId = Guid.NewGuid();
+            var malformedDurationTaskId = Guid.NewGuid();
+            var partialTaskId = Guid.NewGuid();
+            var malformedFieldsTaskId = Guid.NewGuid();
+            var store = new AppStateStore(directory);
+            var oldStateJson =
+                $$"""
+                {
+                  "schemaVersion": 2,
+                  "tasks": [
+                    {
+                      "id": "{{validTaskId}}",
+                      "title": "Valid planned task",
+                      "description": "preserved",
+                      "projectId": "{{projectId}}",
+                      "plannedStartAtUtc": "2026-07-06T09:00:00Z",
+                      "plannedDurationMinutes": 45,
+                      "createdAtUtc": "2026-07-01T08:00:00Z",
+                      "updatedAtUtc": "2026-07-02T08:00:00Z"
+                    },
+                    {
+                      "id": "{{noPlanTaskId}}",
+                      "title": "No planned work",
+                      "projectId": "{{projectId}}",
+                      "createdAtUtc": "2026-07-01T08:00:00Z"
+                    },
+                    {
+                      "id": "{{malformedDurationTaskId}}",
+                      "title": "Malformed duration",
+                      "projectId": "{{projectId}}",
+                      "plannedStartAtUtc": "2026-07-06T11:00:00Z",
+                      "plannedDurationMinutes": 0,
+                      "createdAtUtc": "2026-07-01T08:00:00Z"
+                    },
+                    {
+                      "id": "{{partialTaskId}}",
+                      "title": "Partial planned work",
+                      "projectId": "{{projectId}}",
+                      "plannedDurationMinutes": 30,
+                      "createdAtUtc": "2026-07-01T08:00:00Z"
+                    },
+                    {
+                      "id": "{{malformedFieldsTaskId}}",
+                      "title": "Malformed planned fields",
+                      "projectId": "{{projectId}}",
+                      "plannedStartAtUtc": "not-a-date",
+                      "plannedDurationMinutes": "not-a-number",
+                      "createdAtUtc": "2026-07-01T08:00:00Z"
+                    }
+                  ],
+                  "projects": [{
+                    "id": "{{projectId}}",
+                    "name": "Default",
+                    "colorHex": "#64748B",
+                    "sortOrder": 0,
+                    "createdAtUtc": "2026-07-01T08:00:00Z"
+                  }],
+                  "groups": [],
+                  "overlaySettings": { "alwaysOnTop": true },
+                  "windowPlacement": { "collapsedLeft": 1800, "collapsedTop": 12 },
+                  "createdAtUtc": "2026-07-01T08:00:00Z",
+                  "updatedAtUtc": "2026-07-02T08:00:00Z"
+                }
+                """;
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(store.StatePath, oldStateJson);
+
+            var loaded = store.Load();
+            Assert(loaded.SchemaVersion == AppState.CurrentSchemaVersion,
+                "Schema-2 planned work should migrate to the current schema.");
+            Assert(loaded.TaskWorkSessions.Count == 2,
+                "Only old tasks with a usable planned start should create sessions.");
+            var migrated = loaded.TaskWorkSessions.Single(session => session.TaskId == validTaskId);
+            Assert(migrated.StartUtc == DateTimeOffset.Parse("2026-07-06T09:00:00Z") &&
+                   migrated.EndUtc == DateTimeOffset.Parse("2026-07-06T09:45:00Z"),
+                "Valid old placement should preserve start and duration exactly.");
+            var repairedDuration = loaded.TaskWorkSessions.Single(
+                session => session.TaskId == malformedDurationTaskId);
+            Assert(repairedDuration.EndUtc - repairedDuration.StartUtc == TimeSpan.FromMinutes(60),
+                "Invalid legacy duration should use the previous Calendar default safely.");
+            Assert(loaded.TaskWorkSessions.All(session =>
+                    session.TaskId != noPlanTaskId &&
+                    session.TaskId != partialTaskId &&
+                    session.TaskId != malformedFieldsTaskId),
+                "No-start, partial, and malformed planned work must not create sessions.");
+            Assert(loaded.Tasks.Any(task => task.Id == malformedFieldsTaskId),
+                "Malformed legacy placement fields must not discard the logical task.");
+            Assert(loaded.Tasks.Single(task => task.Id == validTaskId).Description == "preserved",
+                "Migration must preserve unrelated task fields.");
+            Assert(loaded.WindowPlacement.CollapsedLeft == 1800,
+                "Migration must preserve saved handle/window placement.");
+            Assert(File.ReadAllText(store.BackupPath).Contains("\"schemaVersion\": 2"),
+                "The original schema-2 state should remain in the normal backup.");
+            var migratedJson = File.ReadAllText(store.StatePath);
+            Assert(migratedJson.Contains("\"taskWorkSessions\"") &&
+                   !migratedJson.Contains("plannedStartAtUtc") &&
+                   !migratedJson.Contains("plannedDurationMinutes"),
+                "Migrated state should persist sessions and omit cleared legacy fields.");
+
+            var sessionIds = loaded.TaskWorkSessions.Select(session => session.Id).OrderBy(id => id).ToList();
+            var loadedAgain = store.Load();
+            Assert(loadedAgain.TaskWorkSessions.Select(session => session.Id).OrderBy(id => id)
+                    .SequenceEqual(sessionIds),
+                "Loading migrated state twice must not duplicate or replace sessions.");
+        });
+    }
+
+    private static void WorkspaceTaskWorkSessionIsolationAndDelete()
     {
         var now = DateTimeOffset.Parse("2026-07-06T08:00:00Z");
-
-        // Snapshot includes planned fields.
         var state = AppState.CreateDefault(now);
-        var planned = state.Tasks[0];
-        planned.PlannedStartAtUtc = now.AddHours(2);
-        planned.PlannedDurationMinutes = 45;
-        var snapshot = WorkspaceSnapshotFactory.Create(state, now);
-        var plannedSnapshot = snapshot.Tasks.Single(item => item.Id == planned.Id.ToString("N"));
-        Assert(plannedSnapshot.PlannedStartAtUtc == now.AddHours(2),
-            "Snapshot should project planned start.");
-        Assert(plannedSnapshot.PlannedDurationMinutes == 45,
-            "Snapshot should project planned duration.");
+        var task = state.Tasks[0];
+        var service = new TaskWorkSessionService(state);
+        var first = service.Create(task.Id, now.AddHours(1), now.AddHours(2), now: now)!;
+        var second = service.Create(task.Id, now.AddHours(3), now.AddHours(4), now: now)!;
 
-        var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+        Assert(state.TaskWorkSessions.Count == 2,
+            "One logical task should support two sessions in one day.");
+        Assert(service.Update(first.Id, now.AddMinutes(30), now.AddHours(2), first.Note, now),
+            "Moving/resizing one session should succeed.");
+        Assert(second.StartUtc == now.AddHours(3) && second.EndUtc == now.AddHours(4),
+            "Updating one session must not alter another session for the same task.");
+        Assert(service.Delete(first.Id), "Deleting one session should succeed.");
+        Assert(state.Tasks.Contains(task) && state.TaskWorkSessions.Single().Id == second.Id,
+            "Deleting one session must preserve both task and sibling session.");
+
+        Assert(new TreeStateService(state).DeleteNode(task.Id, now),
+            "Deleting the parent task should still succeed.");
+        Assert(state.TaskWorkSessions.All(session => session.TaskId != task.Id),
+            "Deleting a task must clean all of its linked work sessions.");
+    }
+
+    private static void WorkspaceTaskWorkSessionRepairAndSnapshot()
+    {
+        WithTemporaryDirectory(directory =>
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-        Assert(json.Contains("plannedStartAtUtc") && json.Contains("plannedDurationMinutes"),
-            "Serialized snapshot should carry camelCase planned fields.");
+            var now = DateTimeOffset.Parse("2026-07-06T08:00:00Z");
+            var state = AppState.CreateDefault(now);
+            var task = state.Tasks[0];
+            var valid = new TaskWorkSession
+            {
+                TaskId = task.Id,
+                StartUtc = now.AddHours(1),
+                EndUtc = now.AddHours(2),
+                Note = "  Context  ",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.TaskWorkSessions.Add(valid);
+            state.TaskWorkSessions.Add(new TaskWorkSession
+            {
+                TaskId = Guid.NewGuid(),
+                StartUtc = now.AddHours(2),
+                EndUtc = now.AddHours(3)
+            });
+            state.TaskWorkSessions.Add(new TaskWorkSession
+            {
+                TaskId = task.Id,
+                StartUtc = now.AddHours(4),
+                EndUtc = now.AddHours(4)
+            });
 
-        // Old state.json without planned fields deserializes safely.
-        var legacyTask = state.Tasks[1];
-        var legacyJson = "{\"id\":\"" + legacyTask.Id + "\",\"title\":\"Legacy\"}";
-        var deserialized = JsonSerializer.Deserialize<TaskItem>(legacyJson);
-        Assert(deserialized is not null, "Legacy task JSON should deserialize.");
-        Assert(deserialized!.PlannedStartAtUtc is null && deserialized.PlannedDurationMinutes is null,
-            "Missing planned fields in old state must default to null without corruption.");
+            Assert(StateMigrator.RepairCurrentState(state),
+                "Orphan and invalid sessions should require repair.");
+            Assert(state.TaskWorkSessions.Count == 1 && valid.Note == "Context",
+                "Repair should preserve the valid session and remove invalid/orphan rows.");
+
+            var snapshot = WorkspaceSnapshotFactory.Create(state, now);
+            var projected = snapshot.TaskWorkSessions.Single();
+            Assert(projected.Id == valid.Id.ToString("N") &&
+                   projected.TaskId == task.Id.ToString("N") &&
+                   projected.TaskTitle == task.Title &&
+                   projected.TaskStatus == "TODO" &&
+                   !string.IsNullOrWhiteSpace(projected.ProjectColor),
+                "Snapshot should expose separate session and parent task metadata.");
+
+            var store = new AppStateStore(directory);
+            store.Save(state);
+            var reloaded = store.Load();
+            Assert(reloaded.TaskWorkSessions.Single().Id == valid.Id,
+                "Valid sessions should survive a state.json roundtrip.");
+        });
     }
 
     private static void WorkspaceCommandCreateTaskPersistence()
@@ -4874,8 +5096,8 @@ internal static class Program
                 {
                     title = "  New task from Workspace  ",
                     projectId = project.Id.ToString("N"),
-                    plannedStartAtUtc = "2026-07-06T10:15:00Z",
-                    plannedDurationMinutes = 45
+                    workSessionStartUtc = "2026-07-06T10:15:00Z",
+                    workSessionEndUtc = "2026-07-06T11:00:00Z"
                 }),
                 now);
 
@@ -4890,9 +5112,12 @@ internal static class Program
             Assert(created.ProjectId == project.Id, "Created task should be assigned to the requested project.");
             Assert(created.GroupId is null, "Created task without a section should have no group.");
             Assert(created.Status == TaskStatus.Todo, "Created task should default to TODO.");
-            Assert(created.PlannedStartAtUtc == DateTimeOffset.Parse("2026-07-06T10:15:00Z") &&
-                   created.PlannedDurationMinutes == 45,
-                "Created task should persist initial planned work when created from a calendar slot.");
+            var session = loaded.TaskWorkSessions.Single(item => item.TaskId == createdId);
+            Assert(session.StartUtc == DateTimeOffset.Parse("2026-07-06T10:15:00Z") &&
+                   session.EndUtc == DateTimeOffset.Parse("2026-07-06T11:00:00Z"),
+                "Calendar task creation should persist its first work session atomically.");
+            Assert(result.CreatedTaskWorkSessionId == session.Id.ToString("N"),
+                "createTask should return its first work session id.");
         });
     }
 
@@ -5692,7 +5917,21 @@ internal static class Program
         Assert(!missingLocation.Success && missingLocation.ErrorCode == "invalidPayload",
             "createTask without projectId or sectionId should be rejected.");
 
+        var partialSession = WorkspaceCommandProcessor.Execute(state, WorkspaceCommandJson(
+            "create-partial-session",
+            "createTask",
+            new
+            {
+                title = "Valid title",
+                projectId = project.Id.ToString("N"),
+                workSessionStartUtc = "2026-07-06T10:00:00Z"
+            }), now);
+        Assert(!partialSession.Success && partialSession.ErrorCode == "invalidPayload",
+            "Calendar task creation must reject a partial first-session range.");
+
         Assert(state.Tasks.Count == initialCount, "Rejected createTask commands must not add tasks.");
+        Assert(state.TaskWorkSessions.Count == 0,
+            "Rejected createTask commands must not add task work sessions.");
     }
 
     private static void WorkspaceCommandWaitingForPersistence()

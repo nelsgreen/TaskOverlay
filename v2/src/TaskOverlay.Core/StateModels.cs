@@ -7,13 +7,14 @@ namespace TaskOverlay.Core;
 
 public sealed class AppState
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public List<TaskItem> Tasks { get; set; } = new();
     public List<ProjectItem> Projects { get; set; } = new();
     public List<GroupItem> Groups { get; set; } = new();
     public List<MeetingItem> Meetings { get; set; } = new();
+    public List<TaskWorkSession> TaskWorkSessions { get; set; } = new();
     public List<SourceDocument> ContextSources { get; set; } = new();
     public List<ContextItem> ContextItems { get; set; } = new();
     public OverlaySettings OverlaySettings { get; set; } = new();
@@ -104,6 +105,22 @@ public sealed class MeetingItem
     public string Location { get; set; } = string.Empty;
     public string Link { get; set; } = string.Empty;
     public Guid? LinkedTaskId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// One calendar placement for a logical task. Work sessions carry only time
+/// allocation metadata; task status, reminders, deadlines, and panel
+/// visibility remain owned by <see cref="TaskItem"/>.
+/// </summary>
+public sealed class TaskWorkSession
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TaskId { get; set; }
+    public DateTimeOffset StartUtc { get; set; }
+    public DateTimeOffset EndUtc { get; set; }
+    public string Note { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
@@ -242,9 +259,14 @@ public sealed class TaskItem
     public bool ReminderActive { get; set; }
     public bool PinToPanel { get; set; }
 
-    // Calendar planning: "I plan to work on this task at this time".
-    // Independent of REMIND/DEADLINE/MEET; does not trigger reminder popups.
+    // Schema-2 compatibility only. StateMigrator converts this legacy single
+    // placement to AppState.TaskWorkSessions and clears both fields.
+    [JsonConverter(typeof(LegacyPlannedStartUtcConverter))]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? PlannedStartAtUtc { get; set; }
+
+    [JsonConverter(typeof(LegacyPlannedDurationMinutesConverter))]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? PlannedDurationMinutes { get; set; }
 
     // Lightweight execution steps ("Steps" in the UI). Null on states saved
