@@ -235,7 +235,9 @@ function RecordContextBlock({
           <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">Context</span>
           <span className="flex-1" />
           {totalLinked > 0 && (
-            <span className="text-[11px] tabular-nums text-muted-foreground">{totalLinked} linked</span>
+            <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-primary">
+              {totalLinked} linked context{totalLinked === 1 ? "" : " records"}
+            </span>
           )}
           <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
         </button>
@@ -287,7 +289,7 @@ function RecordContextBlock({
                 className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus className="size-3" aria-hidden />
-                Link existing
+                Link existing context
               </button>
               <button
                 type="button"
@@ -488,14 +490,14 @@ function LinkExistingModal({
             autoFocus
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search by title…"
+            placeholder="Search decisions, risks, requirements, source documents…"
             className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-primary/60 focus:ring-1 focus:ring-primary/40"
           />
         </div>
         <div className="flex-1 overflow-y-auto">
           {candidates.length === 0 ? (
             <p className="px-4 py-6 text-center text-[12px] text-muted-foreground">
-              No same-project sources or context items to link.
+              No existing context records found. Create context in ContextHUB first.
             </p>
           ) : (
             candidates.map((candidate) => (
