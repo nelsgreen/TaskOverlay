@@ -321,6 +321,7 @@ function normalizeWorkspaceTab(value: string): TabKey {
 
 function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): MeetItem {
   const local = toLocalDateTime(source.startsAtUtc)
+  const duration = durationLabel(source.durationMinutes)
   return {
     id: source.id,
     projectId: source.projectId,
@@ -328,11 +329,19 @@ function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): Me
     notes: source.notes || undefined,
     date: local.date,
     startTime: local.time,
-    duration: durationLabel(source.durationMinutes),
+    duration,
+    endTime: duration === "custom" ? addMinutesToTime(local.time, source.durationMinutes) : undefined,
     location: source.location || undefined,
     link: source.link || undefined,
     linkedTaskId: source.linkedTaskId ?? undefined,
   }
+}
+
+function addMinutesToTime(time: string, minutes: number): string {
+  const [hour, minute] = time.split(":").map(Number)
+  const total = (hour || 0) * 60 + (minute || 0) + minutes
+  const wrapped = ((total % 1440) + 1440) % 1440
+  return `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}`
 }
 
 function durationLabel(minutes: number): MeetItem["duration"] {

@@ -54,16 +54,17 @@ type WorkspaceSelection =
 
 const MEETING_DRAFT_ID = "meeting-draft"
 
-function createMeetingDraft(projectId: string, dateKey?: string): MeetItem {
+function createMeetingDraft(projectId: string, dateKey?: string, startMin?: number): MeetItem {
   const now = new Date()
   now.setMinutes(Math.ceil(now.getMinutes() / 30) * 30, 0, 0)
   const pad = (value: number) => String(value).padStart(2, "0")
+  const draftStartMin = startMin ?? (now.getHours() * 60 + now.getMinutes())
   return {
     id: MEETING_DRAFT_ID,
     projectId,
     title: "",
     date: dateKey ?? `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
-    startTime: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
+    startTime: `${pad(Math.floor(draftStartMin / 60))}:${pad(draftStartMin % 60)}`,
     duration: "30m",
   }
 }
@@ -82,6 +83,17 @@ function meetDurationMinutes(meeting: MeetItem): number {
   const [endHour, endMinute] = meeting.endTime.split(":").map(Number)
   const difference = (endHour * 60 + endMinute) - (startHour * 60 + startMinute)
   return difference > 0 ? difference : presets[meeting.duration]
+}
+
+function meetDurationFields(startMinutes: number, durationMinutes: number): Pick<MeetItem, "duration" | "endTime"> {
+  const preset = Object.entries({ "15m": 15, "30m": 30, "45m": 45, "1h": 60, "90m": 90, "2h": 120 } as const)
+    .find(([, minutes]) => minutes === durationMinutes)?.[0] as MeetItem["duration"] | undefined
+  if (preset) return { duration: preset, endTime: undefined }
+  const endMinutes = startMinutes + durationMinutes
+  return {
+    duration: "custom",
+    endTime: `${String(Math.floor((endMinutes % 1440) / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`,
+  }
 }
 
 export function TaskManager() {
@@ -126,6 +138,7 @@ export function TaskManager() {
   const [renamingSectionId, setRenamingSectionId] = useState<string | null>(null)
   const [selectedTreeSectionId, setSelectedTreeSectionId] = useState<string | null>(null)
   const [pendingTitleFocusTaskId, setPendingTitleFocusTaskId] = useState<string | null>(null)
+  const [pendingTitleFocusMeetId, setPendingTitleFocusMeetId] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set())
@@ -149,6 +162,10 @@ export function TaskManager() {
     })
   }, [rawTasks, plannedOverrides])
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
+  const calendarMeetItems = useMemo(
+    () => meetingDraft ? [...meetItems.filter((meeting) => meeting.id !== meetingDraft.id), meetingDraft] : meetItems,
+    [meetItems, meetingDraft],
+  )
   const timelineItems = bridge.data?.timelineItems ?? mockTimelineItems
   const activeNowTaskIds = bridge.data?.activeNowTaskIds
   const contextSources = bridge.data?.contextSources ?? mockContextSources
@@ -269,6 +286,7 @@ export function TaskManager() {
       if (tab === "calendar") {
         // Keep the clicked task/meet selected across snapshot refreshes.
         if (selected?.kind === "task" && bridgedData.tasks.some((task) => task.id === selected.id)) return selected
+        if (selected?.kind === "meet" && selected.id === MEETING_DRAFT_ID && meetingDraft) return selected
         if (selected?.kind === "meet" && bridgedData.meetItems.some((meet) => meet.id === selected.id)) return selected
         return null
       }
@@ -377,11 +395,11 @@ export function TaskManager() {
     setSelection({ kind: "meet", id: meetId })
   }
   const selectMeet = (meetId: string) => {
-    const meet = meetItems.find((candidate) => candidate.id === meetId)
+    const meet = calendarMeetItems.find((candidate) => candidate.id === meetId)
     if (meet && !selectedProjectIds.includes(meet.projectId)) {
       setSelectedProjectIds([meet.projectId])
     }
-    setSelectedTimelineItemId(`meet:${meetId}`)
+    setSelectedTimelineItemId(meetId === MEETING_DRAFT_ID ? null : `meet:${meetId}`)
     setSelection({ kind: "meet", id: meetId })
   }
   // The single project used for the Tree tab (Tree is single-project by design)
@@ -676,6 +694,45 @@ export function TaskManager() {
       }
       setMockTasks((prev) => [...prev, created])
       setSelection({ kind: "task", id })
+    }
+  }
+
+  const handleCreateCalendarTask = (dateKey: string, startMin: number) => {
+    const projectId = selectedProjectIds[0] ?? projects[0]?.id
+    if (!projectId || readOnly) return
+    const rootSectionId = sections.find((s) => s.projectId === projectId && s.isProjectRoot)?.id ?? `project:${projectId}:root`
+    const plannedStartAtUtc = isoFromLocalDateTime(dateKey, Math.floor(startMin / 60), startMin % 60)
+    const plannedDurationMinutes = 60
+    setCalendarSelectedDate(dateKey)
+    setTab("calendar")
+    if (connected) {
+      bridge.sendCreateTask({
+        title: "",
+        draft: true,
+        projectId,
+        sectionId: rootSectionId,
+        plannedStartAtUtc,
+        plannedDurationMinutes,
+      })
+      return
+    }
+    if (!bridged) {
+      const id = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      const created: Task = {
+        id,
+        projectId,
+        sectionId: rootSectionId,
+        parentId: null,
+        title: "",
+        status: "TODO",
+        pinned: false,
+        reminder: "none",
+        plannedStartAtUtc,
+        plannedDurationMinutes,
+      }
+      setMockTasks((prev) => [...prev, created])
+      setSelection({ kind: "task", id })
+      setPendingTitleFocusTaskId(id)
     }
   }
 
@@ -1226,6 +1283,18 @@ export function TaskManager() {
   }
 
   const handleMoveMeet = (meetId: string, startsAtUtc: string, durationMinutes: number) => {
+    if (meetId === MEETING_DRAFT_ID && meetingDraft) {
+      const slot = localSlotFromIso(startsAtUtc)
+      if (!slot) return
+      setMeetingDraft({
+        ...meetingDraft,
+        date: slot.dateKey,
+        startTime: `${String(Math.floor(slot.minutes / 60)).padStart(2, "0")}:${String(slot.minutes % 60).padStart(2, "0")}`,
+        ...meetDurationFields(slot.minutes, durationMinutes),
+      })
+      setSelection({ kind: "meet", id: MEETING_DRAFT_ID })
+      return
+    }
     const meeting = meetItems.find((m) => m.id === meetId)
     if (!meeting) return
     if (connected) {
@@ -1249,13 +1318,16 @@ export function TaskManager() {
     selectMeet(meetId)
   }
 
-  const handleCreateMeeting = (dateKey?: string) => {
+  const handleCreateMeeting = (dateKey?: string, startMin?: number) => {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId) return
-    const draft = createMeetingDraft(projectId, dateKey)
     if (readOnly) return
+    const draft = createMeetingDraft(projectId, dateKey, startMin)
+    if (dateKey) setCalendarSelectedDate(dateKey)
+    setTab("calendar")
     setMeetingDraft(draft)
     setSelection({ kind: "meet", id: draft.id })
+    setPendingTitleFocusMeetId(draft.id)
     setSelectedTimelineItemId(null)
   }
 
@@ -1539,7 +1611,7 @@ export function TaskManager() {
                 projects={projects}
                 sections={sections}
                 tasks={tasks}
-                meetItems={meetItems}
+                meetItems={calendarMeetItems}
                 selectedProjectIds={selectedProjectIds}
                 selectedTaskId={selectedTaskId}
                 selectedMeetId={selectedMeetId}
@@ -1548,6 +1620,8 @@ export function TaskManager() {
                 onSelectTask={selectTask}
                 onSelectMeet={selectMeet}
                 onPickDay={handleCalendarPickDay}
+                onCreateTaskAtSlot={handleCreateCalendarTask}
+                onCreateMeetAtSlot={handleCreateMeeting}
                 onPlanTask={(taskId, iso, duration) => handlePlannedWork(taskId, iso, duration)}
                 onMoveMeet={handleMoveMeet}
                 onClearPlanned={(taskId) => handlePlannedWork(taskId, null, null)}
@@ -1622,6 +1696,8 @@ export function TaskManager() {
               onApply={handleApplyMeet}
               onDelete={handleDeleteMeet}
               onOpenLinkedTask={selectTask}
+              focusTitle={selectedMeet.id === pendingTitleFocusMeetId}
+              onTitleFocused={() => setPendingTitleFocusMeetId(null)}
               readOnly={readOnly}
               contextSources={contextSources}
               contextItems={contextItems}

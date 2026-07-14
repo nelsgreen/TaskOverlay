@@ -589,11 +589,11 @@ function CalendarToolbar({
           type="button"
           onClick={onAddMeeting}
           disabled={addMeetingDisabled}
-          title={addMeetingDisabled ? "Read-only: connect to create meetings" : "Create meeting on selected calendar date"}
+          title={addMeetingDisabled ? "Read-only: connect to create MEETs" : "Create MEET on selected calendar date"}
           className="flex h-6 items-center gap-1.5 rounded-md border border-status-meet/35 bg-status-meet/10 px-2.5 text-[11px] font-semibold text-status-meet transition-colors hover:bg-status-meet/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus className="size-3.5" />
-          Meeting
+          MEET
         </button>
       </div>
     </>

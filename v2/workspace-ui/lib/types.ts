@@ -398,6 +398,9 @@ export type WorkspaceCreateTaskCommand = {
   sectionId?: string | null
   /** When set, the new task becomes a subtask of this task and inherits its project/section. */
   parentTaskId?: string
+  /** Optional initial calendar placement for connected slot creation. */
+  plannedStartAtUtc?: string | null
+  plannedDurationMinutes?: number | null
 }
 
 /** Creates a top-level section (workstream) under a project. The bridge returns the section id. */
