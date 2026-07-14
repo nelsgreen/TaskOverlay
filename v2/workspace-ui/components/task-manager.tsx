@@ -1687,14 +1687,13 @@ export function TaskManager() {
       )}
 
       {pendingDeleteTask && (
+        // Backdrop intentionally has no onClick: closing happens only via Cancel/Delete, never an outside click.
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
           role="dialog"
           aria-modal="true"
-          onClick={() => setPendingDelete(null)}
         >
           <div
-            onClick={(e) => e.stopPropagation()}
             className="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-xl"
           >
             <h2 className="text-sm font-semibold text-foreground">Delete task?</h2>
@@ -1725,14 +1724,13 @@ export function TaskManager() {
       )}
 
       {pendingDeleteSection && (
+        // Backdrop intentionally has no onClick: closing happens only via Cancel/Delete, never an outside click.
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
           role="dialog"
           aria-modal="true"
-          onClick={() => setPendingDeleteSectionId(null)}
         >
           <div
-            onClick={(e) => e.stopPropagation()}
             className="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-xl"
           >
             <h2 className="text-sm font-semibold text-foreground">Delete section?</h2>

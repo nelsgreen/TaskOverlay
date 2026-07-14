@@ -284,3 +284,12 @@ item.
   source of truth.
 - No fake controls.
 - Keep PRs bounded, but avoid micro-PRs for tiny UI changes.
+- Modal dialogs never close on an outside/backdrop click. Closing is only
+  through an explicit control (Cancel, Close, X) or Escape where a modal
+  already supports it. This applies to every shared modal in Workspace
+  (Context Pack preview, linked-task/context picker, ContextHUB Add Source/
+  Add Context, and the delete-task/delete-section confirmations).
+- The Task/MEET Details Context block is collapsed by default when nothing is
+  linked and expanded by default once something is, so an empty Context card
+  doesn't take up space the user has to look past. A manual header click
+  always overrides the default until a different task/MEET is selected.

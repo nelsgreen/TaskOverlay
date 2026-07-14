@@ -1123,14 +1123,13 @@ function AddFlowModal({
   }, [onClose])
 
   return (
+    // Backdrop intentionally has no onClick: closing happens only via Cancel/Close/X (or Escape above), never an outside click — this form has real typed content to protect.
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
         className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl shadow-black/50"
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">

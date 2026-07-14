@@ -669,7 +669,10 @@ export function DetailsPanel({
           {bridgeError}
         </div>
       )}
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      {/* scrollbar-gutter:stable reserves the scrollbar's width whether or not it's
+          currently showing, so hovering/expanding a card that pushes content past
+          the viewport doesn't reflow everything else horizontally. */}
+      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]">
 
         {/* ── Title ── */}
         <div>
@@ -1375,25 +1378,44 @@ export function DetailsPanel({
                 </div>
               ))}
 
-              {/* Add input — Enter adds one step; pasting a multiline list adds them all */}
+              {/* Add input — Enter adds one step and stays focused for the next one;
+                  Enter on an empty input leaves the Steps area instead of no-op'ing in
+                  place; pasting a multiline list adds them all in order.
+                  Deliberately never `disabled` (unlike the row buttons above):
+                  a browser force-blurs a focused input the instant it becomes
+                  disabled, which is exactly what broke "stays focused for the
+                  next step" when this was gated on checkpointsPending — no
+                  after-the-fact refocus timing is fully reliable in WebView2.
+                  The pending guard below prevents double-submit / a phantom
+                  locally-added step instead, so nothing needs disabling at all. */}
               <input
                 value={newStepText}
                 onChange={(e) => setNewStepText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault()
+                    if (!newStepText.trim()) {
+                      // Empty step: do not create another blank row — finish
+                      // editing and move focus out of the Steps module.
+                      e.currentTarget.blur()
+                      return
+                    }
+                    // A previous add is still in flight: wait for it rather than
+                    // double-submitting or optimistically adding a step locally
+                    // that was never actually sent.
+                    if (checkpointsPending) return
                     addSteps([newStepText])
                   } else if (e.key === "Escape") {
                     setNewStepText("")
                   }
                 }}
                 onPaste={(e) => {
+                  if (checkpointsPending) return
                   const text = e.clipboardData.getData("text")
                   if (!text.includes("\n")) return
                   e.preventDefault()
                   addSteps(splitPastedSteps(text))
                 }}
-                disabled={checkpointsPending}
                 placeholder="+ Next step… (paste a list to add several)"
                 className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60"
               />
