@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Bell, Check, Flag, GripVertical, Link2, MapPin, X } from "lucide-react"
-import type { MeetItem, Project, Section, Status, Task } from "@/lib/types"
+import type { MeetItem, Project, Section, Status, Task, TaskWorkSession } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
   formatDayNumber,
@@ -44,12 +44,13 @@ function meetEndMin(m: MeetItem): number { return m.endTime ? toMin(m.endTime) :
 // ─── Models ────────────────────────────────────────────────────────────────────
 interface Block {
   key: string; kind: "WORK" | "MEET"; title: string; projectId: string; sectionId?: string
-  startMin: number; endMin: number; taskId?: string; meetId?: string
+  dateKey: string; startMin: number; endMin: number; taskId?: string; sessionId?: string; meetId?: string
   location?: string; hasLink?: boolean; status?: Status; selected: boolean
 }
 interface Marker { key: string; kind: "REMIND" | "DEADLINE"; title: string; projectId: string; min: number; taskId: string; selected: boolean }
 type DragState =
-  | { kind: "TASK"; taskId: string; source: "pool" | "block"; duration: number }
+  | { kind: "TASK"; taskId: string; duration: number }
+  | { kind: "TASK_SESSION"; taskId: string; sessionId: string; duration: number }
   | { kind: "MEET"; meetId: string; duration: number }
 type CalendarMenuState =
   | { kind: "slot"; x: number; y: number; dateKey: string; startMin: number }
@@ -82,23 +83,27 @@ function layoutColumns<T extends { startMin: number; endMin: number }>(items: T[
 // ─── Props ──────────────────────────────────────────────────────────────────
 interface CalendarViewProps {
   viewMode: "day" | "week"; selectedDate: string
-  projects: Project[]; sections: Section[]; tasks: Task[]; meetItems: MeetItem[]
+  projects: Project[]; sections: Section[]; tasks: Task[]; taskWorkSessions: TaskWorkSession[]; meetItems: MeetItem[]
   selectedProjectIds: string[]; selectedTaskId: string | null; selectedMeetId: string | null
   showDone: boolean; canSchedule: boolean
   onSelectTask: (taskId: string) => void; onSelectMeet: (meetId: string) => void
   onPickDay: (dateKey: string) => void
   onCreateTaskAtSlot: (dateKey: string, startMin: number) => void
   onCreateMeetAtSlot: (dateKey: string, startMin: number) => void
-  onPlanTask: (taskId: string, plannedStartAtUtc: string, plannedDurationMinutes: number) => void
+  onCreateTaskWorkSession: (taskId: string, startUtc: string, endUtc: string) => void
+  onUpdateTaskWorkSession: (sessionId: string, startUtc: string, endUtc: string) => void
+  onRequestDeleteTaskWorkSession: (sessionId: string) => void
+  onSetTaskStatus: (taskId: string, status: Status) => void
   onMoveMeet: (meetId: string, startsAtUtc: string, durationMinutes: number) => void
-  onClearPlanned: (taskId: string) => void
+  onRequestDeleteMeet: (meetId: string) => void
 }
 
 export function CalendarView({
-  viewMode, selectedDate, projects, sections, tasks, meetItems,
+  viewMode, selectedDate, projects, sections, tasks, taskWorkSessions, meetItems,
   selectedProjectIds, selectedTaskId, selectedMeetId, showDone, canSchedule,
   onSelectTask, onSelectMeet, onPickDay, onCreateTaskAtSlot, onCreateMeetAtSlot,
-  onPlanTask, onMoveMeet, onClearPlanned,
+  onCreateTaskWorkSession, onUpdateTaskWorkSession, onRequestDeleteTaskWorkSession,
+  onSetTaskStatus, onMoveMeet, onRequestDeleteMeet,
 }: CalendarViewProps) {
   const today = todayKey()
   const [nowMin, setNowMin] = useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes() })
@@ -111,30 +116,33 @@ export function CalendarView({
   const [poolDropActive, setPoolDropActive] = useState(false)
   const [ghost, setGhost] = useState<{ startMin: number; endMin: number } | null>(null)
   const [weekGhost, setWeekGhost] = useState<{ dayIso: string; startMin: number; endMin: number } | null>(null)
-  const [newBlock, setNewBlock] = useState<{ taskId: string; startMin: number } | null>(null)
+  const [newBlock, setNewBlock] = useState<{ taskId: string; dateKey: string; startMin: number } | null>(null)
   const [menu, setMenu] = useState<CalendarMenuState | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
 
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
   const sectionMap = useMemo(() => new Map(sections.map((s) => [s.id, s])), [sections])
+  const taskMap = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks])
   const allSelected = selectedProjectIds.length === projects.length
   const inScope = (projectId: string) => allSelected || selectedProjectIds.includes(projectId)
 
   const buildDay = (dateKey: string): { blocks: Block[]; markers: Marker[] } => {
     const blocks: Block[] = []; const markers: Marker[] = []
-    tasks.forEach((t) => {
-      if (!t.plannedStartAtUtc || !inScope(t.projectId)) return
+    taskWorkSessions.forEach((session) => {
+      const t = taskMap.get(session.taskId)
+      if (!t || !inScope(t.projectId)) return
       if (t.status === "DONE" && !showDone) return
-      const slot = localSlotFromIso(t.plannedStartAtUtc)
+      const slot = localSlotFromIso(session.startUtc)
       if (!slot || slot.dateKey !== dateKey) return
+      const endSlot = localSlotFromIso(session.endUtc)
       const startMin = clamp(slot.minutes, START_MIN, END_MIN)
-      const dur = t.plannedDurationMinutes ?? DEFAULT_DURATION
-      blocks.push({ key: `work-${t.id}`, kind: "WORK", title: t.title, projectId: t.projectId, sectionId: t.sectionId, startMin, endMin: clamp(startMin + dur, START_MIN, END_MIN), taskId: t.id, status: t.status, selected: t.id === selectedTaskId })
+      const endMin = endSlot?.dateKey === dateKey ? endSlot.minutes : END_MIN
+      blocks.push({ key: `work-${session.id}`, kind: "WORK", title: t.title, projectId: t.projectId, sectionId: t.sectionId, dateKey, startMin, endMin: clamp(endMin, startMin + MIN_DURATION, END_MIN), taskId: t.id, sessionId: session.id, status: t.status, selected: t.id === selectedTaskId })
     })
     meetItems.forEach((m) => {
       if (m.date !== dateKey || !inScope(m.projectId)) return
-      blocks.push({ key: `meet-${m.id}`, kind: "MEET", title: m.title, projectId: m.projectId, startMin: toMin(m.startTime), endMin: meetEndMin(m), meetId: m.id, location: m.location, hasLink: !!m.link, selected: m.id === selectedMeetId })
+      blocks.push({ key: `meet-${m.id}`, kind: "MEET", title: m.title, projectId: m.projectId, dateKey, startMin: toMin(m.startTime), endMin: meetEndMin(m), meetId: m.id, location: m.location, hasLink: !!m.link, selected: m.id === selectedMeetId })
     })
     tasks.forEach((t) => {
       if (!inScope(t.projectId)) return
@@ -145,18 +153,32 @@ export function CalendarView({
     return { blocks, markers }
   }
 
-  const unscheduled = useMemo(() => {
-    const pool = tasks.filter((t) => (t.status === "TODO" || t.status === "FOCUS" || t.status === "WAIT") && inScope(t.projectId) && !t.plannedStartAtUtc)
+  const planningTasks = useMemo(() => {
+    const pool = tasks.filter((t) => (t.status === "TODO" || t.status === "FOCUS" || t.status === "WAIT") && inScope(t.projectId))
     return [...pool.filter((t) => t.pinned || t.status === "FOCUS"), ...pool.filter((t) => !t.pinned && t.status !== "FOCUS")]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, allSelected, selectedProjectIds])
+
+  const todaySessionTotals = useMemo(() => {
+    const totals = new Map<string, { blocks: number; minutes: number }>()
+    taskWorkSessions.forEach((session) => {
+      const start = localSlotFromIso(session.startUtc)
+      const end = localSlotFromIso(session.endUtc)
+      if (!start || !end || start.dateKey !== today || end.dateKey !== today) return
+      const current = totals.get(session.taskId) ?? { blocks: 0, minutes: 0 }
+      current.blocks += 1
+      current.minutes += Math.max(0, end.minutes - start.minutes)
+      totals.set(session.taskId, current)
+    })
+    return totals
+  }, [taskWorkSessions, today])
 
   const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i)
   const displayTitle = (block: Block) => block.title.trim() || (block.kind === "MEET" ? "Untitled MEET" : "Untitled task")
 
   // ─── Drag model ───────────────────────────────────────────────────────────
   const startPoolDrag = (e: React.DragEvent, taskId: string) => {
-    dragRef.current = { kind: "TASK", taskId, source: "pool", duration: DEFAULT_DURATION }
+    dragRef.current = { kind: "TASK", taskId, duration: DEFAULT_DURATION }
     e.dataTransfer.effectAllowed = "copyMove"; e.dataTransfer.setData("text/plain", taskId)
   }
   const startBlockDrag = (e: React.DragEvent, block: Block) => {
@@ -167,8 +189,8 @@ export function CalendarView({
       e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", block.meetId)
       return
     }
-    if (!block.taskId) return
-    dragRef.current = { kind: "TASK", taskId: block.taskId, source: "block", duration }
+    if (!block.taskId || !block.sessionId) return
+    dragRef.current = { kind: "TASK_SESSION", taskId: block.taskId, sessionId: block.sessionId, duration }
     e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", block.taskId)
   }
   const minFromRect = (rect: DOMRect, clientY: number) => clamp(snapTo(START_MIN + (clientY - rect.top) / PX_PER_MIN, SNAP_MIN), START_MIN, END_MIN - MIN_DURATION)
@@ -192,15 +214,16 @@ export function CalendarView({
       onSelectMeet(block.meetId)
       return
     }
-    if (block.taskId) {
-      onPlanTask(block.taskId, startsAtUtc, duration)
+    if (block.taskId && block.sessionId) {
+      const endsAtUtc = isoFromLocalDateTime(dateKey, Math.floor(endMin / 60), endMin % 60)
+      onUpdateTaskWorkSession(block.sessionId, startsAtUtc, endsAtUtc)
       onSelectTask(block.taskId)
     }
   }
 
   const onDayDragOver = (e: React.DragEvent) => {
     if (!dragRef.current || !gridRef.current) return
-    e.preventDefault(); e.dataTransfer.dropEffect = dragRef.current.kind === "TASK" && dragRef.current.source === "pool" ? "copy" : "move"
+    e.preventDefault(); e.dataTransfer.dropEffect = dragRef.current.kind === "TASK" ? "copy" : "move"
     const startMin = minFromRect(gridRef.current.getBoundingClientRect(), e.clientY)
     setGhost({ startMin, endMin: clamp(startMin + dragRef.current.duration, START_MIN, END_MIN) })
   }
@@ -215,14 +238,20 @@ export function CalendarView({
       onSelectMeet(d.meetId)
       return
     }
-    onPlanTask(d.taskId, startsAtUtc, d.duration)
+    const taskEndMin = clamp(startMin + d.duration, startMin + MIN_DURATION, END_MIN)
+    const endsAtUtc = isoFromLocalDateTime(selectedDate, Math.floor(taskEndMin / 60), taskEndMin % 60)
+    if (d.kind === "TASK_SESSION") {
+      onUpdateTaskWorkSession(d.sessionId, startsAtUtc, endsAtUtc)
+    } else {
+      onCreateTaskWorkSession(d.taskId, startsAtUtc, endsAtUtc)
+    }
     onSelectTask(d.taskId)
-    if (d.source === "pool") setNewBlock({ taskId: d.taskId, startMin })
+    if (d.kind === "TASK") setNewBlock({ taskId: d.taskId, dateKey: selectedDate, startMin })
   }
   const onColumnDragOver = (e: React.DragEvent, dayIso: string) => {
     if (!dragRef.current || !canSchedule) return
     e.preventDefault()
-    e.dataTransfer.dropEffect = dragRef.current.kind === "TASK" && dragRef.current.source === "pool" ? "copy" : "move"
+    e.dataTransfer.dropEffect = dragRef.current.kind === "TASK" ? "copy" : "move"
     const startMin = minFromRect((e.currentTarget as HTMLElement).getBoundingClientRect(), e.clientY)
     setWeekGhost({ dayIso, startMin, endMin: clamp(startMin + dragRef.current.duration, START_MIN, END_MIN) })
   }
@@ -237,7 +266,13 @@ export function CalendarView({
       onSelectMeet(d.meetId)
       return
     }
-    onPlanTask(d.taskId, startsAtUtc, d.duration)
+    const taskEndMin = clamp(startMin + d.duration, startMin + MIN_DURATION, END_MIN)
+    const endsAtUtc = isoFromLocalDateTime(dayIso, Math.floor(taskEndMin / 60), taskEndMin % 60)
+    if (d.kind === "TASK_SESSION") {
+      onUpdateTaskWorkSession(d.sessionId, startsAtUtc, endsAtUtc)
+    } else {
+      onCreateTaskWorkSession(d.taskId, startsAtUtc, endsAtUtc)
+    }
     onSelectTask(d.taskId)
   }
   // Cleanup when a drag ends anywhere (including cancel/drop outside a target).
@@ -245,7 +280,7 @@ export function CalendarView({
   const onPoolDrop = (e: React.DragEvent) => {
     e.preventDefault(); setPoolDropActive(false)
     const d = dragRef.current; dragRef.current = null
-    if (d?.kind === "TASK" && d.source === "block" && canSchedule) onClearPlanned(d.taskId)
+    if (d?.kind === "TASK_SESSION" && canSchedule) onRequestDeleteTaskWorkSession(d.sessionId)
   }
 
   useEffect(() => {
@@ -265,8 +300,14 @@ export function CalendarView({
     }
   }, [menu])
 
-  const applyDuration = (taskId: string, startMin: number, durMin: number) => {
-    onPlanTask(taskId, isoFromLocalDateTime(selectedDate, Math.floor(startMin / 60), startMin % 60), clamp(durMin, MIN_DURATION, TOTAL_MIN)); setNewBlock(null)
+  const applyDuration = (sessionId: string, dateKey: string, startMin: number, durMin: number) => {
+    const endMin = clamp(startMin + durMin, startMin + MIN_DURATION, END_MIN)
+    onUpdateTaskWorkSession(
+      sessionId,
+      isoFromLocalDateTime(dateKey, Math.floor(startMin / 60), startMin % 60),
+      isoFromLocalDateTime(dateKey, Math.floor(endMin / 60), endMin % 60),
+    )
+    setNewBlock(null)
   }
   const startPoolResize = (event: React.MouseEvent) => {
     event.preventDefault()
@@ -278,24 +319,28 @@ export function CalendarView({
 
   return (
     <div data-cal-root className="flex h-full overflow-hidden bg-background">
-      {/* ── Planning pool (left, resizable, drop-to-unplan) ─────────────── */}
+      {/* Planning pool holds logical tasks; dropping a block removes only that session. */}
       <div
         className={cn("relative flex shrink-0 flex-col border-r border-border bg-sidebar/40", poolDropActive && "bg-primary/5")}
         style={{ width: poolWidth }}
-        onDragOver={(e) => { if (dragRef.current?.kind === "TASK" && dragRef.current.source === "block") { e.preventDefault(); setPoolDropActive(true) } }}
+        onDragOver={(e) => { if (dragRef.current?.kind === "TASK_SESSION") { e.preventDefault(); setPoolDropActive(true) } }}
         onDragLeave={() => setPoolDropActive(false)}
         onDrop={onPoolDrop}
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Planning pool</span>
-          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">{unscheduled.length}</span>
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">{planningTasks.length}</span>
         </div>
         <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
-          {unscheduled.length === 0 ? (
-            <p className="px-1 py-3 text-[11px] text-muted-foreground">No unscheduled Todo, Focus or Wait tasks in scope.</p>
+          {planningTasks.length === 0 ? (
+            <p className="px-1 py-3 text-[11px] text-muted-foreground">No active tasks in scope. DONE tasks stay hidden.</p>
           ) : (
-            unscheduled.map((t) => {
+            planningTasks.map((t) => {
               const p = projectMap.get(t.projectId); const s = sectionMap.get(t.sectionId ?? ""); const st = STATUS_STYLES[t.status] ?? STATUS_STYLES.TODO
+              const todayTotal = todaySessionTotals.get(t.id)
+              const scheduleLabel = !todayTotal
+                ? "Unscheduled"
+                : `Scheduled today · ${todayTotal.blocks} ${todayTotal.blocks === 1 ? "block" : "blocks"} · ${fmtDur(todayTotal.minutes)} total`
               return (
                 <div
                   key={t.id}
@@ -319,6 +364,7 @@ export function CalendarView({
                     <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: p?.color }} />
                     <span className="truncate">{p?.name}{s ? ` / ${s.name}` : ""}</span>
                   </div>
+                  <span className={cn("text-[10px]", todayTotal ? "text-primary/80" : "text-muted-foreground/70")}>{scheduleLabel}</span>
                 </div>
               )
             })
@@ -326,7 +372,7 @@ export function CalendarView({
         </div>
         {canSchedule && (
           <div className="shrink-0 border-t border-border px-2 py-1.5 text-[10px] text-muted-foreground">
-            {poolDropActive ? "Drop here to unplan" : "Drag onto the grid to plan · drag a block here to unplan"}
+            {poolDropActive ? "Drop to remove this calendar block" : "Tasks stay until DONE · drag to add a session"}
           </div>
         )}
         <div onMouseDown={startPoolResize} title="Drag to resize" className="absolute right-0 top-0 z-20 h-full w-1.5 translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40" />
@@ -343,7 +389,8 @@ export function CalendarView({
             onStartBlockDrag={startBlockDrag} onDragCleanup={onDragCleanup}
             onEmptyContextMenu={(e) => openSlotMenu(e, selectedDate)}
             onBlockContextMenu={openBlockMenu}
-            onSelectTask={onSelectTask} onSelectMeet={onSelectMeet} onClearPlanned={onClearPlanned}
+            onSelectTask={onSelectTask} onSelectMeet={onSelectMeet}
+            onRequestDeleteTaskWorkSession={onRequestDeleteTaskWorkSession}
             onResizeBlock={(block, startMin, endMin) => resizeBlock(block, selectedDate, startMin, endMin)}
             onApplyDuration={applyDuration}
             displayTitle={displayTitle}
@@ -383,8 +430,28 @@ export function CalendarView({
             else if (menu.block.taskId) onSelectTask(menu.block.taskId)
             setMenu(null)
           }}
-          onClearPlanned={() => {
-            if (menu.kind === "block" && menu.block.kind === "WORK" && menu.block.taskId) onClearPlanned(menu.block.taskId)
+          onAddTaskSession={() => {
+            if (menu.kind !== "block" || menu.block.kind !== "WORK" || !menu.block.taskId) return
+            const startMin = clamp(menu.block.endMin, START_MIN, END_MIN - DEFAULT_DURATION)
+            const endMin = startMin + DEFAULT_DURATION
+            onCreateTaskWorkSession(
+              menu.block.taskId,
+              isoFromLocalDateTime(menu.block.dateKey, Math.floor(startMin / 60), startMin % 60),
+              isoFromLocalDateTime(menu.block.dateKey, Math.floor(endMin / 60), endMin % 60),
+            )
+            onSelectTask(menu.block.taskId)
+            setMenu(null)
+          }}
+          onRemoveBlock={() => {
+            if (menu.kind !== "block") return
+            if (menu.block.kind === "WORK" && menu.block.sessionId) onRequestDeleteTaskWorkSession(menu.block.sessionId)
+            if (menu.block.kind === "MEET" && menu.block.meetId) onRequestDeleteMeet(menu.block.meetId)
+            setMenu(null)
+          }}
+          onSetTaskStatus={(status) => {
+            if (menu.kind === "block" && menu.block.kind === "WORK" && menu.block.taskId) {
+              onSetTaskStatus(menu.block.taskId, status)
+            }
             setMenu(null)
           }}
           canSchedule={canSchedule}
@@ -401,7 +468,9 @@ function CalendarContextMenu({
   onCreateTask,
   onCreateMeet,
   onOpenBlock,
-  onClearPlanned,
+  onAddTaskSession,
+  onRemoveBlock,
+  onSetTaskStatus,
   canSchedule,
 }: {
   menu: CalendarMenuState
@@ -409,7 +478,9 @@ function CalendarContextMenu({
   onCreateTask: () => void
   onCreateMeet: () => void
   onOpenBlock: () => void
-  onClearPlanned: () => void
+  onAddTaskSession: () => void
+  onRemoveBlock: () => void
+  onSetTaskStatus: (status: Status) => void
   canSchedule: boolean
 }) {
   return (
@@ -452,16 +523,32 @@ function CalendarContextMenu({
             Open {menu.block.kind === "MEET" ? "MEET" : "task"} details
           </button>
           {menu.block.kind === "WORK" && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={onClearPlanned}
-              disabled={!canSchedule}
-              className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Remove from calendar
-            </button>
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={onAddTaskSession}
+                disabled={!canSchedule}
+                className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Add another session today
+              </button>
+              <div className="my-1 border-t border-border" />
+              <button type="button" role="menuitem" onClick={() => onSetTaskStatus("DONE")} disabled={!canSchedule} className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">Complete task</button>
+              <button type="button" role="menuitem" onClick={() => onSetTaskStatus("FOCUS")} disabled={!canSchedule} className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">Set FOCUS</button>
+              <button type="button" role="menuitem" onClick={() => onSetTaskStatus("WAIT")} disabled={!canSchedule} className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">Set WAIT</button>
+            </>
           )}
+          <div className="my-1 border-t border-border" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onRemoveBlock}
+            disabled={!canSchedule}
+            className="flex h-7 w-full items-center rounded-md px-2 text-left text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {menu.block.kind === "MEET" ? "Delete MEET" : "Remove this calendar block"}
+          </button>
         </>
       )}
       <button
@@ -479,20 +566,21 @@ function CalendarContextMenu({
 function DayGrid({
   hours, blocks, markers, isToday, nowMin, projectMap, sectionMap, canSchedule,
   ghost, newBlock, gridRef, onDayDragOver, onDayDragLeave, onDayDrop, onStartBlockDrag, onDragCleanup,
-  onEmptyContextMenu, onBlockContextMenu, onSelectTask, onSelectMeet, onClearPlanned, onResizeBlock, onApplyDuration,
+  onEmptyContextMenu, onBlockContextMenu, onSelectTask, onSelectMeet, onRequestDeleteTaskWorkSession, onResizeBlock, onApplyDuration,
   displayTitle,
 }: {
   hours: number[]; blocks: Block[]; markers: Marker[]; isToday: boolean; nowMin: number
   projectMap: Map<string, Project>; sectionMap: Map<string, Section>; canSchedule: boolean
-  ghost: { startMin: number; endMin: number } | null; newBlock: { taskId: string; startMin: number } | null
+  ghost: { startMin: number; endMin: number } | null; newBlock: { taskId: string; dateKey: string; startMin: number } | null
   gridRef: React.RefObject<HTMLDivElement | null>
   onDayDragOver: (e: React.DragEvent) => void; onDayDragLeave: () => void; onDayDrop: (e: React.DragEvent) => void
   onStartBlockDrag: (e: React.DragEvent, block: Block) => void; onDragCleanup: () => void
   onEmptyContextMenu: (event: React.MouseEvent<HTMLElement>) => void
   onBlockContextMenu: (event: React.MouseEvent, block: Block) => void
-  onSelectTask: (id: string) => void; onSelectMeet: (id: string) => void; onClearPlanned: (taskId: string) => void
+  onSelectTask: (id: string) => void; onSelectMeet: (id: string) => void
+  onRequestDeleteTaskWorkSession: (sessionId: string) => void
   onResizeBlock: (block: Block, startMin: number, endMin: number) => void
-  onApplyDuration: (taskId: string, startMin: number, durMin: number) => void
+  onApplyDuration: (sessionId: string, dateKey: string, startMin: number, durMin: number) => void
   displayTitle: (block: Block) => string
 }) {
   const laid = layoutColumns(blocks)
@@ -568,7 +656,7 @@ function DayGrid({
             const top = (clamp(b.startMin, START_MIN, END_MIN) - START_MIN) * PX_PER_MIN
             const height = Math.max(28, (clamp(b.endMin, START_MIN, END_MIN) - clamp(b.startMin, START_MIN, END_MIN)) * PX_PER_MIN)
             const widthPct = 100 / b.cols; const isMeet = b.kind === "MEET"; const st = b.status ? STATUS_STYLES[b.status] : null
-            const isNew = b.kind === "WORK" && newBlock?.taskId === b.taskId
+            const isNew = b.kind === "WORK" && !!b.sessionId && newBlock !== null && newBlock.taskId === b.taskId && newBlock.dateKey === b.dateKey && newBlock.startMin === b.startMin
             const draggable = canSchedule && !resizing && (b.kind === "WORK" || b.kind === "MEET")
             return (
               <div key={b.key} className="group absolute" style={{ top, height, left: `calc(${b.col * widthPct}% + ${b.col * 4}px)`, width: `calc(${widthPct}% - 4px)` }}>
@@ -604,13 +692,13 @@ function DayGrid({
                   <>
                     <div onMouseDown={(e) => startResize(e, b, "top", b.startMin, b.endMin)} className="absolute inset-x-2 top-0 z-30 h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-primary/20 group-hover:opacity-100" />
                     <div onMouseDown={(e) => startResize(e, b, "bottom", b.startMin, b.endMin)} className="absolute inset-x-2 bottom-0 z-30 h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-primary/20 group-hover:opacity-100" />
-                    {b.kind === "WORK" && <button type="button" onClick={(e) => { e.stopPropagation(); onClearPlanned(b.taskId!) }} title="Remove from calendar (unplan)" className="absolute right-1 top-1 z-30 flex size-4 items-center justify-center rounded bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"><X className="size-3" /></button>}
+                    {b.kind === "WORK" && b.sessionId && <button type="button" onClick={(e) => { e.stopPropagation(); onRequestDeleteTaskWorkSession(b.sessionId!) }} title="Remove this calendar block" className="absolute right-1 top-1 z-30 flex size-4 items-center justify-center rounded bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"><X className="size-3" /></button>}
                   </>
                 )}
 
                 {isNew && (
                   <div className="absolute left-0 top-full z-50 mt-1 flex gap-1 rounded-lg border border-border bg-popover p-1.5 shadow-lg" onClick={(e) => e.stopPropagation()}>
-                    {QUICK_DURATIONS.map((d) => (<button key={d.label} type="button" onClick={() => onApplyDuration(b.taskId!, newBlock!.startMin, d.min)} className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-foreground"><Check className="size-2.5 opacity-0" />{d.label}</button>))}
+                    {QUICK_DURATIONS.map((d) => (<button key={d.label} type="button" onClick={() => onApplyDuration(b.sessionId!, b.dateKey, newBlock!.startMin, d.min)} className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-foreground"><Check className="size-2.5 opacity-0" />{d.label}</button>))}
                   </div>
                 )}
               </div>

@@ -74,12 +74,22 @@ export interface Task {
   reminderActive?: boolean
   /** source deadline timestamp supplied by the read-only WPF bridge */
   deadlineAtUtc?: string
-  /** Calendar planned work block start (UTC ISO), independent of REMIND/DEADLINE */
-  plannedStartAtUtc?: string
-  /** Calendar planned work block duration in minutes */
-  plannedDurationMinutes?: number
   /** lightweight execution steps; absent/empty both mean "no steps" */
   checkpoints?: TaskCheckpoint[]
+}
+
+/** One calendar placement for a logical task. It has no task status of its own. */
+export interface TaskWorkSession {
+  id: string
+  taskId: string
+  startUtc: string
+  endUtc: string
+  note?: string
+  taskTitle: string
+  taskStatus: Status
+  projectId: string
+  sectionId: string
+  projectColor: string
 }
 
 export type TimelineKind = "MEET" | "REMIND" | "DEADLINE"
@@ -187,12 +197,13 @@ export interface ProjectScope {
 }
 
 export interface WorkspaceSnapshotContract {
-  schemaVersion: 1
+  schemaVersion: 2
   generatedAtUtc: string
   mode: "readonly" | "connected"
   projects: WorkspaceProjectSnapshot[]
   sections: WorkspaceSectionSnapshot[]
   tasks: WorkspaceTaskSnapshot[]
+  taskWorkSessions: WorkspaceTaskWorkSessionSnapshot[]
   meetings: WorkspaceMeetingSnapshot[]
   contextSources?: WorkspaceContextSourceSnapshot[]
   contextItems?: WorkspaceContextItemSnapshot[]
@@ -275,9 +286,22 @@ export interface WorkspaceTaskSnapshot {
   reminderEveryMinutes: number | null
   reminderActive: boolean
   deadlineAtUtc: string | null
-  plannedStartAtUtc: string | null
-  plannedDurationMinutes: number | null
   checkpoints?: WorkspaceCheckpointSnapshot[] | null
+}
+
+export interface WorkspaceTaskWorkSessionSnapshot {
+  id: string
+  taskId: string
+  startUtc: string
+  endUtc: string
+  note: string
+  createdAtUtc: string
+  updatedAtUtc: string
+  taskTitle: string
+  taskStatus: Status
+  projectId: string
+  sectionId: string
+  projectColor: string
 }
 
 export interface WorkspaceCheckpointSnapshot {
@@ -324,12 +348,6 @@ export type WorkspaceTaskCommand =
   | { type: "updateTaskPinToPanel"; taskId: string; pinToPanel: boolean }
   | { type: "updateTaskNotes"; taskId: string; notes: string }
   | { type: "updateTaskTitle"; taskId: string; title: string }
-  | {
-      type: "updateTaskPlannedWork"
-      taskId: string
-      plannedStartAtUtc: string | null
-      plannedDurationMinutes: number | null
-    }
   | { type: "updateTaskWaitingFor"; taskId: string; waitingFor: string }
   | {
       type: "updateTaskReminder"
@@ -388,6 +406,23 @@ export type WorkspaceMeetingCommand =
     }
   | { type: "deleteMeeting"; meetingId: string }
 
+export type WorkspaceTaskWorkSessionCommand =
+  | {
+      type: "createTaskWorkSession"
+      taskId: string
+      startUtc: string
+      endUtc: string
+      note?: string | null
+    }
+  | {
+      type: "updateTaskWorkSession"
+      sessionId: string
+      startUtc?: string
+      endUtc?: string
+      note?: string | null
+    }
+  | { type: "deleteTaskWorkSession"; sessionId: string }
+
 /** Creates a task directly from Workspace. No taskId yet — the bridge returns one. */
 export type WorkspaceCreateTaskCommand = {
   type: "createTask"
@@ -398,9 +433,9 @@ export type WorkspaceCreateTaskCommand = {
   sectionId?: string | null
   /** When set, the new task becomes a subtask of this task and inherits its project/section. */
   parentTaskId?: string
-  /** Optional initial calendar placement for connected slot creation. */
-  plannedStartAtUtc?: string | null
-  plannedDurationMinutes?: number | null
+  /** Optional first work session for connected Calendar slot creation. */
+  workSessionStartUtc?: string | null
+  workSessionEndUtc?: string | null
 }
 
 /** Creates a top-level section (workstream) under a project. The bridge returns the section id. */
@@ -481,6 +516,7 @@ export type WorkspaceCommand =
   | WorkspaceCreateTaskCommand
   | WorkspaceCreateSectionCommand
   | WorkspaceMeetingCommand
+  | WorkspaceTaskWorkSessionCommand
   | WorkspaceContextHubCommand
 
 export type WorkspaceCommandPayload = WorkspaceCommand extends infer Command
@@ -506,6 +542,7 @@ export interface WorkspaceCommandResult {
   createdTaskId?: string | null
   createdSectionId?: string | null
   createdMeetingId?: string | null
+  createdTaskWorkSessionId?: string | null
   createdContextSourceId?: string | null
   createdContextItemId?: string | null
 }

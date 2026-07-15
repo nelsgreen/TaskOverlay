@@ -120,10 +120,25 @@ item.
   there until it is DONE (hidden by default once DONE), since a long-running
   task may need several scheduled blocks across a day.
 - A task remains one logical record. Calendar time allocation for that task
-  is tracked as separate linked block/work-session records (see BACKLOG
-  "Multi-segment task scheduling / work sessions"), not by moving the task
-  itself around the grid. Calendar blocks are time/work metadata, never a
-  task status - the status model stays TODO / FOCUS / WAIT / DONE only.
+  is tracked as separate linked `TaskWorkSession` records, not by moving or
+  duplicating the task itself. Each session owns only id/taskId/start/end,
+  optional note, and timestamps. Calendar blocks are time/work metadata,
+  never a task status - the status model stays TODO / FOCUS / WAIT / DONE.
+- Task work-session CRUD follows the connected production path: React ->
+  WebView2 command -> C# `TaskWorkSessionService` / `AppState` -> `state.json`
+  -> fresh Workspace snapshot -> React. Moving/resizing/deleting one block
+  affects only that session. Deleting a task cleans its sessions; deleting a
+  session never deletes the task.
+- Workspace snapshot schema 2 carries logical tasks and task work sessions as
+  separate collections. The command-envelope protocol remains schema 1.
+- State schema 3 migrates the old single task planned-work fields into one
+  linked `TaskWorkSession`, then clears those legacy fields. Missing planned
+  work creates no session; malformed legacy values are handled without
+  dropping the task. The migration is covered by synthetic fixtures and is
+  idempotent. The real user state was unavailable in development, so artifact
+  migration must also be verified manually on the user's work computer.
+- MEET remains a separate first-class entity and is never represented as a
+  task work session.
 
 ## ContextHUB
 

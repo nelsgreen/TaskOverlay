@@ -16,6 +16,7 @@ public sealed record WorkspaceCommandResult(
     string? CreatedTaskId = null,
     string? CreatedSectionId = null,
     string? CreatedMeetingId = null,
+    string? CreatedTaskWorkSessionId = null,
     string? CreatedContextSourceId = null,
     string? CreatedContextItemId = null)
 {
@@ -27,6 +28,7 @@ public sealed record WorkspaceCommandResult(
         string? createdTaskId = null,
         string? createdSectionId = null,
         string? createdMeetingId = null,
+        string? createdTaskWorkSessionId = null,
         string? createdContextSourceId = null,
         string? createdContextItemId = null) =>
         new(
@@ -39,6 +41,7 @@ public sealed record WorkspaceCommandResult(
             createdTaskId,
             createdSectionId,
             createdMeetingId,
+            createdTaskWorkSessionId,
             createdContextSourceId,
             createdContextItemId);
 
@@ -61,8 +64,6 @@ public static class WorkspaceCommandProcessor
     public const int MaximumCommandIdLength = 128;
     public const int MaximumTitleLength = 500;
     public const int MaximumNotesLength = 100_000;
-    public const int MinimumPlannedDurationMinutes = 5;
-    public const int MaximumPlannedDurationMinutes = 24 * 60;
     public const int MaximumWaitingForLength = 300;
 
     public static WorkspaceCommandResult Execute(
@@ -142,6 +143,29 @@ public static class WorkspaceCommandProcessor
                 return DeleteMeeting(state, payload, commandId);
             }
 
+            if (type == "createTaskWorkSession")
+            {
+                return CreateTaskWorkSession(
+                    state,
+                    payload,
+                    commandId,
+                    now ?? DateTimeOffset.UtcNow);
+            }
+
+            if (type == "updateTaskWorkSession")
+            {
+                return UpdateTaskWorkSession(
+                    state,
+                    payload,
+                    commandId,
+                    now ?? DateTimeOffset.UtcNow);
+            }
+
+            if (type == "deleteTaskWorkSession")
+            {
+                return DeleteTaskWorkSession(state, payload, commandId);
+            }
+
             if (type == "renameSection")
             {
                 return RenameSection(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
@@ -197,12 +221,6 @@ public static class WorkspaceCommandProcessor
                     commandId,
                     timestamp),
                 "updateTaskTitle" => UpdateTitle(
-                    treeService,
-                    taskId,
-                    payload,
-                    commandId,
-                    timestamp),
-                "updateTaskPlannedWork" => UpdatePlannedWork(
                     treeService,
                     taskId,
                     payload,
@@ -352,53 +370,6 @@ public static class WorkspaceCommandProcessor
         return treeService.RenameNode(taskId, title, timestamp)
             ? WorkspaceCommandResult.Succeeded(commandId)
             : Fail(commandId, "mutationRejected", "Task title could not be updated.");
-    }
-
-    private static WorkspaceCommandResult UpdatePlannedWork(
-        TreeStateService treeService,
-        Guid taskId,
-        JsonElement payload,
-        string commandId,
-        DateTimeOffset timestamp)
-    {
-        if (!payload.TryGetProperty("plannedStartAtUtc", out var startElement))
-        {
-            return Fail(commandId, "invalidPayload", "plannedStartAtUtc is required (use null to clear).");
-        }
-
-        // Clearing planned work: null start (and duration is ignored).
-        if (startElement.ValueKind == JsonValueKind.Null)
-        {
-            return treeService.SetPlannedWork(taskId, null, null, timestamp)
-                ? WorkspaceCommandResult.Succeeded(commandId)
-                : Fail(commandId, "mutationRejected", "Planned work could not be cleared.");
-        }
-
-        if (startElement.ValueKind != JsonValueKind.String ||
-            !DateTimeOffset.TryParse(
-                startElement.GetString(),
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind,
-                out var plannedStart))
-        {
-            return Fail(commandId, "invalidPayload", "plannedStartAtUtc must be an ISO-8601 timestamp or null.");
-        }
-
-        if (!payload.TryGetProperty("plannedDurationMinutes", out var durationElement) ||
-            durationElement.ValueKind != JsonValueKind.Number ||
-            !durationElement.TryGetInt32(out var durationMinutes) ||
-            durationMinutes < MinimumPlannedDurationMinutes ||
-            durationMinutes > MaximumPlannedDurationMinutes)
-        {
-            return Fail(
-                commandId,
-                "invalidPayload",
-                $"plannedDurationMinutes must be an integer between {MinimumPlannedDurationMinutes} and {MaximumPlannedDurationMinutes}.");
-        }
-
-        return treeService.SetPlannedWork(taskId, plannedStart, durationMinutes, timestamp)
-            ? WorkspaceCommandResult.Succeeded(commandId)
-            : Fail(commandId, "mutationRejected", "Planned work could not be updated.");
     }
 
     private static WorkspaceCommandResult UpdateWaitingFor(
@@ -628,12 +599,15 @@ public static class WorkspaceCommandProcessor
             return Fail(commandId, "invalidPayload", "A valid projectId or sectionId is required.");
         }
 
-        if (!TryReadOptionalPlannedWork(payload, out var plannedStartAtUtc, out var plannedDurationMinutes))
+        if (!TryReadOptionalInitialWorkSession(
+                payload,
+                out var workSessionStartUtc,
+                out var workSessionEndUtc))
         {
             return Fail(
                 commandId,
                 "invalidPayload",
-                $"plannedStartAtUtc must be an ISO-8601 timestamp and plannedDurationMinutes must be an integer between {MinimumPlannedDurationMinutes} and {MaximumPlannedDurationMinutes}.");
+                "workSessionStartUtc/workSessionEndUtc must be valid ISO-8601 timestamps with end after start.");
         }
 
         var treeService = new TreeStateService(state);
@@ -645,24 +619,40 @@ public static class WorkspaceCommandProcessor
             return Fail(commandId, "mutationRejected", "Task could not be created in the given location.");
         }
 
-        if (plannedStartAtUtc is not null)
+        TaskWorkSession? workSession = null;
+        if (workSessionStartUtc is not null && workSessionEndUtc is not null)
         {
-            treeService.SetPlannedWork(created.Id, plannedStartAtUtc, plannedDurationMinutes, timestamp);
+            workSession = new TaskWorkSessionService(state).Create(
+                created.Id,
+                workSessionStartUtc.Value,
+                workSessionEndUtc.Value,
+                now: timestamp);
+            if (workSession is null)
+            {
+                state.Tasks.RemoveAll(task => task.Id == created.Id);
+                return Fail(
+                    commandId,
+                    "mutationRejected",
+                    "Task work session could not be created.");
+            }
         }
 
-        return WorkspaceCommandResult.Succeeded(commandId, created.Id.ToString("N"));
+        return WorkspaceCommandResult.Succeeded(
+            commandId,
+            created.Id.ToString("N"),
+            createdTaskWorkSessionId: workSession?.Id.ToString("N"));
     }
 
-    private static bool TryReadOptionalPlannedWork(
+    private static bool TryReadOptionalInitialWorkSession(
         JsonElement payload,
-        out DateTimeOffset? plannedStartAtUtc,
-        out int? plannedDurationMinutes)
+        out DateTimeOffset? startUtc,
+        out DateTimeOffset? endUtc)
     {
-        plannedStartAtUtc = null;
-        plannedDurationMinutes = null;
-        var hasStart = payload.TryGetProperty("plannedStartAtUtc", out var startElement);
-        var hasDuration = payload.TryGetProperty("plannedDurationMinutes", out var durationElement);
-        if (!hasStart && !hasDuration)
+        startUtc = null;
+        endUtc = null;
+        var hasStart = payload.TryGetProperty("workSessionStartUtc", out var startElement);
+        var hasEnd = payload.TryGetProperty("workSessionEndUtc", out var endElement);
+        if (!hasStart && !hasEnd)
         {
             return true;
         }
@@ -673,23 +663,201 @@ public static class WorkspaceCommandProcessor
                 startElement.GetString(),
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.RoundtripKind,
-                out var parsedStart))
+                out var parsedStart) ||
+            !hasEnd ||
+            endElement.ValueKind != JsonValueKind.String ||
+            !DateTimeOffset.TryParse(
+                endElement.GetString(),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var parsedEnd) ||
+            !TaskWorkSessionService.IsValidRange(parsedStart, parsedEnd))
         {
             return false;
         }
 
-        if (!hasDuration ||
-            durationElement.ValueKind != JsonValueKind.Number ||
-            !durationElement.TryGetInt32(out var parsedDuration) ||
-            parsedDuration < MinimumPlannedDurationMinutes ||
-            parsedDuration > MaximumPlannedDurationMinutes)
-        {
-            return false;
-        }
-
-        plannedStartAtUtc = parsedStart;
-        plannedDurationMinutes = parsedDuration;
+        startUtc = parsedStart;
+        endUtc = parsedEnd;
         return true;
+    }
+
+    private static WorkspaceCommandResult CreateTaskWorkSession(
+        AppState state,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!Guid.TryParse(ReadString(payload, "taskId"), out var taskId) ||
+            taskId == Guid.Empty)
+        {
+            return Fail(commandId, "invalidTaskId", "A valid taskId is required.");
+        }
+
+        if (!state.Tasks.Any(task => task.Id == taskId))
+        {
+            return Fail(commandId, "taskNotFound", "The requested task does not exist.");
+        }
+
+        if (!TryReadRequiredWorkSessionRange(payload, out var startUtc, out var endUtc))
+        {
+            return Fail(
+                commandId,
+                "invalidPayload",
+                "startUtc/endUtc must be valid ISO-8601 timestamps with end after start.");
+        }
+
+        if (!TryReadOptionalWorkSessionNote(payload, out var note))
+        {
+            return Fail(commandId, "invalidPayload", "note is invalid or too long.");
+        }
+
+        var session = new TaskWorkSessionService(state).Create(
+            taskId,
+            startUtc,
+            endUtc,
+            note,
+            timestamp);
+        return session is not null
+            ? WorkspaceCommandResult.Succeeded(
+                commandId,
+                createdTaskWorkSessionId: session.Id.ToString("N"))
+            : Fail(commandId, "mutationRejected", "Task work session could not be created.");
+    }
+
+    private static WorkspaceCommandResult UpdateTaskWorkSession(
+        AppState state,
+        JsonElement payload,
+        string commandId,
+        DateTimeOffset timestamp)
+    {
+        if (!Guid.TryParse(ReadString(payload, "sessionId"), out var sessionId) ||
+            sessionId == Guid.Empty)
+        {
+            return Fail(commandId, "invalidSessionId", "A valid sessionId is required.");
+        }
+
+        var session = state.TaskWorkSessions.FirstOrDefault(item => item.Id == sessionId);
+        if (session is null)
+        {
+            return Fail(commandId, "sessionNotFound", "The requested task work session does not exist.");
+        }
+
+        var startUtc = session.StartUtc;
+        var endUtc = session.EndUtc;
+        var note = session.Note;
+        var hasPatch = false;
+        if (payload.TryGetProperty("startUtc", out var startElement))
+        {
+            hasPatch = true;
+            if (!TryParseIsoTimestamp(startElement, out startUtc))
+            {
+                return Fail(commandId, "invalidPayload", "startUtc must be an ISO-8601 timestamp.");
+            }
+        }
+
+        if (payload.TryGetProperty("endUtc", out var endElement))
+        {
+            hasPatch = true;
+            if (!TryParseIsoTimestamp(endElement, out endUtc))
+            {
+                return Fail(commandId, "invalidPayload", "endUtc must be an ISO-8601 timestamp.");
+            }
+        }
+
+        if (payload.TryGetProperty("note", out var noteElement))
+        {
+            hasPatch = true;
+            if (noteElement.ValueKind == JsonValueKind.Null)
+            {
+                note = string.Empty;
+            }
+            else if (noteElement.ValueKind != JsonValueKind.String ||
+                     (noteElement.GetString()?.Length ?? 0) > TaskWorkSessionService.MaximumNoteLength)
+            {
+                return Fail(commandId, "invalidPayload", "note is invalid or too long.");
+            }
+            else
+            {
+                note = noteElement.GetString() ?? string.Empty;
+            }
+        }
+
+        if (!hasPatch || !TaskWorkSessionService.IsValidRange(startUtc, endUtc))
+        {
+            return Fail(commandId, "invalidPayload", "A valid session patch is required.");
+        }
+
+        return new TaskWorkSessionService(state).Update(
+                sessionId,
+                startUtc,
+                endUtc,
+                note,
+                timestamp)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "mutationRejected", "Task work session could not be updated.");
+    }
+
+    private static WorkspaceCommandResult DeleteTaskWorkSession(
+        AppState state,
+        JsonElement payload,
+        string commandId)
+    {
+        if (!Guid.TryParse(ReadString(payload, "sessionId"), out var sessionId) ||
+            sessionId == Guid.Empty)
+        {
+            return Fail(commandId, "invalidSessionId", "A valid sessionId is required.");
+        }
+
+        return new TaskWorkSessionService(state).Delete(sessionId)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : Fail(commandId, "sessionNotFound", "The requested task work session does not exist.");
+    }
+
+    private static bool TryReadRequiredWorkSessionRange(
+        JsonElement payload,
+        out DateTimeOffset startUtc,
+        out DateTimeOffset endUtc)
+    {
+        startUtc = default;
+        endUtc = default;
+        return payload.TryGetProperty("startUtc", out var startElement) &&
+               TryParseIsoTimestamp(startElement, out startUtc) &&
+               payload.TryGetProperty("endUtc", out var endElement) &&
+               TryParseIsoTimestamp(endElement, out endUtc) &&
+               TaskWorkSessionService.IsValidRange(startUtc, endUtc);
+    }
+
+    private static bool TryReadOptionalWorkSessionNote(
+        JsonElement payload,
+        out string? note)
+    {
+        note = null;
+        if (!payload.TryGetProperty("note", out var element) ||
+            element.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        if (element.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        note = element.GetString();
+        return (note?.Length ?? 0) <= TaskWorkSessionService.MaximumNoteLength;
+    }
+
+    private static bool TryParseIsoTimestamp(
+        JsonElement element,
+        out DateTimeOffset timestamp)
+    {
+        timestamp = default;
+        return element.ValueKind == JsonValueKind.String &&
+               DateTimeOffset.TryParse(
+            element.GetString(),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind,
+            out timestamp);
     }
 
     private static WorkspaceCommandResult MoveTask(

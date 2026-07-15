@@ -68,7 +68,8 @@ public sealed class AppStateStore
 
             Report(
                 $"State load succeeded with {state.Tasks.Count} tasks and " +
-                $"{state.Meetings.Count} meetings.");
+                $"{state.Meetings.Count} meetings and " +
+                $"{state.TaskWorkSessions.Count} task work sessions.");
             return state;
         }
         catch (Exception ex) when (
@@ -131,7 +132,8 @@ public sealed class AppStateStore
 
             Report(
                 $"State save succeeded with {state.Tasks.Count} tasks and " +
-                $"{state.Meetings.Count} meetings.");
+                $"{state.Meetings.Count} meetings and " +
+                $"{state.TaskWorkSessions.Count} task work sessions.");
         }
         finally
         {
@@ -227,6 +229,7 @@ public sealed class AppStateStore
             state.Projects is null ||
             state.Groups is null ||
             state.Meetings is null ||
+            state.TaskWorkSessions is null ||
             state.ContextSources is null ||
             state.ContextItems is null ||
             state.OverlaySettings is null ||
@@ -254,10 +257,14 @@ public sealed class AppStateStore
         var groupIds = state.Groups.Select(group => group.Id).ToHashSet();
         var taskIds = state.Tasks.Select(task => task.Id).ToHashSet();
         var meetingIds = state.Meetings.Select(meeting => meeting.Id).ToHashSet();
+        var taskWorkSessionIds = state.TaskWorkSessions
+            .Select(session => session.Id)
+            .ToHashSet();
         if (projectIds.Count != state.Projects.Count ||
             groupIds.Count != state.Groups.Count ||
             taskIds.Count != state.Tasks.Count ||
-            meetingIds.Count != state.Meetings.Count)
+            meetingIds.Count != state.Meetings.Count ||
+            taskWorkSessionIds.Count != state.TaskWorkSessions.Count)
         {
             throw new InvalidDataException("State file contains duplicate node IDs.");
         }
@@ -306,6 +313,19 @@ public sealed class AppStateStore
                 meeting.LinkedTaskId is Guid linkedTaskId && !taskIds.Contains(linkedTaskId))
             {
                 throw new InvalidDataException("State file contains an invalid meeting.");
+            }
+        }
+
+        foreach (var session in state.TaskWorkSessions)
+        {
+            if (session.Id == Guid.Empty ||
+                !taskIds.Contains(session.TaskId) ||
+                !TaskWorkSessionService.IsValidRange(session.StartUtc, session.EndUtc) ||
+                session.Note is null ||
+                session.Note.Length > TaskWorkSessionService.MaximumNoteLength)
+            {
+                throw new InvalidDataException(
+                    "State file contains an invalid task work session.");
             }
         }
 

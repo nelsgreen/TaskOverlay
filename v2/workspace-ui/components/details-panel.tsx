@@ -243,8 +243,6 @@ function mergeTaskFields(
     remindAtUtc: incoming.remindAtUtc,
     reminderActive: incoming.reminderActive,
     deadlineAtUtc: incoming.deadlineAtUtc,
-    plannedStartAtUtc: incoming.plannedStartAtUtc,
-    plannedDurationMinutes: incoming.plannedDurationMinutes,
     // Checkpoints always take the authoritative snapshot: in-progress row edits
     // and the add-step input live in separate local buffers, never in the draft.
     checkpoints: incoming.checkpoints,

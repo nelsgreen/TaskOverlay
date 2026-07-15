@@ -307,11 +307,11 @@ Active product scope:
     day;
   - a task remains in Planning Pool until DONE; DONE tasks are hidden by
     default;
-  - later scheduling indicators per task: Unscheduled / Scheduled today / N
-    blocks today / Total today: 1h 15m;
+  - scheduling indicators are implemented from real work sessions:
+    Unscheduled / Scheduled today / N blocks today / Total today;
   - later filters: Active / Unscheduled / Today / All;
   - clearing a block removes the planned block, not the task.
-- Calendar empty-slot context menu:
+- Calendar empty-slot context menu (implemented; preserve connected behavior):
   - right-click an empty area of Day/Week view opens Create task / Create
     MEET;
   - created record uses the clicked date/time; default duration (e.g. 30
@@ -323,25 +323,32 @@ Active product scope:
   - implementation must go through connected bridge/service/AppState/
     state.json/fresh snapshot; no mock-only UI, no `localStorage` production
     persistence.
-- Multi-segment task scheduling / work sessions (design, not implemented):
+- Multi-segment task scheduling / work sessions (foundation implemented):
   - problem: moving a long-running task around Calendar loses work history
     when the user works on it across several separate time periods;
   - decision: the task remains one logical record; Calendar displays
     separate block/work-session records linked to the same task instead of
     moving the task itself;
-  - future model idea, `TaskCalendarBlock` / `TaskWorkSession`: `id`,
-    `taskId`, `startUtc`, `endUtc`, optional note, `createdAtUtc`,
-    `updatedAtUtc`, and possibly a later Planned/Actual `kind`;
+  - implemented model: `TaskWorkSession` with `id`, `taskId`, `startUtc`,
+    `endUtc`, optional note, `createdAtUtc`, and `updatedAtUtc`; a later
+    Planned/Actual `kind` remains out of scope;
   - one task can have multiple blocks; dragging from Planning Pool creates a
     new block linked to the task; moving/resizing a block changes only that
     block; past blocks stay visible and are never overwritten; the user can
     add another block for the same task;
-  - Task Details should show linked blocks/work sessions and total duration;
-    Day and Week Calendar should show all blocks under the same task title;
+  - connected create/update/delete commands, snapshot projection, Day/Week
+    rendering, per-session drag/resize/delete, and Calendar context actions
+    are implemented;
+  - schema-2 single planned work migrates to one session in schema 3 with
+    synthetic malformed/partial/idempotency fixtures; real user-state
+    migration still requires artifact QA on the user's work computer;
+  - Task Details showing linked sessions/history and total duration remains a
+    follow-up; Day and Week already show all blocks under the same task title;
   - blocks are time/work metadata, not task status - status stays TODO /
     FOCUS / WAIT / DONE only;
-  - this is a model/design item for a future PR, not implemented here.
-- Calendar block usability (MEET and task blocks):
+  - deleting a calendar block removes only its session; deleting the logical
+    task cleans all linked sessions; MEET remains separate.
+- Calendar block usability (implemented in PR #64; preserve):
   - MEET blocks resizable by mouse like task blocks;
   - rename "+Meeting" to "+MEET"; first click on +MEET immediately opens
     MEET Details/draft, not a menu;

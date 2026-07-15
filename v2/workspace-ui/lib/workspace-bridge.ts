@@ -7,6 +7,7 @@ import type {
   Section,
   TabKey,
   Task,
+  TaskWorkSession,
   TimelineItem,
   PendingWorkspaceCommand,
   WorkspaceCommand,
@@ -23,6 +24,7 @@ import type {
   WorkspaceSectionCommand,
   WorkspaceSnapshotContract,
   WorkspaceTaskCommand,
+  WorkspaceTaskWorkSessionCommand,
 } from "@/lib/types"
 import { dateKeyFromIso } from "@/lib/calendar-date"
 
@@ -49,6 +51,7 @@ export interface WorkspaceData {
   projects: Project[]
   sections: Section[]
   tasks: Task[]
+  taskWorkSessions: TaskWorkSession[]
   activeNowTaskIds: string[]
   timelineItems: TimelineItem[]
   meetItems: MeetItem[]
@@ -76,6 +79,7 @@ export interface WorkspaceBridgeState {
   sendCreateSection(input: Omit<WorkspaceCreateSectionCommand, "type">): boolean
   sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
   sendMeetingCommand(command: WorkspaceMeetingCommand): boolean
+  sendTaskWorkSessionCommand(command: WorkspaceTaskWorkSessionCommand): boolean
   sendContextHubCommand(command: WorkspaceContextHubCommand): boolean
   clearError(): void
   clearLastCreatedTaskId(): void
@@ -191,6 +195,9 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const sendMeetingCommand = useCallback((command: WorkspaceMeetingCommand): boolean =>
     postCommand(command), [postCommand])
 
+  const sendTaskWorkSessionCommand = useCallback((command: WorkspaceTaskWorkSessionCommand): boolean =>
+    postCommand(command), [postCommand])
+
   const sendContextHubCommand = useCallback((command: WorkspaceContextHubCommand): boolean =>
     postCommand(command), [postCommand])
 
@@ -217,6 +224,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     sendCreateSection,
     sendWorkspaceContext,
     sendMeetingCommand,
+    sendTaskWorkSessionCommand,
     sendContextHubCommand,
     clearError,
     clearLastCreatedTaskId,
@@ -242,12 +250,13 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
 function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceSnapshotContract>
-  return candidate.schemaVersion === 1 &&
+  return candidate.schemaVersion === 2 &&
     (candidate.mode === "readonly" || candidate.mode === "connected") &&
     typeof candidate.generatedAtUtc === "string" &&
     Array.isArray(candidate.projects) &&
     Array.isArray(candidate.sections) &&
     Array.isArray(candidate.tasks) &&
+    Array.isArray(candidate.taskWorkSessions) &&
     Array.isArray(candidate.meetings) &&
     Array.isArray(candidate.activeNow) &&
     Array.isArray(candidate.timelineItems) &&
@@ -294,6 +303,7 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     isProjectRoot: section.isProjectRoot,
   }))
   const tasks = snapshot.tasks.map(adaptTask)
+  const taskWorkSessions = snapshot.taskWorkSessions.map(adaptTaskWorkSession)
   const timelineItems = snapshot.timelineItems.map(adaptTimelineItem)
   const meetItems = snapshot.meetings.map(adaptMeeting)
 
@@ -301,6 +311,7 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     projects,
     sections,
     tasks,
+    taskWorkSessions,
     activeNowTaskIds: snapshot.activeNow.map((item) => item.taskId),
     timelineItems,
     meetItems,
@@ -334,6 +345,23 @@ function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): Me
     location: source.location || undefined,
     link: source.link || undefined,
     linkedTaskId: source.linkedTaskId ?? undefined,
+  }
+}
+
+function adaptTaskWorkSession(
+  source: WorkspaceSnapshotContract["taskWorkSessions"][number],
+): TaskWorkSession {
+  return {
+    id: source.id,
+    taskId: source.taskId,
+    startUtc: source.startUtc,
+    endUtc: source.endUtc,
+    note: source.note || undefined,
+    taskTitle: source.taskTitle,
+    taskStatus: source.taskStatus,
+    projectId: source.projectId,
+    sectionId: source.sectionId,
+    projectColor: source.projectColor,
   }
 }
 
@@ -397,8 +425,6 @@ function adaptTask(source: WorkspaceSnapshotContract["tasks"][number]): Task {
     remindAtUtc: source.reminderAtUtc ?? undefined,
     reminderActive: source.reminderActive,
     deadlineAtUtc: source.deadlineAtUtc ?? undefined,
-    plannedStartAtUtc: source.plannedStartAtUtc ?? undefined,
-    plannedDurationMinutes: source.plannedDurationMinutes ?? undefined,
     checkpoints: (source.checkpoints ?? []).map((checkpoint) => ({
       id: checkpoint.id,
       title: checkpoint.title,

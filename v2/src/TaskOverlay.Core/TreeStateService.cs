@@ -209,6 +209,7 @@ public sealed class TreeStateService
                     return false;
                 }
 
+                new TaskWorkSessionService(_state).DeleteForTask(task.Id);
                 new MeetingService(_state).ClearLinkedTask(task.Id, timestamp);
                 new ContextService(_state).ClearTaskLinks(task.Id, timestamp);
 
@@ -455,34 +456,6 @@ public sealed class TreeStateService
         }
 
         task.DueAtUtc = deadlineAtUtc?.ToUniversalTime();
-        task.UpdatedAtUtc = now ?? DateTimeOffset.UtcNow;
-        return true;
-    }
-
-    public bool SetPlannedWork(
-        Guid nodeId,
-        DateTimeOffset? plannedStartAtUtc,
-        int? plannedDurationMinutes,
-        DateTimeOffset? now = null)
-    {
-        var task = FindTask(nodeId);
-        if (task is null)
-        {
-            return false;
-        }
-
-        if (plannedStartAtUtc is null)
-        {
-            // Clearing planned work always clears both fields.
-            task.PlannedStartAtUtc = null;
-            task.PlannedDurationMinutes = null;
-        }
-        else
-        {
-            task.PlannedStartAtUtc = plannedStartAtUtc.Value.ToUniversalTime();
-            task.PlannedDurationMinutes = plannedDurationMinutes;
-        }
-
         task.UpdatedAtUtc = now ?? DateTimeOffset.UtcNow;
         return true;
     }
