@@ -13,6 +13,8 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceTaskSnapshot> Tasks,
     IReadOnlyList<WorkspaceTaskWorkSessionSnapshot> TaskWorkSessions,
     IReadOnlyList<WorkspaceMeetingSnapshot> Meetings,
+    IReadOnlyList<WorkspaceMeetingRecordingSnapshot> MeetingRecordings,
+    IReadOnlyList<WorkspaceMeetingAnalysisSnapshot> MeetingAnalyses,
     IReadOnlyList<WorkspaceContextSourceSnapshot> ContextSources,
     IReadOnlyList<WorkspaceContextItemSnapshot> ContextItems,
     IReadOnlyList<WorkspaceActiveNowSnapshot> ActiveNow,
@@ -91,8 +93,75 @@ public sealed record WorkspaceMeetingSnapshot(
     string Location,
     string Link,
     string? LinkedTaskId,
+    string RecordingPolicy,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
+
+public sealed record WorkspaceMeetingRecordingSnapshot(
+    string Id,
+    string? MeetingId,
+    string SourceKind,
+    string State,
+    DateTimeOffset? StartedAtUtc,
+    DateTimeOffset? StoppedAtUtc,
+    string SystemAudioHealth,
+    string MicrophoneHealth,
+    bool KeepLocalOnly,
+    bool PlannedEndPassed,
+    bool HasSystemAudio,
+    bool HasMicrophoneAudio,
+    bool HasMixedAudio,
+    bool HasTranscript,
+    bool HasAnalysis,
+    string TranscriptText,
+    string LastError,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);
+
+public sealed record WorkspaceMeetingAnalysisSnapshot(
+    string Id,
+    string RecordingId,
+    string? MeetingId,
+    string State,
+    string Provider,
+    string Model,
+    string Summary,
+    IReadOnlyList<string> Decisions,
+    IReadOnlyList<string> MyActionItems,
+    IReadOnlyList<string> OtherPeopleActionItems,
+    IReadOnlyList<string> WaitingFor,
+    IReadOnlyList<string> Risks,
+    IReadOnlyList<string> QuestionsToClarify,
+    IReadOnlyList<string> Deadlines,
+    IReadOnlyList<WorkspaceMeetingSourceReferenceSnapshot> KeyQuotesOrSourceReferences,
+    IReadOnlyList<WorkspaceProposedActionSnapshot> ProposedActions,
+    string LastError,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);
+
+public sealed record WorkspaceMeetingSourceReferenceSnapshot(
+    double? StartSeconds,
+    double? EndSeconds,
+    string Excerpt);
+
+public sealed record WorkspaceProposedActionSnapshot(
+    string Id,
+    string Type,
+    string Title,
+    string? ProposedProjectId,
+    string ProjectSuggestion,
+    string ProposedStatus,
+    string WaitingFor,
+    DateTimeOffset? DeadlineAtUtc,
+    DateTimeOffset? ReminderAtUtc,
+    double? SourceSegmentStart,
+    double? SourceSegmentEnd,
+    string SourceExcerpt,
+    double Confidence,
+    string Rationale,
+    string ReviewState,
+    string? AppliedTaskId,
+    string? AppliedContextItemId);
 
 public sealed record WorkspaceContextSourceSnapshot(
     string Id,
@@ -139,14 +208,15 @@ public sealed record WorkspaceTimelineItemSnapshot(
 
 public static class WorkspaceSnapshotFactory
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
     public const string ReadOnlyMode = "readonly";
     public const string ConnectedMode = "connected";
 
     public static WorkspaceSnapshot Create(
         AppState state,
         DateTimeOffset? now = null,
-        string mode = ReadOnlyMode)
+        string mode = ReadOnlyMode,
+        Func<MeetingRecording, string?>? transcriptLoader = null)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -277,8 +347,99 @@ public static class WorkspaceSnapshotFactory
                 meeting.LinkedTaskId is Guid linkedTaskId && taskIds.Contains(linkedTaskId)
                     ? FormatId(linkedTaskId)
                     : null,
+                meeting.RecordingPolicy.ToString(),
                 meeting.CreatedAtUtc,
                 meeting.UpdatedAtUtc))
+            .ToList();
+
+        var meetingById = sourceMeetings.ToDictionary(meeting => meeting.Id);
+        var sourceRecordings = state.MeetingRecordings ?? new List<MeetingRecording>();
+        var recordings = sourceRecordings
+            .OrderByDescending(recording => recording.StartedAtUtc ?? recording.CreatedAtUtc)
+            .ThenBy(recording => recording.Id)
+            .Select(recording =>
+            {
+                var plannedEndPassed = recording.IsActive &&
+                                       recording.MeetId is Guid recordingMeetId &&
+                                       meetingById.TryGetValue(recordingMeetId, out var ownerMeeting) &&
+                                       timestamp >= ownerMeeting.StartsAtUtc.AddMinutes(
+                                           ownerMeeting.DurationMinutes);
+                return new WorkspaceMeetingRecordingSnapshot(
+                    FormatId(recording.Id),
+                    recording.MeetId is Guid meetId ? FormatId(meetId) : null,
+                    recording.SourceKind.ToString(),
+                    recording.State.ToString(),
+                    recording.StartedAtUtc,
+                    recording.StoppedAtUtc,
+                    recording.SystemAudioHealth.ToString(),
+                    recording.MicrophoneHealth.ToString(),
+                    recording.KeepLocalOnly,
+                    plannedEndPassed,
+                    recording.SystemAudioFile.Length > 0,
+                    recording.MicrophoneFile.Length > 0,
+                    recording.MixedAudioFile.Length > 0,
+                    recording.TranscriptFile.Length > 0,
+                    recording.AnalysisFile.Length > 0,
+                    transcriptLoader?.Invoke(recording) ?? string.Empty,
+                    recording.LastError,
+                    recording.CreatedAtUtc,
+                    recording.UpdatedAtUtc);
+            })
+            .ToList();
+        var recordingIdSet = sourceRecordings.Select(recording => recording.Id).ToHashSet();
+        var analyses = (state.MeetingAnalyses ?? new List<MeetingAnalysis>())
+            .Where(analysis => recordingIdSet.Contains(analysis.RecordingId))
+            .OrderByDescending(analysis => analysis.UpdatedAtUtc)
+            .ThenBy(analysis => analysis.Id)
+            .Select(analysis => new WorkspaceMeetingAnalysisSnapshot(
+                FormatId(analysis.Id),
+                FormatId(analysis.RecordingId),
+                analysis.MeetId is Guid meetId ? FormatId(meetId) : null,
+                analysis.State.ToString(),
+                analysis.Provider,
+                analysis.Model,
+                analysis.Summary,
+                analysis.Decisions,
+                analysis.MyActionItems,
+                analysis.OtherPeopleActionItems,
+                analysis.WaitingFor,
+                analysis.Risks,
+                analysis.QuestionsToClarify,
+                analysis.Deadlines,
+                analysis.KeyQuotesOrSourceReferences.Select(reference =>
+                    new WorkspaceMeetingSourceReferenceSnapshot(
+                        reference.StartSeconds,
+                        reference.EndSeconds,
+                        reference.Excerpt)).ToList(),
+                analysis.ProposedActions.Select(action =>
+                    new WorkspaceProposedActionSnapshot(
+                        FormatId(action.Id),
+                        action.Type.ToString(),
+                        action.Title,
+                        action.ProposedProjectId is Guid projectId &&
+                        projectById.ContainsKey(projectId)
+                            ? FormatId(projectId)
+                            : null,
+                        action.ProjectSuggestion,
+                        ToStatus(action.ProposedStatus),
+                        action.WaitingFor,
+                        action.DeadlineAtUtc,
+                        action.ReminderAtUtc,
+                        action.SourceSegmentStart,
+                        action.SourceSegmentEnd,
+                        action.SourceExcerpt,
+                        action.Confidence,
+                        action.Rationale,
+                        action.ReviewState.ToString(),
+                        action.AppliedTaskId is Guid taskId && taskIds.Contains(taskId)
+                            ? FormatId(taskId)
+                            : null,
+                        action.AppliedContextItemId is Guid contextId
+                            ? FormatId(contextId)
+                            : null)).ToList(),
+                analysis.LastError,
+                analysis.CreatedAtUtc,
+                analysis.UpdatedAtUtc))
             .ToList();
 
         // ContextHUB: links to deleted tasks/meetings/sources are filtered out of
@@ -375,6 +536,8 @@ public static class WorkspaceSnapshotFactory
             tasks,
             taskWorkSessions,
             meetings,
+            recordings,
+            analyses,
             contextSources,
             contextItems,
             activeNow,

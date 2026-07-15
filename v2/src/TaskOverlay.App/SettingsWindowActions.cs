@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using TaskOverlay.Core;
 
@@ -26,7 +27,15 @@ public sealed class SettingsWindowActions
         Func<Task<TelegramConnectionTestResult>> testTelegramConnection,
         Func<TelegramCaptureDiagnostics> getTelegramDiagnostics,
         Func<Task<TelegramPollNowResult>> pollTelegramNow,
-        Action openContextHub)
+        Action openContextHub,
+        Func<MeetingAssistantSettings> getMeetingAssistantSettings,
+        Action saveMeetingAssistantSettings,
+        Func<IReadOnlyList<AudioDeviceDescriptor>> getMicrophoneDevices,
+        Func<IReadOnlyList<AudioDeviceDescriptor>> getSystemOutputDevices,
+        Func<bool> openMeetingRecordingsFolder,
+        Func<bool> hasOpenAiApiKey,
+        Func<string, bool> saveOpenAiApiKey,
+        Func<bool> clearOpenAiApiKey)
     {
         SetOverlayMode = setOverlayMode;
         OpenLogs = openLogs;
@@ -48,6 +57,14 @@ public sealed class SettingsWindowActions
         GetTelegramDiagnostics = getTelegramDiagnostics;
         PollTelegramNow = pollTelegramNow;
         OpenContextHub = openContextHub;
+        GetMeetingAssistantSettings = getMeetingAssistantSettings;
+        SaveMeetingAssistantSettings = saveMeetingAssistantSettings;
+        GetMicrophoneDevices = getMicrophoneDevices;
+        GetSystemOutputDevices = getSystemOutputDevices;
+        OpenMeetingRecordingsFolder = openMeetingRecordingsFolder;
+        HasOpenAiApiKey = hasOpenAiApiKey;
+        SaveOpenAiApiKey = saveOpenAiApiKey;
+        ClearOpenAiApiKey = clearOpenAiApiKey;
     }
 
     public Action<OverlayMode> SetOverlayMode { get; }
@@ -70,4 +87,12 @@ public sealed class SettingsWindowActions
     public Func<TelegramCaptureDiagnostics> GetTelegramDiagnostics { get; }
     public Func<Task<TelegramPollNowResult>> PollTelegramNow { get; }
     public Action OpenContextHub { get; }
+    public Func<MeetingAssistantSettings> GetMeetingAssistantSettings { get; }
+    public Action SaveMeetingAssistantSettings { get; }
+    public Func<IReadOnlyList<AudioDeviceDescriptor>> GetMicrophoneDevices { get; }
+    public Func<IReadOnlyList<AudioDeviceDescriptor>> GetSystemOutputDevices { get; }
+    public Func<bool> OpenMeetingRecordingsFolder { get; }
+    public Func<bool> HasOpenAiApiKey { get; }
+    public Func<string, bool> SaveOpenAiApiKey { get; }
+    public Func<bool> ClearOpenAiApiKey { get; }
 }

@@ -1,5 +1,7 @@
 "use client"
 
+import { useEffect, useState } from "react"
+
 import {
   Bell,
   CalendarClock,
@@ -15,9 +17,10 @@ import {
   ListChecks,
   Plus,
   Search,
+  Square,
   Video,
 } from "lucide-react"
-import type { StatusFilterKey, TabKey, Task, TreeFilter, WorkstreamFilter } from "@/lib/types"
+import type { MeetingRecordingSnapshot, StatusFilterKey, TabKey, Task, TreeFilter, WorkstreamFilter } from "@/lib/types"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { cn } from "@/lib/utils"
 import { addDaysKey, formatWeekLabel, mondayOfWeekKey, parseDateKey, todayKey } from "@/lib/calendar-date"
@@ -63,6 +66,8 @@ interface Props {
   onContextPack: () => void
   contextPackDisabled?: boolean
   contextPackHint?: string | null
+  activeRecording?: MeetingRecordingSnapshot | null
+  onStopRecording?: () => void
 }
 
 const tabs: { key: TabKey; label: string; icon: typeof FolderTree; later?: boolean }[] = [
@@ -144,8 +149,18 @@ export function WorkspaceHeader({
   onContextPack,
   contextPackDisabled = false,
   contextPackHint = null,
+  activeRecording = null,
+  onStopRecording,
 }: Props) {
   const searchDisabled = tab === "calendar"
+  const [clock, setClock] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!activeRecording) return
+    setClock(Date.now())
+    const timer = window.setInterval(() => setClock(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [activeRecording?.id])
 
   return (
     <header className="shrink-0 border-b border-border">
@@ -193,6 +208,21 @@ export function WorkspaceHeader({
             )
           })}
         </nav>
+
+        {activeRecording && (
+          <button
+            type="button"
+            onClick={onStopRecording}
+            title={activeRecording.plannedEndPassed
+              ? "Planned MEET end passed. Recording continues until you stop it."
+              : "Recording is active. Click to stop."}
+            className="my-auto flex h-8 shrink-0 items-center gap-2 rounded-md border border-red-500/50 bg-red-500/10 px-2.5 text-[11px] font-semibold text-red-400"
+          >
+            <span className="size-2 animate-pulse rounded-full bg-red-500" />
+            REC {formatRecordingElapsed(activeRecording.startedAtUtc, clock)}
+            <Square className="size-3 fill-current" />
+          </button>
+        )}
 
         <div className="relative my-auto w-56 shrink-0 max-w-[28vw]">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -266,6 +296,19 @@ export function WorkspaceHeader({
       </div>
     </header>
   )
+}
+
+function formatRecordingElapsed(startedAtUtc: string | null, now: number): string {
+  const started = startedAtUtc ? Date.parse(startedAtUtc) : Number.NaN
+  const seconds = Number.isFinite(started)
+    ? Math.max(0, Math.floor((now - started) / 1000))
+    : 0
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const remainder = seconds % 60
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+    : `${minutes}:${String(remainder).padStart(2, "0")}`
 }
 
 function ContextHubToolbar({

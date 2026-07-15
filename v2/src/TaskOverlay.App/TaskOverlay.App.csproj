@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\TaskOverlay.Core\TaskOverlay.Core.csproj" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
+    <PackageReference Include="NAudio" Version="2.3.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -7,7 +7,7 @@ namespace TaskOverlay.Core;
 
 public sealed class AppState
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public List<TaskItem> Tasks { get; set; } = new();
@@ -17,6 +17,8 @@ public sealed class AppState
     public List<TaskWorkSession> TaskWorkSessions { get; set; } = new();
     public List<SourceDocument> ContextSources { get; set; } = new();
     public List<ContextItem> ContextItems { get; set; } = new();
+    public List<MeetingRecording> MeetingRecordings { get; set; } = new();
+    public List<MeetingAnalysis> MeetingAnalyses { get; set; } = new();
     public OverlaySettings OverlaySettings { get; set; } = new();
     public WindowPlacement WindowPlacement { get; set; } = new();
     public TreeManagerSettings TreeManagerSettings { get; set; } = new();
@@ -105,6 +107,8 @@ public sealed class MeetingItem
     public string Location { get; set; } = string.Empty;
     public string Link { get; set; } = string.Empty;
     public Guid? LinkedTaskId { get; set; }
+    public MeetingRecordingPolicy RecordingPolicy { get; set; } =
+        MeetingRecordingPolicy.Inherit;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
@@ -275,6 +279,7 @@ public sealed class TaskItem
     // pin/priority of its own. Checkpoint state is independent of parent task
     // status; marking the parent DONE must not mutate checkpoint states.
     public List<CheckpointItem>? Checkpoints { get; set; }
+    public List<TaskSourceReference>? SourceReferences { get; set; }
 
     public Guid? ProjectId { get; set; }
     public Guid? GroupId { get; set; }

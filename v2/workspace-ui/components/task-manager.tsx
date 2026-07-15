@@ -158,6 +158,10 @@ export function TaskManager() {
   const tasks = bridge.data?.tasks ?? mockTasks
   const taskWorkSessions = bridge.data?.taskWorkSessions ?? mockTaskWorkSessions
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
+  const meetingRecordings = bridge.data?.meetingRecordings ?? []
+  const meetingAnalyses = bridge.data?.meetingAnalyses ?? []
+  const activeMeetingRecording = meetingRecordings.find((recording) =>
+    recording.state === "Recording" || recording.state === "Stopping") ?? null
   const calendarMeetItems = useMemo(
     () => meetingDraft ? [...meetItems.filter((meeting) => meeting.id !== meetingDraft.id), meetingDraft] : meetItems,
     [meetItems, meetingDraft],
@@ -1501,6 +1505,15 @@ export function TaskManager() {
             onContextPack={handleProjectContextPack}
             contextPackDisabled={!singleProjectScope}
             contextPackHint={contextPackHint}
+            activeRecording={activeMeetingRecording}
+            onStopRecording={activeMeetingRecording ? () => {
+              if (window.confirm("Stop the active recording and finalize its local files?")) {
+                bridge.sendMeetingAssistantCommand({
+                  type: "stopMeetingRecording",
+                  recordingId: activeMeetingRecording.id,
+                })
+              }
+            } : undefined}
           />
           <ProjectScopeBar
             projects={projects}
@@ -1746,6 +1759,14 @@ export function TaskManager() {
               onOpenContextHub={() => setTab("contexthub")}
               sections={sections}
               meetItems={meetItems}
+              meetingRecordings={meetingRecordings}
+              meetingAnalyses={meetingAnalyses}
+              activeRecording={activeMeetingRecording}
+              meetingAssistantError={bridge.error}
+              onClearMeetingAssistantError={bridge.clearError}
+              onMeetingAssistantCommand={connected
+                ? bridge.sendMeetingAssistantCommand
+                : undefined}
             />
           ) : tab === "workstreams" && !selectedTask && selectedWorkstreamSection && selectedWorkstreamProject ? (
             <WorkstreamDetailPanel

@@ -83,6 +83,21 @@ public sealed class MeetingService
 
         // Project memory outlives the meeting: clear navigation links only.
         new ContextService(_state).ClearMeetingLinks(meetingId, now);
+        var timestamp = now ?? DateTimeOffset.UtcNow;
+        foreach (var recording in (_state.MeetingRecordings ?? new())
+                     .Where(recording => recording.MeetId == meetingId))
+        {
+            recording.MeetId = null;
+            recording.SourceKind = MeetingRecordingSourceKind.Emergency;
+            recording.UpdatedAtUtc = timestamp;
+        }
+
+        foreach (var analysis in (_state.MeetingAnalyses ?? new())
+                     .Where(analysis => analysis.MeetId == meetingId))
+        {
+            analysis.MeetId = null;
+            analysis.UpdatedAtUtc = timestamp;
+        }
         return true;
     }
 

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace TaskOverlay.Core;
 
@@ -11,7 +12,8 @@ public sealed class LocalSettingsStore
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
     private readonly Action<string, Exception?>? _diagnostic;
 
@@ -41,7 +43,9 @@ public sealed class LocalSettingsStore
                                _jsonOptions) ??
                            new LocalAppSettings();
             settings.Backups ??= new BackupSettings();
-            if (settings.Backups.Normalize())
+            settings.MeetingAssistant ??= new MeetingAssistantSettings();
+            if (settings.Backups.Normalize() |
+                settings.MeetingAssistant.Normalize())
             {
                 Save(settings);
             }
@@ -62,7 +66,9 @@ public sealed class LocalSettingsStore
     {
         ArgumentNullException.ThrowIfNull(settings);
         settings.Backups ??= new BackupSettings();
+        settings.MeetingAssistant ??= new MeetingAssistantSettings();
         settings.Backups.Normalize();
+        settings.MeetingAssistant.Normalize();
         Directory.CreateDirectory(StateDirectory);
 
         var temporaryPath = Path.Combine(

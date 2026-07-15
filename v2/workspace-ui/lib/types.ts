@@ -139,6 +139,90 @@ export interface MeetItem {
   link?: string
   /** optional id of a related Task */
   linkedTaskId?: string
+  recordingPolicy?: MeetingRecordingPolicy
+}
+
+export type MeetingRecordingPolicy = "Inherit" | "Manual" | "AutoRecord"
+export type MeetingRecordingState =
+  | "Pending"
+  | "Recording"
+  | "Stopping"
+  | "Recorded"
+  | "Processing"
+  | "Transcribing"
+  | "TranscriptReady"
+  | "Analyzing"
+  | "Ready"
+  | "Failed"
+
+export interface MeetingRecordingSnapshot {
+  id: string
+  meetingId: string | null
+  sourceKind: "ScheduledMeet" | "ManualMeet" | "Emergency"
+  state: MeetingRecordingState
+  startedAtUtc: string | null
+  stoppedAtUtc: string | null
+  systemAudioHealth: "Unknown" | "Healthy" | "Unavailable" | "Failed"
+  microphoneHealth: "Unknown" | "Healthy" | "Unavailable" | "Failed"
+  keepLocalOnly: boolean
+  plannedEndPassed: boolean
+  hasSystemAudio: boolean
+  hasMicrophoneAudio: boolean
+  hasMixedAudio: boolean
+  hasTranscript: boolean
+  hasAnalysis: boolean
+  transcriptText: string
+  lastError: string
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
+export interface MeetingSourceReferenceSnapshot {
+  startSeconds: number | null
+  endSeconds: number | null
+  excerpt: string
+}
+
+export interface MeetingProposedActionSnapshot {
+  id: string
+  type: "CreateTask" | "CreateWaitingTask" | "CreateFollowUpTask" | "AddMeetingContextNote"
+  title: string
+  proposedProjectId: string | null
+  projectSuggestion: string
+  proposedStatus: Status
+  waitingFor: string
+  deadlineAtUtc: string | null
+  reminderAtUtc: string | null
+  sourceSegmentStart: number | null
+  sourceSegmentEnd: number | null
+  sourceExcerpt: string
+  confidence: number
+  rationale: string
+  reviewState: "Pending" | "Applied" | "Rejected" | "Failed"
+  appliedTaskId: string | null
+  appliedContextItemId: string | null
+}
+
+export interface MeetingAnalysisSnapshot {
+  id: string
+  recordingId: string
+  meetingId: string | null
+  state: "Pending" | "Analyzing" | "ReadyForReview" | "PartiallyApplied" | "Applied" | "Failed"
+  provider: string
+  model: string
+  summary: string
+  decisions: string[]
+  myActionItems: string[]
+  otherPeopleActionItems: string[]
+  waitingFor: string[]
+  risks: string[]
+  questionsToClarify: string[]
+  deadlines: string[]
+  keyQuotesOrSourceReferences: MeetingSourceReferenceSnapshot[]
+  proposedActions: MeetingProposedActionSnapshot[]
+  lastError: string
+  createdAtUtc: string
+  updatedAtUtc: string
 }
 
 /** Which panel mode is active in the right panel */
@@ -197,7 +281,7 @@ export interface ProjectScope {
 }
 
 export interface WorkspaceSnapshotContract {
-  schemaVersion: 2
+  schemaVersion: 3
   generatedAtUtc: string
   mode: "readonly" | "connected"
   projects: WorkspaceProjectSnapshot[]
@@ -205,6 +289,8 @@ export interface WorkspaceSnapshotContract {
   tasks: WorkspaceTaskSnapshot[]
   taskWorkSessions: WorkspaceTaskWorkSessionSnapshot[]
   meetings: WorkspaceMeetingSnapshot[]
+  meetingRecordings: MeetingRecordingSnapshot[]
+  meetingAnalyses: MeetingAnalysisSnapshot[]
   contextSources?: WorkspaceContextSourceSnapshot[]
   contextItems?: WorkspaceContextItemSnapshot[]
   activeNow: WorkspaceActiveNowSnapshot[]
@@ -327,6 +413,7 @@ export interface WorkspaceMeetingSnapshot {
   location: string
   link: string
   linkedTaskId: string | null
+  recordingPolicy: MeetingRecordingPolicy
   createdAtUtc: string
   updatedAtUtc: string
 }
@@ -509,6 +596,38 @@ export type WorkspaceContextHubCommand =
   | { type: "linkSourceToMeeting"; sourceId: string; meetingId: string }
   | { type: "unlinkSourceFromMeeting"; sourceId: string; meetingId: string }
 
+export interface MeetingProposedActionOverride {
+  actionId: string
+  title?: string
+  projectId?: string | null
+  status?: Status
+  waitingFor?: string
+  deadlineAtUtc?: string | null
+  reminderAtUtc?: string | null
+}
+
+export type WorkspaceMeetingAssistantCommand =
+  | { type: "startMeetingRecording"; meetingId: string }
+  | { type: "startEmergencyRecording" }
+  | { type: "stopMeetingRecording"; recordingId: string }
+  | { type: "transcribeMeetingRecording"; recordingId: string; acceptUploadDisclosure: boolean }
+  | { type: "analyzeMeetingRecording"; recordingId: string }
+  | { type: "cancelMeetingProcessing"; recordingId: string }
+  | { type: "setMeetingRecordingPolicy"; meetingId: string; policy: MeetingRecordingPolicy }
+  | { type: "setMeetingRecordingLocalOnly"; recordingId: string; keepLocalOnly: boolean }
+  | { type: "deleteMeetingRecording"; recordingId: string }
+  | { type: "linkMeetingRecording"; recordingId: string; meetingId: string }
+  | { type: "createMeetingFromRecording"; recordingId: string; projectId: string; title: string }
+  | { type: "openMeetingRecordingFolder"; recordingId: string }
+  | { type: "openMeetingLink"; meetingId: string }
+  | {
+      type: "applyMeetingProposedActions"
+      analysisId: string
+      actionIds: string[]
+      overrides: MeetingProposedActionOverride[]
+    }
+  | { type: "rejectMeetingProposedAction"; analysisId: string; actionId: string }
+
 export type WorkspaceCommand =
   | WorkspaceTaskCommand
   | WorkspaceSectionCommand
@@ -518,6 +637,7 @@ export type WorkspaceCommand =
   | WorkspaceMeetingCommand
   | WorkspaceTaskWorkSessionCommand
   | WorkspaceContextHubCommand
+  | WorkspaceMeetingAssistantCommand
 
 export type WorkspaceCommandPayload = WorkspaceCommand extends infer Command
   ? Command extends { type: string }

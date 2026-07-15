@@ -386,38 +386,26 @@ Active product scope:
 - Calendar is the MEET planning/creation surface, including visual
   drag/drop rescheduling through the connected `updateMeeting` path.
 - Default meeting duration is 30 minutes.
-- Recording, transcription, AI analysis, recurrence, calendar sync, and direct
-  provider APIs remain later work.
+- Connected MEET recording and Meeting Assistant foundation is implemented:
+  - explicit per-MEET recording policy: Off / Ask / Auto;
+  - visible local recording with separate system-audio and microphone tracks;
+  - one active recording at a time, restart recovery, and emergency recording;
+  - optional OpenAI transcription and structured meeting analysis through
+    provider interfaces;
+  - transcript, analysis, and selected ProposedActions require explicit user
+    review before existing TaskOverlay services apply mutations;
+  - audio and transcript files stay local and automatic backups contain only
+    recording metadata.
+- Recurrence, calendar sync, direct meeting-platform APIs, and live
+  transcription remain later work.
 - Handle next MEET countdown.
-- Local MEET recording MVP:
-  - Start/Stop from MEET;
-  - record system audio + mic locally;
-  - no OpenAI yet.
-- Emergency recording:
-  - start first, classify later;
-  - save as new MEET / link existing / keep recording only / transcribe /
-    delete.
-- Post-meeting transcription:
-  - explicit upload;
-  - save transcript json/md.
-- Meeting analysis:
-  - decisions;
-  - my tasks;
-  - others' tasks;
-  - waiting for;
-  - risks;
-  - questions.
-- Suggested tasks from meeting:
-  - no auto-create;
-  - user reviews checkbox list and creates selected tasks.
-- Provider abstraction:
-  - `ITranscriptionProvider`;
-  - `IMeetingAnalysisProvider`;
-  - OpenAI first, AssemblyAI/Deepgram/Local Whisper later.
-- Two-track audio:
-  - mic + system audio locally;
-  - default process mixed;
-  - better mode keeps both tracks.
+- Recording follow-ups:
+  - artifact/manual QA across real microphone and output-device combinations;
+  - recording-device hot-plug and degraded-track recovery polish;
+  - richer emergency-recording inbox and classification flow;
+  - transcript editing/search and ContextHUB source promotion;
+  - additional transcription/analysis providers, including local Whisper;
+  - chunk retry/progress polish and recording retention controls.
 
 ## Task Quality And Neuroinclusive Planning
 

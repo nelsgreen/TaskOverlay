@@ -5,15 +5,19 @@ import { CalendarDays, Clock, ExternalLink, MapPin, Save, Trash2, UndoDot, Video
 import type {
   MeetDuration,
   MeetItem,
+  MeetingAnalysisSnapshot,
+  MeetingRecordingSnapshot,
   Project,
   Section,
   Task,
   WorkspaceContextHubCommand,
   WorkspaceContextItemSnapshot,
   WorkspaceContextSourceSnapshot,
+  WorkspaceMeetingAssistantCommand,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { MeetContextBlock } from "./task-context-block"
+import { MeetingAssistantSection } from "./meeting-assistant-section"
 
 interface Props {
   meet: MeetItem | null
@@ -36,6 +40,12 @@ interface Props {
   /** Sections + all MEETs, for the Context block's Context Pack export (linked task path, related MEETs). */
   sections?: Section[]
   meetItems?: MeetItem[]
+  meetingRecordings?: MeetingRecordingSnapshot[]
+  meetingAnalyses?: MeetingAnalysisSnapshot[]
+  activeRecording?: MeetingRecordingSnapshot | null
+  meetingAssistantError?: string | null
+  onClearMeetingAssistantError?: () => void
+  onMeetingAssistantCommand?: (command: WorkspaceMeetingAssistantCommand) => boolean
 }
 
 const durationOptions: { value: MeetDuration; label: string }[] = [
@@ -106,6 +116,12 @@ export function MeetDetailsPanel({
   onOpenContextHub,
   sections = [],
   meetItems = [],
+  meetingRecordings = [],
+  meetingAnalyses = [],
+  activeRecording = null,
+  meetingAssistantError = null,
+  onClearMeetingAssistantError,
+  onMeetingAssistantCommand,
 }: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
   const sessionBaseRef = useRef<MeetItem | null>(meet)
@@ -370,6 +386,21 @@ export function MeetDetailsPanel({
         </div>
 
         {/* ── CONTEXT — linked ContextHUB SourceDocuments/ContextItems (MEET-only MVP) ── */}
+        {onMeetingAssistantCommand && (
+          <MeetingAssistantSection
+            meet={draft}
+            projects={projects}
+            recordings={meetingRecordings}
+            analyses={meetingAnalyses}
+            unclassifiedRecordings={meetingRecordings.filter((recording) => !recording.meetingId)}
+            activeRecording={activeRecording}
+            readOnly={readOnly}
+            commandError={meetingAssistantError}
+            onClearError={onClearMeetingAssistantError}
+            onCommand={onMeetingAssistantCommand}
+          />
+        )}
+
         {onContextCommand && onOpenContextHub && (
           <MeetContextBlock
             meet={draft}

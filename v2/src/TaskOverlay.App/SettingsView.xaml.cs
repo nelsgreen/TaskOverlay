@@ -11,6 +11,12 @@ namespace TaskOverlay.App;
 
 internal sealed record SettingsHotkeyItem(string Label, string Key);
 internal sealed record TelegramProjectOption(Guid Id, string Name);
+internal sealed record MeetingRecordingPolicyOption(
+    MeetingRecordingPolicy Value,
+    string Label);
+internal sealed record MeetingLanguageOption(
+    MeetingTranscriptLanguage Value,
+    string Label);
 
 public partial class SettingsView : UserControl
 {
@@ -54,6 +60,23 @@ public partial class SettingsView : UserControl
         InitializeComponent();
         ModeListBox.ItemsSource = OverlayModeDisplay.UserModes;
         HotkeyItems.ItemsSource = BuildHotkeyItems();
+        MeetingRecordingPolicyComboBox.ItemsSource =
+            new[]
+            {
+                new MeetingRecordingPolicyOption(
+                    MeetingRecordingPolicy.Manual,
+                    "Manual"),
+                new MeetingRecordingPolicyOption(
+                    MeetingRecordingPolicy.AutoRecord,
+                    "Auto-record")
+            };
+        MeetingLanguageComboBox.ItemsSource =
+            new[]
+            {
+                new MeetingLanguageOption(MeetingTranscriptLanguage.Auto, "Auto"),
+                new MeetingLanguageOption(MeetingTranscriptLanguage.Russian, "Russian"),
+                new MeetingLanguageOption(MeetingTranscriptLanguage.English, "English")
+            };
         _updatingControls = false;
         UpdateFromSettings();
     }
@@ -119,6 +142,7 @@ public partial class SettingsView : UserControl
             UpdateValueLabels();
             UpdateBackupControls();
             UpdateTelegramControls();
+            UpdateMeetingAssistantControls();
         }
         finally
         {
@@ -647,6 +671,171 @@ public partial class SettingsView : UserControl
         _actions.ResetWindowPositions();
         DiagnosticsStatusText.Text =
             "Saved window positions were cleared for the next placement.";
+    }
+
+    private void MeetingAssistantSettings_OnChanged(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (!_updatingControls)
+        {
+            CommitMeetingAssistantSettings();
+        }
+    }
+
+    private void MeetingAssistantSettings_OnSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (!_updatingControls)
+        {
+            CommitMeetingAssistantSettings();
+        }
+    }
+
+    private void MeetingAssistantSettings_OnLostKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+    {
+        if (!_updatingControls)
+        {
+            CommitMeetingAssistantSettings();
+        }
+    }
+
+    private void OpenMeetingRecordingsFolderButton_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        MeetingAssistantStatusText.Text = _actions.OpenMeetingRecordingsFolder()
+            ? "Opened the local recordings folder."
+            : "The recordings folder could not be opened.";
+    }
+
+    private void UpdateOpenAiApiKeyButton_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        var key = OpenAiApiKeyPasswordBox.Password;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            MeetingAssistantStatusText.Text =
+                "Enter an API key before choosing Update key.";
+            return;
+        }
+
+        MeetingAssistantStatusText.Text = _actions.SaveOpenAiApiKey(key)
+            ? "OpenAI API key saved with Windows user protection."
+            : "OpenAI API key could not be saved.";
+        OpenAiApiKeyPasswordBox.Clear();
+        UpdateMeetingAssistantKeyStatus();
+    }
+
+    private void ClearOpenAiApiKeyButton_OnClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        MeetingAssistantStatusText.Text = _actions.ClearOpenAiApiKey()
+            ? "OpenAI API key removed."
+            : "OpenAI API key could not be removed.";
+        OpenAiApiKeyPasswordBox.Clear();
+        UpdateMeetingAssistantKeyStatus();
+    }
+
+    private void UpdateMeetingAssistantControls()
+    {
+        if (AutomaticMeetingRecordingCheckBox is null)
+        {
+            return;
+        }
+
+        var settings = _actions.GetMeetingAssistantSettings();
+        var microphones = BuildAudioDeviceOptions(
+            _actions.GetMicrophoneDevices(),
+            "Default microphone");
+        var outputs = BuildAudioDeviceOptions(
+            _actions.GetSystemOutputDevices(),
+            "Default system output");
+        var wasUpdating = _updatingControls;
+        _updatingControls = true;
+        try
+        {
+            AutomaticMeetingRecordingCheckBox.IsChecked =
+                settings.AutomaticRecordingEnabled;
+            AutoTranscribeMeetingCheckBox.IsChecked =
+                settings.AutoTranscribeAfterStop;
+            MeetingRecordingPolicyComboBox.SelectedValue =
+                settings.DefaultRecordingPolicy;
+            MeetingMicrophoneComboBox.ItemsSource = microphones;
+            MeetingMicrophoneComboBox.SelectedValue =
+                microphones.Any(item => item.Id == settings.MicrophoneDeviceId)
+                    ? settings.MicrophoneDeviceId
+                    : string.Empty;
+            MeetingSystemOutputComboBox.ItemsSource = outputs;
+            MeetingSystemOutputComboBox.SelectedValue =
+                outputs.Any(item => item.Id == settings.SystemOutputDeviceId)
+                    ? settings.SystemOutputDeviceId
+                    : string.Empty;
+            MeetingTranscriptionModelTextBox.Text = settings.TranscriptionModel;
+            MeetingAnalysisModelTextBox.Text = settings.AnalysisModel;
+            MeetingLanguageComboBox.SelectedValue = settings.Language;
+            OpenAiApiKeyPasswordBox.Clear();
+            UpdateMeetingAssistantKeyStatus();
+        }
+        finally
+        {
+            _updatingControls = wasUpdating;
+        }
+    }
+
+    private void CommitMeetingAssistantSettings()
+    {
+        var settings = _actions.GetMeetingAssistantSettings();
+        settings.AutomaticRecordingEnabled =
+            AutomaticMeetingRecordingCheckBox.IsChecked == true;
+        settings.AutoTranscribeAfterStop =
+            AutoTranscribeMeetingCheckBox.IsChecked == true;
+        if (MeetingRecordingPolicyComboBox.SelectedValue is
+            MeetingRecordingPolicy policy)
+        {
+            settings.DefaultRecordingPolicy = policy;
+        }
+
+        settings.MicrophoneDeviceId =
+            MeetingMicrophoneComboBox.SelectedValue as string ?? string.Empty;
+        settings.SystemOutputDeviceId =
+            MeetingSystemOutputComboBox.SelectedValue as string ?? string.Empty;
+        settings.TranscriptionModel = MeetingTranscriptionModelTextBox.Text;
+        settings.AnalysisModel = MeetingAnalysisModelTextBox.Text;
+        if (MeetingLanguageComboBox.SelectedValue is
+            MeetingTranscriptLanguage language)
+        {
+            settings.Language = language;
+        }
+
+        settings.Normalize();
+        _actions.SaveMeetingAssistantSettings();
+        MeetingAssistantStatusText.Text = "Meeting Assistant settings saved.";
+    }
+
+    private void UpdateMeetingAssistantKeyStatus()
+    {
+        OpenAiApiKeyStatusText.Text = _actions.HasOpenAiApiKey()
+            ? "API key saved. Enter a new key only when replacing it."
+            : "No OpenAI API key saved.";
+    }
+
+    private static IReadOnlyList<AudioDeviceDescriptor> BuildAudioDeviceOptions(
+        IReadOnlyList<AudioDeviceDescriptor> devices,
+        string defaultLabel)
+    {
+        var options = new List<AudioDeviceDescriptor>
+        {
+            new(string.Empty, defaultLabel, true)
+        };
+        options.AddRange(devices.Where(device =>
+            !string.IsNullOrWhiteSpace(device.Id)));
+        return options;
     }
 
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)

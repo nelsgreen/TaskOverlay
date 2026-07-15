@@ -104,10 +104,22 @@ item.
   MEET; opening the linked task must be an explicit action from MEET Details.
 - Workstreams are context recovery, not a Kanban/status board/Calendar.
 - Direct meeting service integrations are not MVP.
-- Basic MEET CRUD is connected through the WebView2 bridge. Recording,
-  transcription, AI analysis, recurrence, calendar sync, and provider APIs are
-  explicitly later features.
-- AI suggests tasks; the user confirms selected tasks.
+- Basic MEET CRUD and the local recording/Meeting Assistant foundation are
+  connected through the WebView2 bridge. Recording uses local Windows audio
+  capture with separate system-audio and microphone tracks and permits only
+  one active recording. Auto-record is an explicit per-MEET opt-in and remains
+  visibly indicated while active; emergency recording may start before a MEET
+  is classified.
+- Audio/transcript payloads remain in the local recording folder. `state.json`
+  stores metadata, relative paths, analysis, and review state; automatic
+  backups do not copy audio or transcript files. The optional OpenAI API key
+  is protected separately with Windows DPAPI and is never stored in
+  `state.json` or logs.
+- Transcription and structured meeting analysis use provider interfaces.
+  ProposedActions never mutate state directly: the user reviews and selects
+  actions, and apply routes through existing TaskOverlay domain services.
+- Recurrence, calendar sync, live transcription, direct meeting-platform APIs,
+  and automatic action application remain later features.
 - No embedded ChatGPT window inside the app.
 - Reminder repeat is a flat minute interval (`remindEveryMinutes`). Monthly
   repeat is not connected until a calendar-aware recurrence model exists.
@@ -155,16 +167,17 @@ item.
 - Deleting a task/MEET/source repairs links; it never deletes context records.
 - Deleting a SourceDocument keeps derived ContextItems and only removes the
   source reference.
-- Future OpenAI meeting analysis, transcription, and Telegram capture will
-  write into this layer as drafts that require explicit user review before
-  anything is created.
+- Telegram capture writes into this layer as drafts that require explicit user
+  review before anything is created. MEET transcription and analysis now have
+  a connected local recording/review foundation; promoting transcripts into
+  ContextHUB sources remains follow-up work.
 - Future AI-assisted analysis (meeting analysis, capture interpretation,
   suggested tasks, etc.) follows one pipeline: raw input -> SourceDocument/
   Capture -> `AIAnalysisRun` -> `ProposedAction[]` -> a Review UI -> apply
   through the existing connected services, only after explicit user
-  confirmation. AI must never mutate tasks/MEET/context directly. AI
-  ProposedActions are not started yet - this records the intended shape for
-  when that work begins.
+  confirmation. AI must never mutate tasks/MEET/context directly. The MEET
+  Assistant implements the first bounded ProposedActions review/apply path;
+  future AI features must reuse the same explicit-review boundary.
 - Context Pack is a read-only export generated from stored TaskOverlay data;
   deprecated/superseded items are excluded by default. Not shipped in the
   foundation PR (expanded export shipped later - see the Context Pack entry

@@ -17,6 +17,8 @@ public static class StateMigrator
         state.TaskWorkSessions ??= new List<TaskWorkSession>();
         state.ContextSources ??= new List<SourceDocument>();
         state.ContextItems ??= new List<ContextItem>();
+        state.MeetingRecordings ??= new List<MeetingRecording>();
+        state.MeetingAnalyses ??= new List<MeetingAnalysis>();
         state.WorkspaceSettings ??= new WorkspaceSettings();
         state.TelegramCapture ??= new TelegramCaptureSettings();
 
@@ -31,6 +33,11 @@ public static class StateMigrator
                 case 2:
                     MigrateLegacyPlannedWork(state);
                     state.SchemaVersion = 3;
+                    break;
+                case 3:
+                    state.MeetingRecordings ??= new List<MeetingRecording>();
+                    state.MeetingAnalyses ??= new List<MeetingAnalysis>();
+                    state.SchemaVersion = 4;
                     break;
                 default:
                     throw new InvalidDataException(
@@ -112,6 +119,18 @@ public static class StateMigrator
         if (state.ContextItems is null)
         {
             state.ContextItems = new List<ContextItem>();
+            changed = true;
+        }
+
+        if (state.MeetingRecordings is null)
+        {
+            state.MeetingRecordings = new List<MeetingRecording>();
+            changed = true;
+        }
+
+        if (state.MeetingAnalyses is null)
+        {
+            state.MeetingAnalyses = new List<MeetingAnalysis>();
             changed = true;
         }
 
@@ -339,6 +358,12 @@ public static class StateMigrator
                 changed = true;
             }
 
+            if (!Enum.IsDefined(meeting.RecordingPolicy))
+            {
+                meeting.RecordingPolicy = MeetingRecordingPolicy.Inherit;
+                changed = true;
+            }
+
             if (meeting.CreatedAtUtc == default)
             {
                 meeting.CreatedAtUtc = meeting.StartsAtUtc;
@@ -511,6 +536,154 @@ public static class StateMigrator
             }
         }
 
+        var recordingIds = new HashSet<Guid>();
+        foreach (var recording in state.MeetingRecordings)
+        {
+            if (recording.Id == Guid.Empty || !recordingIds.Add(recording.Id))
+            {
+                recording.Id = Guid.NewGuid();
+                recordingIds.Add(recording.Id);
+                changed = true;
+            }
+
+            if (recording.MeetId is Guid recordingMeetId && !meetingIds.Contains(recordingMeetId))
+            {
+                recording.MeetId = null;
+                recording.SourceKind = MeetingRecordingSourceKind.Emergency;
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(recording.SourceKind))
+            {
+                recording.SourceKind = recording.MeetId.HasValue
+                    ? MeetingRecordingSourceKind.ManualMeet
+                    : MeetingRecordingSourceKind.Emergency;
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(recording.State))
+            {
+                recording.State = MeetingRecordingState.Failed;
+                recording.LastError = "Recording state was invalid; original files were kept.";
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(recording.SystemAudioHealth))
+            {
+                recording.SystemAudioHealth = AudioTrackHealth.Unknown;
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(recording.MicrophoneHealth))
+            {
+                recording.MicrophoneHealth = AudioTrackHealth.Unknown;
+                changed = true;
+            }
+
+            var folder = RecordingPathPolicy.NormalizeRelativePath(
+                recording.RecordingFolderRelativePath);
+            if (!RecordingPathPolicy.IsSafeRelativePath(folder))
+            {
+                folder = $"meetings/emergency/recordings/{recording.Id:N}";
+                recording.State = MeetingRecordingState.Failed;
+                recording.LastError =
+                    "Recording path was invalid. Locate the original files and retry.";
+                changed = true;
+            }
+
+            if (recording.RecordingFolderRelativePath != folder)
+            {
+                recording.RecordingFolderRelativePath = folder;
+                changed = true;
+            }
+
+            recording.TranscriptionChunkFiles ??= new List<string>();
+            changed |= NormalizeRecordingFileNames(recording);
+            recording.LastError = NormalizeBounded(recording.LastError, 2_000);
+            if (recording.CreatedAtUtc == default)
+            {
+                recording.CreatedAtUtc = recording.StartedAtUtc ?? DateTimeOffset.UtcNow;
+                changed = true;
+            }
+
+            if (recording.UpdatedAtUtc == default)
+            {
+                recording.UpdatedAtUtc = recording.CreatedAtUtc;
+                changed = true;
+            }
+        }
+
+        var analysisIds = new HashSet<Guid>();
+        foreach (var analysis in state.MeetingAnalyses.ToList())
+        {
+            if (!recordingIds.Contains(analysis.RecordingId))
+            {
+                state.MeetingAnalyses.Remove(analysis);
+                changed = true;
+                continue;
+            }
+
+            if (analysis.Id == Guid.Empty || !analysisIds.Add(analysis.Id))
+            {
+                analysis.Id = Guid.NewGuid();
+                analysisIds.Add(analysis.Id);
+                changed = true;
+            }
+
+            if (analysis.MeetId is Guid analysisMeetId && !meetingIds.Contains(analysisMeetId))
+            {
+                analysis.MeetId = null;
+                changed = true;
+            }
+
+            analysis.Provider = NormalizeBounded(analysis.Provider, 100);
+            analysis.Model = NormalizeBounded(analysis.Model, 100);
+            analysis.Summary = NormalizeBounded(analysis.Summary, 100_000);
+            analysis.LastError = NormalizeBounded(analysis.LastError, 2_000);
+            analysis.Decisions ??= new List<string>();
+            analysis.MyActionItems ??= new List<string>();
+            analysis.OtherPeopleActionItems ??= new List<string>();
+            analysis.WaitingFor ??= new List<string>();
+            analysis.Risks ??= new List<string>();
+            analysis.QuestionsToClarify ??= new List<string>();
+            analysis.Deadlines ??= new List<string>();
+            analysis.KeyQuotesOrSourceReferences ??= new List<MeetingSourceReference>();
+            analysis.ProposedActions ??= new List<ProposedAction>();
+            foreach (var action in analysis.ProposedActions)
+            {
+                if (action.Id == Guid.Empty)
+                {
+                    action.Id = Guid.NewGuid();
+                    changed = true;
+                }
+
+                action.Title = NormalizeBounded(action.Title, 500);
+                action.ProjectSuggestion = NormalizeBounded(action.ProjectSuggestion, 500);
+                action.WaitingFor = NormalizeBounded(action.WaitingFor, 300);
+                action.SourceExcerpt = NormalizeBounded(action.SourceExcerpt, 5_000);
+                action.Rationale = NormalizeBounded(action.Rationale, 5_000);
+                action.Confidence = Math.Clamp(action.Confidence, 0, 1);
+                if (action.ProposedProjectId is Guid actionProjectId &&
+                    !projectIds.Contains(actionProjectId))
+                {
+                    action.ProposedProjectId = null;
+                    changed = true;
+                }
+            }
+
+            if (analysis.CreatedAtUtc == default)
+            {
+                analysis.CreatedAtUtc = DateTimeOffset.UtcNow;
+                changed = true;
+            }
+
+            if (analysis.UpdatedAtUtc == default)
+            {
+                analysis.UpdatedAtUtc = analysis.CreatedAtUtc;
+                changed = true;
+            }
+        }
+
         var visitState = new Dictionary<Guid, int>();
         foreach (var task in state.Tasks)
         {
@@ -536,6 +709,23 @@ public static class StateMigrator
 
         void RepairTask(TaskItem task)
         {
+            if (task.SourceReferences is not null)
+            {
+                var originalCount = task.SourceReferences.Count;
+                task.SourceReferences = task.SourceReferences
+                    .Where(reference =>
+                        reference is not null &&
+                        recordingIds.Contains(reference.RecordingId) &&
+                        analysisIds.Contains(reference.AnalysisId))
+                    .GroupBy(reference => reference.ProposedActionId)
+                    .Select(group => group.First())
+                    .ToList();
+                if (task.SourceReferences.Count != originalCount)
+                {
+                    changed = true;
+                }
+            }
+
             if (visitState.TryGetValue(task.Id, out var currentState))
             {
                 if (currentState == 1)
@@ -567,6 +757,59 @@ public static class StateMigrator
             }
 
             visitState[task.Id] = 2;
+        }
+
+        bool NormalizeRecordingFileNames(MeetingRecording recording)
+        {
+            var fileChanged = false;
+            recording.SystemAudioFile = NormalizeFile(recording.SystemAudioFile, ref fileChanged);
+            recording.MicrophoneFile = NormalizeFile(recording.MicrophoneFile, ref fileChanged);
+            recording.MixedAudioFile = NormalizeFile(recording.MixedAudioFile, ref fileChanged);
+            recording.TranscriptRawFile = NormalizeFile(recording.TranscriptRawFile, ref fileChanged);
+            recording.TranscriptFile = NormalizeFile(recording.TranscriptFile, ref fileChanged);
+            recording.TranscriptMarkdownFile = NormalizeFile(recording.TranscriptMarkdownFile, ref fileChanged);
+            recording.AnalysisFile = NormalizeFile(recording.AnalysisFile, ref fileChanged);
+            for (var index = recording.TranscriptionChunkFiles.Count - 1; index >= 0; index--)
+            {
+                var original = recording.TranscriptionChunkFiles[index];
+                var normalized = NormalizeFile(original, ref fileChanged);
+                if (normalized.Length == 0)
+                {
+                    recording.TranscriptionChunkFiles.RemoveAt(index);
+                    fileChanged = true;
+                }
+                else
+                {
+                    recording.TranscriptionChunkFiles[index] = normalized;
+                }
+            }
+
+            return fileChanged;
+        }
+
+        static string NormalizeFile(string? value, ref bool fileChanged)
+        {
+            var normalized = value?.Trim() ?? string.Empty;
+            if (normalized.Length > 0 &&
+                (Path.IsPathRooted(normalized) || normalized.Contains("..", StringComparison.Ordinal)))
+            {
+                normalized = string.Empty;
+            }
+
+            if (value != normalized)
+            {
+                fileChanged = true;
+            }
+
+            return normalized;
+        }
+
+        static string NormalizeBounded(string? value, int maximumLength)
+        {
+            var normalized = value?.Trim() ?? string.Empty;
+            return normalized.Length <= maximumLength
+                ? normalized
+                : normalized[..maximumLength];
         }
 
         // Removes empty, duplicate, and dangling ids in place.

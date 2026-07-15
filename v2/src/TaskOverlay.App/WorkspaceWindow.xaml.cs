@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
 using TaskOverlay.Core;
@@ -17,18 +19,26 @@ public partial class WorkspaceWindow : Window
 
     private readonly AppState _state;
     private readonly WorkspaceCommandDispatcher _commandDispatcher;
+    private readonly Func<string, CancellationToken, Task<WorkspaceCommandResult?>>?
+        _runtimeCommandHandler;
+    private readonly Func<MeetingRecording, string?>? _transcriptLoader;
     private bool _initialized;
 
     public WorkspaceWindow(
         AppState state,
         Action saveState,
-        Action stateChanged)
+        Action stateChanged,
+        Func<string, CancellationToken, Task<WorkspaceCommandResult?>>?
+            runtimeCommandHandler = null,
+        Func<MeetingRecording, string?>? transcriptLoader = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _commandDispatcher = new WorkspaceCommandDispatcher(
             _state,
             saveState,
             stateChanged);
+        _runtimeCommandHandler = runtimeCommandHandler;
+        _transcriptLoader = transcriptLoader;
         InitializeComponent();
     }
 
@@ -139,7 +149,7 @@ public partial class WorkspaceWindow : Window
         ShowError($"Workspace failed to load: {e.WebErrorStatus}");
     }
 
-    private void CoreWebView2_OnWebMessageReceived(
+    private async void CoreWebView2_OnWebMessageReceived(
         object? sender,
         CoreWebView2WebMessageReceivedEventArgs e)
     {
@@ -151,7 +161,12 @@ public partial class WorkspaceWindow : Window
         WorkspaceCommandResult result;
         try
         {
-            result = _commandDispatcher.Dispatch(e.WebMessageAsJson);
+            result = _runtimeCommandHandler is null
+                ? _commandDispatcher.Dispatch(e.WebMessageAsJson)
+                : await _runtimeCommandHandler(
+                      e.WebMessageAsJson,
+                      CancellationToken.None) ??
+                  _commandDispatcher.Dispatch(e.WebMessageAsJson);
         }
         catch (Exception)
         {
@@ -194,7 +209,8 @@ public partial class WorkspaceWindow : Window
     {
         var snapshot = WorkspaceSnapshotFactory.Create(
             _state,
-            mode: WorkspaceSnapshotFactory.ConnectedMode);
+            mode: WorkspaceSnapshotFactory.ConnectedMode,
+            transcriptLoader: _transcriptLoader);
         SendMessage(snapshot);
     }
 
