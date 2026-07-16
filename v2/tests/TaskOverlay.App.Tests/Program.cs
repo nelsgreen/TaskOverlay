@@ -47,6 +47,7 @@ internal static class Program
             ("recording metadata maps files by track kind", RecordingMetadataMapsFilesByTrackKind),
             ("transcription prefers finalized mixed audio", TranscriptionPrefersFinalizedMixedAudio),
             ("transcription multipart uploads exact mixed bytes", TranscriptionMultipartUploadsExactMixedBytes),
+            ("transcription multipart configures diarization models", TranscriptionMultipartConfiguresDiarizationModels),
             ("transcription targets selected recording and snapshot", TranscriptionTargetsSelectedRecordingAndSnapshot),
             ("transcription retry clears stale artifacts", TranscriptionRetryClearsStaleArtifacts),
             ("compact transcription rejects missing mixed track", CompactTranscriptionRejectsMissingMixedTrack),
@@ -1118,6 +1119,48 @@ internal static class Program
         }
     }
 
+    private static async Task TranscriptionMultipartConfiguresDiarizationModels()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var audioPath = Path.Combine(directory, "mixed.m4a");
+            File.WriteAllBytes(audioPath, Encoding.UTF8.GetBytes("synthetic mixed audio"));
+
+            async Task<IReadOnlyDictionary<string, string>> CaptureFieldsAsync(string model)
+            {
+                var handler = new CapturingMultipartHandler();
+                using var client = new HttpClient(handler);
+                var provider = new OpenAiTranscriptionProvider(
+                    () => "synthetic-key",
+                    client);
+                await provider.TranscribeAsync(new TranscriptionProviderRequest(
+                    audioPath,
+                    model,
+                    MeetingTranscriptLanguage.Auto,
+                    TimeSpan.Zero));
+                return handler.Fields;
+            }
+
+            var diarized = await CaptureFieldsAsync("gpt-4o-transcribe-diarize");
+            Assert(diarized.GetValueOrDefault("response_format") == "diarized_json" &&
+                   diarized.GetValueOrDefault("chunking_strategy") == "auto",
+                "Diarization requests must send diarized_json with automatic chunking.");
+
+            foreach (var model in new[] { "gpt-4o-transcribe", "gpt-4o-mini-transcribe" })
+            {
+                var normal = await CaptureFieldsAsync(model);
+                Assert(normal.GetValueOrDefault("response_format") == "json" &&
+                       !normal.ContainsKey("chunking_strategy"),
+                    $"Normal transcription model {model} must not send diarization fields.");
+            }
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
     private static async Task TranscriptionTargetsSelectedRecordingAndSnapshot()
     {
         await using var fixture = new TranscriptionFixture();
@@ -1645,6 +1688,8 @@ internal static class Program
         public byte[] UploadedBytes { get; private set; } = Array.Empty<byte>();
         public string FileName { get; private set; } = string.Empty;
         public string ContentType { get; private set; } = string.Empty;
+        public IReadOnlyDictionary<string, string> Fields { get; private set; } =
+            new Dictionary<string, string>(StringComparer.Ordinal);
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -1662,6 +1707,17 @@ internal static class Program
             FileName = (file.Headers.ContentDisposition?.FileNameStar ??
                         file.Headers.ContentDisposition?.FileName ?? string.Empty).Trim('"');
             ContentType = file.Headers.ContentType?.MediaType ?? string.Empty;
+            var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var content in multipart.Where(content => !ReferenceEquals(content, file)))
+            {
+                var name = content.Headers.ContentDisposition?.Name?.Trim('"');
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    fields[name] = await content.ReadAsStringAsync(cancellationToken);
+                }
+            }
+
+            Fields = fields;
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(

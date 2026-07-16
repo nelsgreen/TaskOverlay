@@ -91,6 +91,11 @@ public sealed class OpenAiTranscriptionProvider : ITranscriptionProvider
                         ? "verbose_json"
                         : "json"),
             "response_format");
+        if (wantsDiarization)
+        {
+            form.Add(new StringContent("auto"), "chunking_strategy");
+        }
+
         if (wantsWhisperSegments)
         {
             form.Add(new StringContent("segment"), "timestamp_granularities[]");
