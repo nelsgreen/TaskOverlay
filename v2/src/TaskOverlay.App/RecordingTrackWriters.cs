@@ -31,7 +31,8 @@ public sealed record RecordingTrackWriterStartRequest(
     string BaseFileName,
     int PreferredChannels,
     int PreferredSampleRate = 48_000,
-    int PreferredBitrate = 96_000);
+    int PreferredBitrate = 96_000,
+    Guid RecordingId = default);
 
 public interface IRecordingTrackWriter : IAsyncDisposable
 {

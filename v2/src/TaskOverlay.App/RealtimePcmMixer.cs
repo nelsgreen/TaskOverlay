@@ -60,7 +60,8 @@ public sealed class RealtimePcmMixer : IAsyncDisposable
 
     public async Task StartAsync(
         string recordingFolder,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid recordingId = default)
     {
         await _writer.StartAsync(
             new RecordingTrackWriterStartRequest(
@@ -68,7 +69,8 @@ public sealed class RealtimePcmMixer : IAsyncDisposable
                 recordingFolder,
                 "mixed",
                 PreferredChannels: 1,
-                PreferredSampleRate: MixSampleRate),
+                PreferredSampleRate: MixSampleRate,
+                RecordingId: recordingId),
             cancellationToken);
         if (_writer.InputFormat.SampleRate != MixSampleRate ||
             _writer.InputFormat.Channels != 1 ||

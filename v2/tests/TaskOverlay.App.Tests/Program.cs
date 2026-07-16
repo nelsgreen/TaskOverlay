@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,6 +25,12 @@ internal static class Program
             ("stop without runtime reconciles stale state", StopWithoutRuntimeReconcilesStaleState),
             ("active runtime remains owned by its MEET", ActiveRuntimeRemainsOwnedByItsMeet),
             ("recording writer factory selects explicit format", RecordingWriterFactorySelectsExplicitFormat),
+            ("AAC writer owns COM lifecycle on one MTA thread", AacWriterOwnsLifecycleOnOneMtaThread),
+            ("three AAC writers keep isolated owner threads", ThreeAacWritersKeepIsolatedOwnerThreads),
+            ("three Media Foundation AAC tracks finalize together", ThreeMediaFoundationAacTracksFinalizeTogether),
+            ("AAC bounded queue keeps producers non-blocking", AacBoundedQueueKeepsProducersNonBlocking),
+            ("AAC finalization failure preserves current file and permits retry", AacFinalizationFailurePreservesCurrentFileAndPermitsRetry),
+            ("AAC abort and disposal release on owner thread", AacAbortAndDisposalReleaseOnOwnerThread),
             ("direct Media Foundation AAC writes finalized M4A", DirectMediaFoundationAacWritesFinalizedM4a),
             ("lossless writer creates WAV only", LosslessWriterCreatesWavOnly),
             ("real-time mixer supports partial source combinations", RealTimeMixerSupportsPartialSources),
@@ -31,6 +38,8 @@ internal static class Program
             ("bounded writer backpressure is explicit", BoundedWriterBackpressureIsExplicit),
             ("encoder initialization failure has no WAV fallback", EncoderInitializationFailureHasNoWavFallback),
             ("mid-stream encoder failure remains retryable", MidStreamEncoderFailureRemainsRetryable),
+            ("recording finalization failure is concise and retryable", RecordingFinalizationFailureIsConciseAndRetryable),
+            ("recording format command uses local settings boundary", RecordingFormatCommandUsesLocalSettingsBoundary),
             ("transcription prefers finalized mixed audio", TranscriptionPrefersFinalizedMixedAudio),
             ("recording format setting is local and defaults compact", RecordingFormatSettingIsLocalAndDefaultsCompact),
             ("legacy WAV migration and interrupted recovery are idempotent", LegacyWavMigrationAndInterruptedRecoveryAreIdempotent)
@@ -214,6 +223,68 @@ internal static class Program
             "Selecting another MEET must not transfer runtime recording ownership.");
     }
 
+    private static async Task RecordingFinalizationFailureIsConciseAndRetryable()
+    {
+        await using var fixture = new RecordingFixture();
+        fixture.Recorder.FailNextStop = true;
+        var start = await fixture.SendAsync(
+            "startMeetingRecording",
+            new { meetingId = fixture.Meeting.Id.ToString("N") });
+        Assert(start.Success, start.ErrorMessage ?? "Start command failed.");
+        var recording = fixture.State.MeetingRecordings.Single(item => item.IsActive);
+
+        var stop = await fixture.SendAsync(
+            "stopMeetingRecording",
+            new { recordingId = recording.Id.ToString("N") });
+        const string expected =
+            "Recording could not be finalized. " +
+            "The incomplete files were preserved for diagnostics.";
+        Assert(!stop.Success && stop.ErrorMessage == expected &&
+               recording.State == MeetingRecordingState.Failed &&
+               recording.LastError == expected,
+            "Finalization failure must expose a concise retryable UI message.");
+        Assert(recording.Tracks.Count == 3 &&
+               recording.Tracks.All(track =>
+                   track.ValidationState == MeetingRecordingValidationState.Invalid &&
+                   track.Error.Contains("E_NOINTERFACE", StringComparison.Ordinal)),
+            "Technical COM details must remain attached to failed track metadata.");
+        Assert(fixture.Diagnostics.Any(message =>
+                message.Contains("E_NOINTERFACE", StringComparison.Ordinal)),
+            "Full finalization diagnostics must be logged outside the compact UI error.");
+        Assert(fixture.Recorder.Status.RecordingId is null,
+            "A terminal finalization failure must clear the runtime recording lock.");
+
+        var retry = await fixture.SendAsync(
+            "startMeetingRecording",
+            new { meetingId = fixture.Meeting.Id.ToString("N") });
+        Assert(retry.Success && fixture.Recorder.StartCount == 2,
+            "Start recording must be available after a terminal finalization failure.");
+    }
+
+    private static async Task RecordingFormatCommandUsesLocalSettingsBoundary()
+    {
+        await using var fixture = new RecordingFixture();
+        var change = await fixture.SendAsync(
+            "setMeetingRecordingFormat",
+            new { format = "Wav" });
+        Assert(change.Success &&
+               fixture.LocalSettings.MeetingAssistant.RecordingFormat == MeetingRecordingFormat.Wav &&
+               fixture.LocalSettingsSaveCount == 1,
+            "Switch to Lossless WAV must persist through the local-settings boundary.");
+
+        var start = await fixture.SendAsync(
+            "startMeetingRecording",
+            new { meetingId = fixture.Meeting.Id.ToString("N") });
+        Assert(start.Success, start.ErrorMessage ?? "Start command failed.");
+        var blocked = await fixture.SendAsync(
+            "setMeetingRecordingFormat",
+            new { format = "AacM4a" });
+        Assert(!blocked.Success &&
+               fixture.LocalSettings.MeetingAssistant.RecordingFormat == MeetingRecordingFormat.Wav &&
+               fixture.LocalSettingsSaveCount == 1,
+            "Recording format must not change while a live recorder owns the runtime lock.");
+    }
+
     private static Task RecordingWriterFactorySelectsExplicitFormat()
     {
         var factory = new RecordingTrackWriterFactory();
@@ -223,6 +294,298 @@ internal static class Program
         Assert(factory.Create(MeetingRecordingFormat.Wav) is WaveTrackWriter,
             "Lossless format must select the independent WAV writer.");
         return Task.CompletedTask;
+    }
+
+    private static async Task AacWriterOwnsLifecycleOnOneMtaThread()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new TrackingAacSessionFactory();
+            await using var writer = new MediaFoundationAacTrackWriter(factory);
+            var startCaller = 0;
+            var writeCaller = 0;
+            var completeCaller = 0;
+            await RunOnThreadAsync(ApartmentState.STA, async () =>
+            {
+                startCaller = Environment.CurrentManagedThreadId;
+                await writer.StartAsync(new RecordingTrackWriterStartRequest(
+                    MeetingRecordingTrackKind.Microphone,
+                    directory,
+                    "microphone",
+                    PreferredChannels: 1,
+                    RecordingId: Guid.NewGuid()));
+            });
+            await RunOnThreadAsync(ApartmentState.MTA, async () =>
+            {
+                writeCaller = Environment.CurrentManagedThreadId;
+                await writer.WriteAsync(CreateToneFrame(48_000, 1, 0, 960));
+            });
+            var artifact = await RunOnThreadAsync(ApartmentState.STA, async () =>
+            {
+                completeCaller = Environment.CurrentManagedThreadId;
+                return await writer.CompleteAsync();
+            });
+
+            var operations = factory.OperationsFor("microphone");
+            var ownerThreads = operations.Select(item => item.ThreadId).Distinct().ToList();
+            Assert(artifact.ValidationState == MeetingRecordingValidationState.Valid,
+                "The owner-thread test session must produce a finalized artifact.");
+            Assert(ownerThreads.Count == 1 &&
+                   operations.All(item => item.ApartmentState == ApartmentState.MTA),
+                "Initialize, WriteSample, Finalize, and COM release must use one MTA owner thread.");
+            Assert(operations.Any(item => item.Operation == "Initialize") &&
+                   operations.Any(item => item.Operation == "WriteSample") &&
+                   operations.Any(item => item.Operation == "Finalize") &&
+                   operations.Any(item => item.Operation == "Release"),
+                "The owner-thread test must observe the full encoder lifecycle.");
+            Assert(ownerThreads[0] != startCaller &&
+                   ownerThreads[0] != writeCaller &&
+                   ownerThreads[0] != completeCaller &&
+                   new[] { startCaller, writeCaller, completeCaller }.Distinct().Count() == 3,
+                "Caller thread changes must never transfer ownership of the encoder session.");
+            Assert(writer.OwnerThreadId == ownerThreads[0] &&
+                   writer.OwnerApartmentState == ApartmentState.MTA,
+                "Writer diagnostics must expose the stable MTA owner thread.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    private static async Task ThreeAacWritersKeepIsolatedOwnerThreads()
+    {
+        var directory = CreateTemporaryDirectory();
+        var writers = new List<MediaFoundationAacTrackWriter>();
+        try
+        {
+            var factory = new TrackingAacSessionFactory();
+            foreach (var (kind, name, channels) in new[]
+                     {
+                         (MeetingRecordingTrackKind.System, "system", 2),
+                         (MeetingRecordingTrackKind.Microphone, "microphone", 1),
+                         (MeetingRecordingTrackKind.Mixed, "mixed", 1)
+                     })
+            {
+                var writer = new MediaFoundationAacTrackWriter(factory);
+                writers.Add(writer);
+                await writer.StartAsync(new RecordingTrackWriterStartRequest(
+                    kind,
+                    directory,
+                    name,
+                    PreferredChannels: channels,
+                    RecordingId: Guid.NewGuid()));
+            }
+
+            await Task.WhenAll(writers.Select((writer, index) =>
+                writer.WriteAsync(CreateToneFrame(
+                    writer.InputFormat.SampleRate,
+                    writer.InputFormat.Channels,
+                    index * 960,
+                    960)).AsTask()));
+            var artifacts = await Task.WhenAll(writers.Select(writer => writer.CompleteAsync()));
+
+            Assert(artifacts.All(item =>
+                    item.ValidationState == MeetingRecordingValidationState.Valid),
+                "System, microphone, and mixed writers must all finalize independently.");
+            Assert(writers.Select(writer => writer.OwnerThreadId).Distinct().Count() == 3,
+                "Concurrent AAC track writers must have isolated live owner threads.");
+            foreach (var name in new[] { "system", "microphone", "mixed" })
+            {
+                var operations = factory.OperationsFor(name);
+                Assert(operations.Select(item => item.ThreadId).Distinct().Count() == 1 &&
+                       operations.All(item => item.ApartmentState == ApartmentState.MTA),
+                    $"The {name} session crossed its MTA owner thread.");
+            }
+        }
+        finally
+        {
+            foreach (var writer in writers)
+            {
+                await writer.DisposeAsync();
+            }
+
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    private static async Task ThreeMediaFoundationAacTracksFinalizeTogether()
+    {
+        var directory = CreateTemporaryDirectory();
+        var writers = new List<MediaFoundationAacTrackWriter>();
+        try
+        {
+            foreach (var (kind, name, channels) in new[]
+                     {
+                         (MeetingRecordingTrackKind.System, "system-real", 2),
+                         (MeetingRecordingTrackKind.Microphone, "microphone-real", 1),
+                         (MeetingRecordingTrackKind.Mixed, "mixed-real", 1)
+                     })
+            {
+                var writer = new MediaFoundationAacTrackWriter();
+                writers.Add(writer);
+                await writer.StartAsync(new RecordingTrackWriterStartRequest(
+                    kind,
+                    directory,
+                    name,
+                    PreferredChannels: channels,
+                    RecordingId: Guid.NewGuid()));
+            }
+
+            await Task.WhenAll(writers.Select(writer =>
+                WriteSyntheticToneAsync(writer, TimeSpan.FromSeconds(1))));
+            var artifacts = await Task.WhenAll(writers.Select(writer => writer.CompleteAsync()));
+            Assert(artifacts.All(artifact =>
+                    artifact.ValidationState == MeetingRecordingValidationState.Valid &&
+                    artifact.FinalizationState == MeetingRecordingFinalizationState.Finalized &&
+                    File.Exists(Path.Combine(directory, artifact.FileName))),
+                "Three live Media Foundation writers must finalize playable system, microphone, and mixed M4A tracks.");
+            Assert(writers.Select(writer => writer.OwnerThreadId).Distinct().Count() == 3 &&
+                   writers.All(writer => writer.OwnerApartmentState == ApartmentState.MTA),
+                "Real Media Foundation tracks must retain separate live MTA owners.");
+        }
+        finally
+        {
+            foreach (var writer in writers)
+            {
+                await writer.DisposeAsync();
+            }
+
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    private static async Task AacBoundedQueueKeepsProducersNonBlocking()
+    {
+        var directory = CreateTemporaryDirectory();
+        using var gate = new ManualResetEventSlim();
+        var factory = new TrackingAacSessionFactory(writeGate: gate);
+        await using var writer = new MediaFoundationAacTrackWriter(factory);
+        try
+        {
+            await writer.StartAsync(new RecordingTrackWriterStartRequest(
+                MeetingRecordingTrackKind.System,
+                directory,
+                "bounded-aac",
+                PreferredChannels: 2,
+                RecordingId: Guid.NewGuid()));
+            var frame = CreateToneFrame(48_000, 2, 0, 960);
+            Assert(writer.TryWrite(frame) && factory.WriteEntered.Wait(TimeSpan.FromSeconds(2)),
+                "The owner thread must enter the synthetic blocked WriteSample operation.");
+
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            var rejected = false;
+            for (var index = 1; index < 2_000; index++)
+            {
+                if (!writer.TryWrite(frame with
+                    {
+                        SampleTime100Nanoseconds = index * frame.SampleDuration100Nanoseconds
+                    }))
+                {
+                    rejected = true;
+                    break;
+                }
+            }
+
+            timer.Stop();
+            Assert(rejected && timer.Elapsed < TimeSpan.FromSeconds(1) &&
+                   writer.Error?.Contains("bounded", StringComparison.OrdinalIgnoreCase) == true,
+                "TryWrite must reject a full bounded AAC queue promptly without blocking capture callbacks.");
+        }
+        finally
+        {
+            gate.Set();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await writer.AbortAsync(timeout.Token);
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    private static async Task AacFinalizationFailurePreservesCurrentFileAndPermitsRetry()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var failedFactory = new TrackingAacSessionFactory(failFinalization: true);
+            await using (var failed = new MediaFoundationAacTrackWriter(failedFactory))
+            {
+                await failed.StartAsync(new RecordingTrackWriterStartRequest(
+                    MeetingRecordingTrackKind.Mixed,
+                    directory,
+                    "failed",
+                    PreferredChannels: 1,
+                    RecordingId: Guid.NewGuid()));
+                await failed.WriteAsync(CreateToneFrame(48_000, 1, 0, 960));
+                var artifact = await failed.CompleteAsync();
+                Assert(artifact.FinalizationState == MeetingRecordingFinalizationState.Failed &&
+                       artifact.ValidationState == MeetingRecordingValidationState.Invalid &&
+                       artifact.FileName.Length == 0 &&
+                       artifact.InProgressFileName == "failed.current.m4a" &&
+                       artifact.Error.Contains("E_NOINTERFACE", StringComparison.Ordinal),
+                    "A failed finalization must retain the current file without reporting it Ready.");
+                Assert(failedFactory.OperationsFor("failed")
+                        .Select(item => item.ThreadId).Distinct().Count() == 1,
+                    "Failure cleanup must remain on the failed writer owner thread.");
+            }
+
+            var retryFactory = new TrackingAacSessionFactory();
+            await using var retry = new MediaFoundationAacTrackWriter(retryFactory);
+            await retry.StartAsync(new RecordingTrackWriterStartRequest(
+                MeetingRecordingTrackKind.Mixed,
+                directory,
+                "retry",
+                PreferredChannels: 1,
+                RecordingId: Guid.NewGuid()));
+            await retry.WriteAsync(CreateToneFrame(48_000, 1, 0, 960));
+            Assert((await retry.CompleteAsync()).ValidationState ==
+                   MeetingRecordingValidationState.Valid,
+                "A terminal AAC finalization failure must not prevent another recording.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    private static async Task AacAbortAndDisposalReleaseOnOwnerThread()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            foreach (var (name, explicitAbort) in new[]
+                     {
+                         ("abort", true),
+                         ("shutdown", false)
+                     })
+            {
+                var factory = new TrackingAacSessionFactory();
+                var writer = new MediaFoundationAacTrackWriter(factory);
+                await writer.StartAsync(new RecordingTrackWriterStartRequest(
+                    MeetingRecordingTrackKind.Microphone,
+                    directory,
+                    name,
+                    PreferredChannels: 1,
+                    RecordingId: Guid.NewGuid()));
+                await writer.WriteAsync(CreateToneFrame(48_000, 1, 0, 960));
+                if (explicitAbort)
+                {
+                    await writer.AbortAsync();
+                }
+
+                await writer.DisposeAsync();
+                var operations = factory.OperationsFor(name);
+                Assert(operations.Any(item => item.Operation == "Abort") &&
+                       operations.Any(item => item.Operation == "Release") &&
+                       operations.Select(item => item.ThreadId).Distinct().Count() == 1 &&
+                       operations.All(item => item.ApartmentState == ApartmentState.MTA),
+                    "Abort and application-shutdown disposal must release on the owner MTA thread.");
+            }
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(directory);
+        }
     }
 
     private static async Task DirectMediaFoundationAacWritesFinalizedM4a()
@@ -252,6 +615,19 @@ internal static class Program
             using var reader = new MediaFoundationReader(path);
             Assert(reader.TotalTime > TimeSpan.FromSeconds(1),
                 "Finalized M4A must reopen with plausible duration.");
+
+            await using var repeated = new MediaFoundationAacTrackWriter();
+            await repeated.StartAsync(new RecordingTrackWriterStartRequest(
+                MeetingRecordingTrackKind.Mixed,
+                directory,
+                "mixed-repeat",
+                PreferredChannels: 1,
+                RecordingId: Guid.NewGuid()));
+            await WriteSyntheticToneAsync(repeated, TimeSpan.FromSeconds(1));
+            var repeatedArtifact = await repeated.CompleteAsync();
+            Assert(repeatedArtifact.ValidationState == MeetingRecordingValidationState.Valid &&
+                   File.Exists(Path.Combine(directory, repeatedArtifact.FileName)),
+                "A second direct AAC writer must start and finalize after the first releases COM resources.");
         }
         finally
         {
@@ -790,6 +1166,167 @@ internal static class Program
         }
     }
 
+    private static Task RunOnThreadAsync(
+        ApartmentState apartmentState,
+        Func<Task> action) =>
+        RunOnThreadAsync<object?>(apartmentState, async () =>
+        {
+            await action();
+            return null;
+        });
+
+    private static Task<T> RunOnThreadAsync<T>(
+        ApartmentState apartmentState,
+        Func<Task<T>> action)
+    {
+        var completion = new TaskCompletionSource<T>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                completion.TrySetResult(action().GetAwaiter().GetResult());
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "TaskOverlay test caller"
+        };
+        thread.SetApartmentState(apartmentState);
+        thread.Start();
+        return completion.Task;
+    }
+
+    private sealed record AacOwnerOperation(
+        string Session,
+        string Operation,
+        int ThreadId,
+        ApartmentState ApartmentState);
+
+    private sealed class TrackingAacSessionFactory : IMediaFoundationAacEncoderSessionFactory
+    {
+        private readonly object _sync = new();
+        private readonly bool _failFinalization;
+        private readonly ManualResetEventSlim? _writeGate;
+        private readonly List<AacOwnerOperation> _operations = new();
+
+        public TrackingAacSessionFactory(
+            bool failFinalization = false,
+            ManualResetEventSlim? writeGate = null)
+        {
+            _failFinalization = failFinalization;
+            _writeGate = writeGate;
+        }
+
+        public ManualResetEventSlim WriteEntered { get; } = new();
+
+        public IMediaFoundationAacEncoderSession Create(
+            RecordingTrackWriterStartRequest request,
+            string finalPath,
+            string inProgressPath)
+        {
+            Record(request.BaseFileName, "Initialize");
+            return new TrackingAacSession(
+                this,
+                request,
+                finalPath,
+                inProgressPath,
+                _failFinalization,
+                _writeGate);
+        }
+
+        public IReadOnlyList<AacOwnerOperation> OperationsFor(string session)
+        {
+            lock (_sync)
+            {
+                return _operations.Where(item => item.Session == session).ToList();
+            }
+        }
+
+        public void Record(string session, string operation)
+        {
+            lock (_sync)
+            {
+                _operations.Add(new AacOwnerOperation(
+                    session,
+                    operation,
+                    Environment.CurrentManagedThreadId,
+                    Thread.CurrentThread.GetApartmentState()));
+            }
+        }
+    }
+
+    private sealed class TrackingAacSession : IMediaFoundationAacEncoderSession
+    {
+        private readonly TrackingAacSessionFactory _factory;
+        private readonly string _session;
+        private readonly string _finalPath;
+        private readonly string _inProgressPath;
+        private readonly bool _failFinalization;
+        private readonly ManualResetEventSlim? _writeGate;
+        private bool _hasFrames;
+
+        public TrackingAacSession(
+            TrackingAacSessionFactory factory,
+            RecordingTrackWriterStartRequest request,
+            string finalPath,
+            string inProgressPath,
+            bool failFinalization,
+            ManualResetEventSlim? writeGate)
+        {
+            _factory = factory;
+            _session = request.BaseFileName;
+            _finalPath = finalPath;
+            _inProgressPath = inProgressPath;
+            _failFinalization = failFinalization;
+            _writeGate = writeGate;
+            InputFormat = new WaveFormat(48_000, 16, request.PreferredChannels);
+            File.WriteAllBytes(_inProgressPath, new byte[] { 1 });
+        }
+
+        public WaveFormat InputFormat { get; }
+        public int Bitrate => 96_000;
+
+        public void WriteFrame(PcmAudioFrame frame)
+        {
+            _factory.Record(_session, "WriteSample");
+            _factory.WriteEntered.Set();
+            _writeGate?.Wait();
+            _hasFrames = frame.Data.Length > 0;
+        }
+
+        public AacEncoderSessionCompletion Complete()
+        {
+            _factory.Record(_session, "Finalize");
+            if (_failFinalization)
+            {
+                throw new COMException(
+                    "Synthetic IMFSinkWriter finalization failed: E_NOINTERFACE.",
+                    unchecked((int)0x80004002));
+            }
+
+            Assert(_hasFrames, "Tracking AAC session expected at least one frame.");
+            File.WriteAllBytes(_finalPath, new byte[] { 1, 2, 3, 4 });
+            File.Delete(_inProgressPath);
+            return new AacEncoderSessionCompletion(4, TimeSpan.FromMilliseconds(20));
+        }
+
+        public void Abort(bool preserveInProgressFile)
+        {
+            _factory.Record(_session, "Abort");
+            if (!preserveInProgressFile)
+            {
+                File.Delete(_inProgressPath);
+            }
+        }
+
+        public void Dispose() => _factory.Record(_session, "Release");
+    }
+
     private sealed class RecordingFixture : IAsyncDisposable
     {
         private readonly string _directory;
@@ -808,7 +1345,7 @@ internal static class Program
             Meeting.RecordingPolicy = policy;
             Store = new AppStateStore(_directory);
             Recorder = new FakeMeetingRecorder();
-            var localSettings = new LocalAppSettings
+            LocalSettings = new LocalAppSettings
             {
                 MeetingAssistant = new MeetingAssistantSettings
                 {
@@ -817,10 +1354,10 @@ internal static class Program
             };
             Coordinator = new MeetingAssistantCoordinator(
                 State,
-                localSettings,
+                LocalSettings,
                 _directory,
                 () => Store.Save(State),
-                () => { },
+                () => LocalSettingsSaveCount++,
                 () => StateChangedCount++,
                 Recorder,
                 new UnusedAudioProcessor(),
@@ -833,11 +1370,13 @@ internal static class Program
         public AppState State { get; }
         public MeetingItem Meeting { get; }
         public AppStateStore Store { get; }
+        public LocalAppSettings LocalSettings { get; }
         public FakeMeetingRecorder Recorder { get; }
         public MeetingAssistantCoordinator Coordinator { get; }
         public MeetingAssistantWorkspaceCommandHandler Handler { get; }
         public List<string> Diagnostics { get; } = new();
         public int StateChangedCount { get; private set; }
+        public int LocalSettingsSaveCount { get; private set; }
 
         public MeetingItem AddMeeting(string title, DateTimeOffset startsAtUtc)
         {
@@ -1097,6 +1636,7 @@ internal static class Program
         private MeetingRecordingFormat _format = MeetingRecordingFormat.AacM4a;
 
         public bool FailNextStart { get; set; }
+        public bool FailNextStop { get; set; }
         public int StartCount { get; private set; }
         public int StopCount { get; private set; }
         public MeetingRecorderRuntimeStatus Status => _status;
@@ -1163,6 +1703,27 @@ internal static class Program
 
             StopCount++;
             _status = IdleStatus();
+            if (FailNextStop)
+            {
+                FailNextStop = false;
+                const string technicalError =
+                    "Synthetic IMFSinkWriter finalization failed: E_NOINTERFACE " +
+                    "(0x80004002), IID {3137F1CD-FE5E-4805-A5D8-FB477448CB3D}.";
+                return Task.FromResult(new MeetingRecordingStopResult(
+                    DateTimeOffset.UtcNow,
+                    AudioTrackHealth.Failed,
+                    AudioTrackHealth.Failed,
+                    technicalError,
+                    _format,
+                    new[]
+                    {
+                        CreateFailedArtifact(MeetingRecordingTrackKind.System, technicalError),
+                        CreateFailedArtifact(MeetingRecordingTrackKind.Microphone, technicalError),
+                        CreateFailedArtifact(MeetingRecordingTrackKind.Mixed, technicalError)
+                    },
+                    HasUsableAudio: false));
+            }
+
             return Task.FromResult(new MeetingRecordingStopResult(
                 DateTimeOffset.UtcNow,
                 AudioTrackHealth.Healthy,
@@ -1216,6 +1777,27 @@ internal static class Program
                 ValidationState = finalized
                     ? MeetingRecordingValidationState.Valid
                     : MeetingRecordingValidationState.Unknown
+            };
+        }
+
+        private MeetingRecordingTrackArtifact CreateFailedArtifact(
+            MeetingRecordingTrackKind kind,
+            string error)
+        {
+            var extension = _format == MeetingRecordingFormat.AacM4a ? ".m4a" : ".wav";
+            return new MeetingRecordingTrackArtifact
+            {
+                Kind = kind,
+                InProgressFileName = kind.ToString().ToLowerInvariant() + ".current" + extension,
+                Container = _format == MeetingRecordingFormat.AacM4a ? "MPEG-4/M4A" : "WAV",
+                Codec = _format == MeetingRecordingFormat.AacM4a ? "AAC-LC" : "PCM 16-bit",
+                SampleRate = 48_000,
+                ChannelCount = kind == MeetingRecordingTrackKind.System ? 2 : 1,
+                Bitrate = _format == MeetingRecordingFormat.AacM4a ? 96_000 : 768_000,
+                HasAudioFrames = true,
+                FinalizationState = MeetingRecordingFinalizationState.Failed,
+                ValidationState = MeetingRecordingValidationState.Invalid,
+                Error = error
             };
         }
     }

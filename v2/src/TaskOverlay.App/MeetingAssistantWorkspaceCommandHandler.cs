@@ -20,6 +20,7 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
         "analyzeMeetingRecording",
         "cancelMeetingProcessing",
         "setMeetingRecordingPolicy",
+        "setMeetingRecordingFormat",
         "setMeetingRecordingLocalOnly",
         "deleteMeetingRecording",
         "linkMeetingRecording",
@@ -105,6 +106,7 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
                         _coordinator.CancelProcessing,
                         "Processing operation is not active."),
                     "setMeetingRecordingPolicy" => SetPolicy(commandId, payload),
+                    "setMeetingRecordingFormat" => SetRecordingFormat(commandId, payload),
                     "setMeetingRecordingLocalOnly" => WithRecording(
                         commandId,
                         payload,
@@ -207,6 +209,24 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
                 commandId,
                 "mutationRejected",
                 "MEET recording policy could not be updated.");
+    }
+
+    private WorkspaceCommandResult SetRecordingFormat(string commandId, JsonElement payload)
+    {
+        if (!Enum.TryParse<MeetingRecordingFormat>(
+                ReadString(payload, "format"),
+                ignoreCase: true,
+                out var format))
+        {
+            return Invalid(commandId, "A valid meeting recording format is required.");
+        }
+
+        return _coordinator.SetRecordingFormat(format)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : WorkspaceCommandResult.Failed(
+                commandId,
+                "mutationRejected",
+                "Recording format cannot change while a recording is active.");
     }
 
     private WorkspaceCommandResult LinkRecording(string commandId, JsonElement payload)

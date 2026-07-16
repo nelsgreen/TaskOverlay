@@ -345,6 +345,15 @@ tracks directly as AAC-LC in M4A containers; no full-meeting WAV is written in
 Compact mode. Lossless mode uses the same queues and mixer with independent WAV
 writers instead.
 
+Each AAC track writer owns a dedicated background MTA thread. That thread calls
+`CoInitializeEx(COINIT_MULTITHREADED)`, creates and configures the Sink Writer,
+handles every queued sample, finalizes the container, releases all related COM
+objects, and then uninitializes COM. `StartAsync`, capture callbacks,
+`CompleteAsync`, and `AbortAsync` exchange bounded commands with that owner;
+the `IMFSinkWriter` RCW never leaves its thread. Diagnostics record recording
+id, track kind, managed owner-thread id, apartment, lifecycle operation, and COM
+initialization result without logging audio content.
+
 During capture, output uses `*.current.m4a` or `*.current.wav`. Stop first stops
 capture, drains the bounded queues, finalizes the containers, reopens them to
 validate readable metadata and duration, then renames valid files to their
@@ -354,6 +363,22 @@ Interrupted/Invalid records and preserves their in-progress names. Because the
 current M4A implementation is single-file rather than segmented, an unexpected
 process termination can lose the current container; periodic finalized M4A
 segments remain a follow-up.
+
+Finalization failure preserves recoverable current files as Invalid/Interrupted,
+clears the process recording lock, and allows a new Start. Workspace shows a
+short retryable message and keeps full HRESULT/IID details in logs and a
+collapsed technical section; invalid audio is never sent to transcription.
+
+## Workspace MEET editor
+
+TASK Details remains in the resizable right Workspace sidebar. MEET create,
+view, edit, recording controls/history, transcript, analysis, ProposedActions,
+and Context share one responsive modal editor. Calendar, Timeline, `+MEET`,
+empty-slot creation, and emergency-recording classification all select that same
+connected editor. The modal owns only draft UI state: closing or unmounting it
+does not stop an active recording or finalization, both of which remain owned by
+the WPF application service. Unsaved MEET fields require explicit discard
+confirmation; backdrop clicks never close the modal.
 
 ## Known limitations
 

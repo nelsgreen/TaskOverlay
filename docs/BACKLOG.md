@@ -400,6 +400,16 @@ Active product scope:
     review before existing TaskOverlay services apply mutations;
   - audio and transcript files stay local and automatic backups contain only
     recording metadata.
+  - every Media Foundation Sink Writer is created, written, finalized, and
+    released on its own dedicated MTA owner thread; capture callbacks only post
+    to bounded queues;
+  - failed finalization keeps recoverable `*.current.m4a` files and exposes a
+    compact retry message; HRESULT/IID details stay in diagnostics and a
+    collapsed technical-details section;
+  - MEET create/view/edit, recording history, transcript, analysis, and
+    ProposedActions use one large Workspace modal. TASK Details remains in the
+    right sidebar, and closing the MEET modal does not stop recording or
+    finalization.
 - Recurrence, calendar sync, direct meeting-platform APIs, and live
   transcription remain later work.
 - Handle next MEET countdown.

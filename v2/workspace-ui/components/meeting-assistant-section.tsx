@@ -288,6 +288,11 @@ export function MeetingAssistantSection({
               isProcessing={isProcessing}
               readOnly={readOnly}
               send={send}
+              onStartAnother={recordingControls.mode === "start" ? () => {
+                if (send({ type: "startMeetingRecording", meetingId: meet.id })) {
+                  setPendingRecordingAction("start")
+                }
+              } : undefined}
             />
           )}
 
@@ -378,17 +383,20 @@ function RecordingCard({
   isProcessing,
   readOnly,
   send,
+  onStartAnother,
 }: {
   recording: MeetingRecordingSnapshot
   isRuntimeActive: boolean
   isProcessing: boolean
   readOnly: boolean
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
+  onStartAnother?: () => void
 }) {
   const canTranscribe = !recording.keepLocalOnly
     && recording.hasMixedAudio
     && ["Recorded", "TranscriptReady", "Ready", "Failed"].includes(recording.state)
   const canAnalyze = recording.hasTranscript && !isProcessing
+  const technicalErrors = recording.tracks.filter((track) => track.error.trim().length > 0)
 
   return (
     <div className="space-y-2 rounded-md border border-border bg-background/50 p-2.5">
@@ -431,7 +439,32 @@ function RecordingCard({
         </p>
       )}
 
+      {technicalErrors.length > 0 && (
+        <details className="min-w-0 rounded border border-border/70 bg-card/30 p-2">
+          <summary className="cursor-pointer text-[10px] font-semibold text-muted-foreground">
+            Show technical details
+          </summary>
+          <div className="mt-2 max-h-40 min-w-0 space-y-2 overflow-y-auto">
+            {technicalErrors.map((track) => (
+              <div key={track.kind} className="min-w-0 text-[10px] leading-relaxed text-muted-foreground">
+                <strong className="text-foreground">{track.kind}:</strong>{" "}
+                <span className="break-words [overflow-wrap:anywhere]">{track.error}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
       <div className="flex flex-wrap gap-1.5">
+        {recording.state === "Failed" && onStartAnother && (
+          <ActionButton
+            label="Start another recording"
+            icon={Play}
+            primary
+            disabled={readOnly}
+            onClick={onStartAnother}
+          />
+        )}
         {isRuntimeActive ? (
           <ActionButton
             label="Stop"
@@ -479,6 +512,14 @@ function RecordingCard({
           icon={FolderOpen}
           onClick={() => send({ type: "openMeetingRecordingFolder", recordingId: recording.id })}
         />
+        {recording.state === "Failed" && recording.recordingFormat === "AacM4a" && (
+          <ActionButton
+            label="Switch to Lossless WAV"
+            icon={FileAudio}
+            disabled={readOnly || isRuntimeActive}
+            onClick={() => send({ type: "setMeetingRecordingFormat", format: "Wav" })}
+          />
+        )}
         <ActionButton
           label={recording.keepLocalOnly ? "Local only" : "Keep local only"}
           icon={Check}

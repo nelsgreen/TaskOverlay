@@ -116,6 +116,11 @@ item.
   external converter executable. The actual selected sample rate, channel
   count, bitrate, duration, bytes, finalization, and validation state are kept
   as recording artifact metadata.
+- Each Compact track owns one dedicated MTA encoder thread. COM initialization,
+  `MFCreateSinkWriterFromURL`, every Sink Writer call, finalization, and RCW
+  release happen on that same thread; callers communicate through a bounded
+  command/frame channel. Media Foundation COM objects never cross the UI,
+  capture, or thread-pool boundaries.
 - Lossless WAV is an explicit independent format for diagnostics,
   compatibility, or intentional lossless capture. It is never a silent
   fallback when Compact encoder initialization fails, and it is not
@@ -199,9 +204,11 @@ item.
   deprecated/superseded items are excluded by default. Not shipped in the
   foundation PR (expanded export shipped later - see the Context Pack entry
   below).
-- Modal-based creation (Add Source / Add Context) worked well in v0 and may be
-  considered for future large editors; Task/MEET editors are not being
-  redesigned around modals for now.
+- Modal-based creation remains appropriate for large editors. MEET now uses one
+  dedicated responsive Workspace modal because recording, transcript,
+  analysis, Context, and scheduling no longer fit the narrow Details column.
+  TASK Details intentionally remains in the right sidebar. Closing the MEET
+  modal never owns or stops the process-level recording/finalization runtime.
 - Task Details Context block (done): a compact, Task-only card in Task
   Details shows linked SourceDocuments/ContextItems and lets the user link an
   existing same-project record or unlink one. No create/edit of

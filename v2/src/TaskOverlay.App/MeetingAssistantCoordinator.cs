@@ -209,16 +209,34 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 var result = await _recorder.StopAsync(recordingId, cancellationToken);
                 if (!result.HasUsableAudio)
                 {
+                    const string userMessage =
+                        "Recording could not be finalized. " +
+                        "The incomplete files were preserved for diagnostics.";
+                    Report(
+                        $"MEET recording produced no usable finalized audio: " +
+                        $"recordingId={recordingId:N}; warning={result.Warning ?? "none"}.");
+                    foreach (var track in result.Tracks ?? Array.Empty<MeetingRecordingTrackArtifact>())
+                    {
+                        if (!string.IsNullOrWhiteSpace(track.Error))
+                        {
+                            Report(
+                                $"MEET recording track finalization detail: " +
+                                $"recordingId={recordingId:N}; track={track.Kind}; " +
+                                $"state={track.FinalizationState}; validation={track.ValidationState}; " +
+                                $"error={track.Error}.");
+                        }
+                    }
+
                     service.MarkFailed(
                         recordingId,
-                        result.Warning ?? "No microphone or system audio frames were captured.");
+                        userMessage);
                     recording.RecordingFormat = result.RecordingFormat;
                     recording.Tracks = result.Tracks?.Select(CloneTrack).ToList() ?? new();
                     recording.StoppedAtUtc = result.StoppedAtUtc;
                     recording.SystemAudioHealth = result.SystemAudioHealth;
                     recording.MicrophoneHealth = result.MicrophoneHealth;
                     Persist(recording);
-                    return MeetingAssistantOperationResult.Fail(recording.LastError);
+                    return MeetingAssistantOperationResult.Fail(userMessage);
                 }
 
                 if (!service.MarkRecorded(recordingId, result))
@@ -614,6 +632,19 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         meeting.RecordingPolicy = policy;
         meeting.UpdatedAtUtc = DateTimeOffset.UtcNow;
         PersistStateAndNotify();
+        return true;
+    }
+
+    public bool SetRecordingFormat(MeetingRecordingFormat format)
+    {
+        if (!Enum.IsDefined(format) || _recorder.Status.RecordingId is not null)
+        {
+            return false;
+        }
+
+        _localSettings.MeetingAssistant.RecordingFormat = format;
+        _persistLocalSettings();
+        Report($"MEET recording format changed: format={format}.");
         return true;
     }
 

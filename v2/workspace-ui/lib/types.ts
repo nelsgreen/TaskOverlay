@@ -635,6 +635,7 @@ export type WorkspaceMeetingAssistantCommand =
   | { type: "analyzeMeetingRecording"; recordingId: string }
   | { type: "cancelMeetingProcessing"; recordingId: string }
   | { type: "setMeetingRecordingPolicy"; meetingId: string; policy: MeetingRecordingPolicy }
+  | { type: "setMeetingRecordingFormat"; format: "AacM4a" | "Wav" }
   | { type: "setMeetingRecordingLocalOnly"; recordingId: string; keepLocalOnly: boolean }
   | { type: "deleteMeetingRecording"; recordingId: string }
   | { type: "linkMeetingRecording"; recordingId: string; meetingId: string }

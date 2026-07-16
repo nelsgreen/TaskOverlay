@@ -81,13 +81,17 @@ never a direct mutation without explicit user confirmation (see DECISIONS
 3. MEET creation and drag/drop rescheduling from Calendar - implemented.
 4. Handle next MEET countdown.
 5. Local recording - Compact direct AAC/M4A foundation implemented with
-   microphone, system, and mixed tracks; Lossless WAV remains optional.
+   microphone, system, and mixed tracks, strict per-writer MTA thread ownership,
+   bounded queues, concise retryable failure UI, and optional Lossless WAV.
 6. Emergency recording and later classification - foundation implemented.
 7. Post-meeting transcription - connected optional OpenAI provider implemented.
 8. Structured meeting analysis - connected optional OpenAI provider implemented.
 9. Suggested actions review/apply selected - foundation implemented; no
    automatic mutations.
-10. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
+10. Dedicated connected MEET modal - implemented for create/edit, recording,
+    transcript, analysis, ProposedActions, and Context; TASK Details remains in
+    the right sidebar and modal close does not stop recording.
+11. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
     loss, device recovery, retention, transcript editing/search, ContextHUB
     promotion, and additional/local providers.
 

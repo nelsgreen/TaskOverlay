@@ -107,7 +107,10 @@ public sealed class WindowsMeetingRecorder : IMeetingRecorder
                 microphone is not null,
                 mixedWriter,
                 _diagnostic);
-            await mixer.StartAsync(request.RecordingFolder, cancellationToken);
+            await mixer.StartAsync(
+                request.RecordingFolder,
+                cancellationToken,
+                request.RecordingId);
             system?.AttachMixer(mixer);
             microphone?.AttachMixer(mixer);
 
@@ -329,7 +332,8 @@ public sealed class WindowsMeetingRecorder : IMeetingRecorder
                     kind,
                     request.RecordingFolder,
                     kind == MeetingRecordingTrackKind.System ? "system" : "microphone",
-                    preferredChannels),
+                    preferredChannels,
+                    RecordingId: request.RecordingId),
                 cancellationToken);
         }
         catch
