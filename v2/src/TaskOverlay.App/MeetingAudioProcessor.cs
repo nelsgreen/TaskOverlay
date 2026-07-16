@@ -27,6 +27,7 @@ public sealed class MeetingAudioProcessor : IMeetingAudioProcessor
         }
 
         Directory.CreateDirectory(request.RecordingFolder);
+        DeleteStaleTranscriptionChunks(request.RecordingFolder);
         if (!string.IsNullOrWhiteSpace(request.ExistingMixedAudioPath))
         {
             return await ProcessFinalizedMixedAsync(request, cancellationToken);
@@ -180,14 +181,6 @@ public sealed class MeetingAudioProcessor : IMeetingAudioProcessor
             throw new ArgumentOutOfRangeException(
                 nameof(maximumChunkBytes),
                 "M4A transcription chunks require at least 256 KiB.");
-        }
-
-        foreach (var oldChunk in Directory.EnumerateFiles(
-                     recordingFolder,
-                     "transcription-*.m4a",
-                     SearchOption.TopDirectoryOnly))
-        {
-            File.Delete(oldChunk);
         }
 
         using var reader = new AudioFileReader(mixedPath);
@@ -363,6 +356,22 @@ public sealed class MeetingAudioProcessor : IMeetingAudioProcessor
         }
 
         return chunks;
+    }
+
+    private static void DeleteStaleTranscriptionChunks(string recordingFolder)
+    {
+        foreach (var path in Directory.EnumerateFiles(
+                     recordingFolder,
+                     "transcription-*.*",
+                     SearchOption.TopDirectoryOnly))
+        {
+            var extension = Path.GetExtension(path);
+            if (extension.Equals(".m4a", StringComparison.OrdinalIgnoreCase) ||
+                extension.Equals(".wav", StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(path);
+            }
+        }
     }
 
     private static void EnsureFinalizedAudioPath(string path)

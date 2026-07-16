@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Bot,
   Check,
@@ -30,6 +30,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { deriveMeetingRecordingControlState } from "@/lib/meeting-recording-controls"
+import { resolveMeetingRecordingSelection } from "@/lib/meeting-recording-selection"
 
 interface Props {
   meet: MeetItem
@@ -72,6 +73,7 @@ export function MeetingAssistantSection({
     [recordings, meet.id],
   )
   const [selectedRecordingId, setSelectedRecordingId] = useState<string | null>(null)
+  const previousLatestRecordingId = useRef<string | null>(null)
   const [pendingRecordingAction, setPendingRecordingAction] = useState<"start" | "stop" | null>(null)
   const [runtimeClock, setRuntimeClock] = useState(() => Date.now())
   const selectedRecording = meetingRecordings.find((recording) => recording.id === selectedRecordingId)
@@ -82,11 +84,24 @@ export function MeetingAssistantSection({
     .sort((left, right) => right.updatedAtUtc.localeCompare(left.updatedAtUtc))[0]
     ?? null
 
+  const latestRecordingId = meetingRecordings[0]?.id ?? null
+  const availableRecordingIds = useMemo(
+    () => meetingRecordings.map((recording) => recording.id),
+    [meetingRecordings],
+  )
+
   useEffect(() => {
-    if (selectedRecording && selectedRecording.id !== selectedRecordingId) {
-      setSelectedRecordingId(selectedRecording.id)
+    const nextSelection = resolveMeetingRecordingSelection(
+      selectedRecordingId,
+      previousLatestRecordingId.current,
+      latestRecordingId,
+      availableRecordingIds,
+    )
+    previousLatestRecordingId.current = latestRecordingId
+    if (nextSelection !== selectedRecordingId) {
+      setSelectedRecordingId(nextSelection)
     }
-  }, [selectedRecording?.id, selectedRecordingId])
+  }, [availableRecordingIds, latestRecordingId, selectedRecordingId])
 
   useEffect(() => {
     setPendingRecordingAction(null)
@@ -397,6 +412,11 @@ function RecordingCard({
     && ["Recorded", "TranscriptReady", "Ready", "Failed"].includes(recording.state)
   const canAnalyze = recording.hasTranscript && !isProcessing
   const technicalErrors = recording.tracks.filter((track) => track.error.trim().length > 0)
+  const transcriptionSource = recording.tracks.find((track) =>
+    track.kind === "Mixed"
+      && track.finalizationState === "Finalized"
+      && track.validationState === "Valid"
+      && track.fileName.trim().length > 0)
 
   return (
     <div className="space-y-2 rounded-md border border-border bg-background/50 p-2.5">
@@ -432,6 +452,19 @@ function RecordingCard({
           <p className="text-amber-300">Lossless WAV recordings use substantially more disk space.</p>
         )}
       </div>
+
+      {transcriptionSource && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded border border-status-meet/25 bg-status-meet/5 px-2 py-1.5 text-[10px] text-muted-foreground">
+          <span>
+            Transcription source:{" "}
+            <strong className="text-foreground">{transcriptionSource.fileName}</strong>
+          </span>
+          <span>
+            Size: {formatBytes(transcriptionSource.bytes)}{" - "}
+            Duration: {formatDuration(transcriptionSource.durationSeconds)}
+          </span>
+        </div>
+      )}
 
       {recording.lastError && (
         <p className="rounded border border-destructive/30 bg-destructive/10 p-2 text-[10px] text-destructive">

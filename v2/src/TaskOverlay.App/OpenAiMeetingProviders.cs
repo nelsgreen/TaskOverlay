@@ -20,16 +20,19 @@ public sealed class OpenAiTranscriptionProvider : ITranscriptionProvider
     private static readonly Uri Endpoint = new("https://api.openai.com/v1/audio/transcriptions");
     private readonly Func<string?> _loadApiKey;
     private readonly HttpClient _httpClient;
+    private readonly Action<string, Exception?>? _diagnostic;
 
     public OpenAiTranscriptionProvider(
         Func<string?> loadApiKey,
-        HttpClient? httpClient = null)
+        HttpClient? httpClient = null,
+        Action<string, Exception?>? diagnostic = null)
     {
         _loadApiKey = loadApiKey ?? throw new ArgumentNullException(nameof(loadApiKey));
         _httpClient = httpClient ?? new HttpClient
         {
             Timeout = TimeSpan.FromMinutes(15)
         };
+        _diagnostic = diagnostic;
     }
 
     public string Name => "OpenAI";
@@ -60,20 +63,19 @@ public sealed class OpenAiTranscriptionProvider : ITranscriptionProvider
         using var message = new HttpRequestMessage(HttpMethod.Post, Endpoint);
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         using var form = new MultipartFormDataContent();
-        await using var fileStream = new FileStream(
-            request.AudioPath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            64 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var fileStream = TranscriptionAudioDiagnostics.OpenRead(request.AudioPath);
+        var uploadBytes = fileStream.Length;
+        var uploadSha256 = await TranscriptionAudioDiagnostics.ComputeSha256Async(
+            fileStream,
+            cancellationToken);
+        fileStream.Position = 0;
         using var fileContent = new StreamContent(fileStream);
-        fileContent.Headers.ContentType = new MediaTypeHeaderValue(
-            Path.GetExtension(request.AudioPath).Equals(
+        var contentType = Path.GetExtension(request.AudioPath).Equals(
                 ".m4a",
                 StringComparison.OrdinalIgnoreCase)
-                ? "audio/mp4"
-                : "audio/wav");
+            ? "audio/mp4"
+            : "audio/wav";
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         form.Add(fileContent, "file", fileName);
         form.Add(new StringContent(request.Model), "model");
         var wantsDiarization = request.Model.Contains("diarize", StringComparison.OrdinalIgnoreCase);
@@ -106,11 +108,21 @@ public sealed class OpenAiTranscriptionProvider : ITranscriptionProvider
         }
 
         message.Content = form;
-        using var response = await _httpClient.SendAsync(
-            message,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+        Report(
+            $"OpenAI transcription multipart upload prepared: " +
+            $"recordingId={FormatOptionalId(request.RecordingId)}; " +
+            $"meetId={FormatOptionalId(request.MeetingId)}; " +
+            $"path={Path.GetFullPath(request.AudioPath)}; fileName={fileName}; " +
+            $"contentType={contentType}; bytes={uploadBytes}; sha256={uploadSha256}; " +
+            $"model={request.Model}; language={request.Language}.");
+        using var response = await SendAsync(message, fileName, uploadBytes, uploadSha256, cancellationToken);
         var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        Report(
+            $"OpenAI transcription response received: " +
+            $"recordingId={FormatOptionalId(request.RecordingId)}; " +
+            $"meetId={FormatOptionalId(request.MeetingId)}; fileName={fileName}; " +
+            $"bytes={uploadBytes}; sha256={uploadSha256}; " +
+            $"success={response.IsSuccessStatusCode}; status={(int)response.StatusCode}.");
         if (!response.IsSuccessStatusCode)
         {
             throw CreateProviderException("Transcription", response, raw);
@@ -171,6 +183,45 @@ public sealed class OpenAiTranscriptionProvider : ITranscriptionProvider
                 ex);
         }
     }
+
+    private async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage message,
+        string fileName,
+        long bytes,
+        string sha256,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _httpClient.SendAsync(
+                message,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Report(
+                $"OpenAI transcription upload failed: fileName={fileName}; " +
+                $"bytes={bytes}; sha256={sha256}.",
+                ex);
+            throw;
+        }
+    }
+
+    private void Report(string message, Exception? exception = null)
+    {
+        try
+        {
+            _diagnostic?.Invoke(message, exception);
+        }
+        catch
+        {
+            // Diagnostics must never alter provider behavior.
+        }
+    }
+
+    private static string FormatOptionalId(Guid? value) =>
+        value.HasValue ? value.Value.ToString("N") : "none";
 
     private static double ReadDouble(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.TryGetDouble(out var parsed)

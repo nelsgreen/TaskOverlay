@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -40,7 +44,13 @@ internal static class Program
             ("mid-stream encoder failure remains retryable", MidStreamEncoderFailureRemainsRetryable),
             ("recording finalization failure is concise and retryable", RecordingFinalizationFailureIsConciseAndRetryable),
             ("recording format command uses local settings boundary", RecordingFormatCommandUsesLocalSettingsBoundary),
+            ("recording metadata maps files by track kind", RecordingMetadataMapsFilesByTrackKind),
             ("transcription prefers finalized mixed audio", TranscriptionPrefersFinalizedMixedAudio),
+            ("transcription multipart uploads exact mixed bytes", TranscriptionMultipartUploadsExactMixedBytes),
+            ("transcription targets selected recording and snapshot", TranscriptionTargetsSelectedRecordingAndSnapshot),
+            ("transcription retry clears stale artifacts", TranscriptionRetryClearsStaleArtifacts),
+            ("compact transcription rejects missing mixed track", CompactTranscriptionRejectsMissingMixedTrack),
+            ("oversized compact chunks derive from mixed track", OversizedCompactChunksDeriveFromMixedTrack),
             ("recording format setting is local and defaults compact", RecordingFormatSettingIsLocalAndDefaultsCompact),
             ("legacy WAV migration and interrupted recovery are idempotent", LegacyWavMigrationAndInterruptedRecoveryAreIdempotent)
         };
@@ -854,6 +864,62 @@ internal static class Program
         }
     }
 
+    private static Task RecordingMetadataMapsFilesByTrackKind()
+    {
+        var orderings = new[]
+        {
+            new[]
+            {
+                MeetingRecordingTrackKind.Mixed,
+                MeetingRecordingTrackKind.System,
+                MeetingRecordingTrackKind.Microphone
+            },
+            new[]
+            {
+                MeetingRecordingTrackKind.Microphone,
+                MeetingRecordingTrackKind.Mixed,
+                MeetingRecordingTrackKind.System
+            }
+        };
+
+        foreach (var ordering in orderings)
+        {
+            var state = AppState.CreateDefault();
+            var recording = new MeetingRecording
+            {
+                State = MeetingRecordingState.Recording,
+                RecordingFormat = MeetingRecordingFormat.AacM4a
+            };
+            state.MeetingRecordings.Add(recording);
+            var tracks = ordering.Select(kind => CreateFinalTrackArtifact(
+                kind,
+                kind switch
+                {
+                    MeetingRecordingTrackKind.System => "system.m4a",
+                    MeetingRecordingTrackKind.Microphone => "microphone.m4a",
+                    _ => "mixed.m4a"
+                })).ToList();
+            var marked = new MeetingRecordingService(state).MarkRecorded(
+                recording.Id,
+                new MeetingRecordingStopResult(
+                    DateTimeOffset.UtcNow,
+                    AudioTrackHealth.Healthy,
+                    AudioTrackHealth.Healthy,
+                    null,
+                    MeetingRecordingFormat.AacM4a,
+                    tracks,
+                    HasUsableAudio: true));
+
+            Assert(marked &&
+                   recording.SystemAudioFile == "system.m4a" &&
+                   recording.MicrophoneFile == "microphone.m4a" &&
+                   recording.MixedAudioFile == "mixed.m4a",
+                "Finalized files must be assigned by TrackKind regardless of result ordering.");
+        }
+
+        return Task.CompletedTask;
+    }
+
     private static async Task TranscriptionPrefersFinalizedMixedAudio()
     {
         var directory = CreateTemporaryDirectory();
@@ -873,20 +939,33 @@ internal static class Program
             }
 
             var mixedPath = Path.Combine(directory, "mixed.m4a");
+            var systemPath = Path.Combine(directory, "system.m4a");
+            var microphonePath = Path.Combine(directory, "microphone.m4a");
+            var staleChunkPath = Path.Combine(directory, "transcription-999.m4a");
+            File.WriteAllBytes(systemPath, Encoding.UTF8.GetBytes("distinct-system-fixture"));
+            File.WriteAllBytes(microphonePath, Encoding.UTF8.GetBytes("distinct-microphone-fixture"));
+            File.WriteAllBytes(staleChunkPath, Encoding.UTF8.GetBytes("stale-chunk"));
+            var mixedHash = ComputeFileSha256(mixedPath);
+            var systemHash = ComputeFileSha256(systemPath);
+            var microphoneHash = ComputeFileSha256(microphonePath);
             var processor = new MeetingAudioProcessor();
             var result = await processor.ProcessAsync(new MeetingAudioProcessingRequest(
                 Guid.NewGuid(),
                 directory,
+                systemPath,
                 null,
-                null,
-                null,
+                microphonePath,
                 null,
                 ExistingMixedAudioPath: mixedPath,
                 RecordingFormat: MeetingRecordingFormat.AacM4a));
             Assert(result.MixedAudioPath == mixedPath &&
                    result.OrderedChunkPaths.SequenceEqual(new[] { mixedPath }) &&
+                   ComputeFileSha256(result.OrderedChunkPaths.Single()) == mixedHash &&
+                   mixedHash != systemHash &&
+                   mixedHash != microphoneHash &&
+                   !File.Exists(staleChunkPath) &&
                    Directory.EnumerateFiles(directory, "mixed.wav").Any() == false,
-                "Transcription must prefer the finalized mixed M4A without creating a full WAV.");
+                "Transcription must select the exact finalized mixed M4A bytes, clean stale chunks, and never select source tracks.");
 
             var currentPath = Path.Combine(directory, "mixed.current.m4a");
             File.Copy(mixedPath, currentPath);
@@ -981,6 +1060,194 @@ internal static class Program
                        StringComparison.OrdinalIgnoreCase) &&
                    File.Exists(legacyResult.MixedAudioPath),
                 "Legacy WAV recordings must remain transcribable through the compatibility path.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    private static async Task TranscriptionMultipartUploadsExactMixedBytes()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var microphoneBytes = Encoding.UTF8.GetBytes("microphone-fixture-A");
+            var systemBytes = Encoding.UTF8.GetBytes("system-fixture-B");
+            var mixedBytes = Encoding.UTF8.GetBytes("mixed-fixture-C-with-both-sources");
+            File.WriteAllBytes(Path.Combine(directory, "microphone.m4a"), microphoneBytes);
+            File.WriteAllBytes(Path.Combine(directory, "system.m4a"), systemBytes);
+            var mixedPath = Path.Combine(directory, "mixed.m4a");
+            File.WriteAllBytes(mixedPath, mixedBytes);
+            var handler = new CapturingMultipartHandler();
+            var diagnostics = new List<string>();
+            using var client = new HttpClient(handler);
+            var recordingId = Guid.NewGuid();
+            var meetingId = Guid.NewGuid();
+            var provider = new OpenAiTranscriptionProvider(
+                () => "synthetic-key",
+                client,
+                (message, _) => diagnostics.Add(message));
+
+            await provider.TranscribeAsync(new TranscriptionProviderRequest(
+                mixedPath,
+                "test-model",
+                MeetingTranscriptLanguage.Russian,
+                TimeSpan.Zero,
+                recordingId,
+                meetingId));
+
+            var expectedHash = Convert.ToHexString(SHA256.HashData(mixedBytes));
+            Assert(handler.FileName == "mixed.m4a" &&
+                   handler.ContentType == "audio/mp4" &&
+                   handler.UploadedBytes.SequenceEqual(mixedBytes) &&
+                   !handler.UploadedBytes.SequenceEqual(microphoneBytes) &&
+                   !handler.UploadedBytes.SequenceEqual(systemBytes) &&
+                   Convert.ToHexString(SHA256.HashData(handler.UploadedBytes)) == expectedHash,
+                "Multipart upload must contain the exact selected mixed.m4a bytes.");
+            Assert(diagnostics.Any(message =>
+                       message.Contains(recordingId.ToString("N"), StringComparison.Ordinal) &&
+                       message.Contains("fileName=mixed.m4a", StringComparison.Ordinal) &&
+                       message.Contains($"bytes={mixedBytes.Length}", StringComparison.Ordinal) &&
+                       message.Contains($"sha256={expectedHash}", StringComparison.Ordinal)),
+                "Provider diagnostics must identify the exact multipart filename, size, hash, and recording ID.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    private static async Task TranscriptionTargetsSelectedRecordingAndSnapshot()
+    {
+        await using var fixture = new TranscriptionFixture();
+        var recordingA = fixture.AddRecordedWav("recording-a", 330);
+        var recordingB = fixture.AddRecordedWav("recording-b", 660);
+
+        var result = await fixture.SendAsync(recordingB.Id);
+        Assert(result.Success, result.ErrorMessage ?? "Selected recording transcription failed.");
+        Assert(fixture.Processor.Requests.Single().RecordingId == recordingB.Id &&
+               fixture.Provider.Requests.Single().RecordingId == recordingB.Id &&
+               fixture.Provider.Requests.Single().AudioPath.EndsWith(
+                   $"{recordingB.Id:N}{Path.DirectorySeparatorChar}mixed.wav",
+                   StringComparison.OrdinalIgnoreCase),
+            "Connected command must process and upload the selected recording B only.");
+        Assert(recordingA.State == MeetingRecordingState.Recorded &&
+               recordingA.TranscriptFile.Length == 0 &&
+               recordingB.State == MeetingRecordingState.TranscriptReady &&
+               recordingB.TranscriptFile == "transcript.json",
+            "Transcript metadata must attach only to selected recording B.");
+
+        var snapshot = fixture.Snapshot();
+        var snapshotA = snapshot.MeetingRecordings.Single(item => item.Id == recordingA.Id.ToString("N"));
+        var snapshotB = snapshot.MeetingRecordings.Single(item => item.Id == recordingB.Id.ToString("N"));
+        Assert(snapshotA.TranscriptText.Length == 0 &&
+               snapshotB.TranscriptText == fixture.Provider.TranscriptFor(recordingB.Id),
+            "Workspace snapshot must load transcript text from the matching recording folder and ID.");
+    }
+
+    private static async Task TranscriptionRetryClearsStaleArtifacts()
+    {
+        await using var fixture = new TranscriptionFixture();
+        var recording = fixture.AddRecordedWav("retry-recording", 440);
+        var first = await fixture.SendAsync(recording.Id);
+        Assert(first.Success, first.ErrorMessage ?? "Initial transcription failed.");
+        var firstHash = fixture.Provider.Hashes.Single();
+
+        var folder = fixture.Storage.ResolveFolder(recording.RecordingFolderRelativePath);
+        var staleChunk = Path.Combine(folder, "transcription-999.wav");
+        File.WriteAllBytes(staleChunk, Encoding.UTF8.GetBytes("stale chunk from prior attempt"));
+        recording.TranscriptionChunkFiles.Add(Path.GetFileName(staleChunk));
+        WriteWaveTone(Path.Combine(folder, "mixed.wav"), 880);
+        fixture.Provider.BeforeTranscribe = () =>
+        {
+            Assert(recording.TranscriptFile.Length == 0 &&
+                   recording.TranscriptRawFile.Length == 0 &&
+                   recording.TranscriptMarkdownFile.Length == 0 &&
+                   !File.Exists(staleChunk) &&
+                   !File.Exists(Path.Combine(folder, "transcript.json")),
+                "Retry must clear stale chunks and transcript references before provider upload.");
+        };
+
+        var retry = await fixture.SendAsync(recording.Id);
+        Assert(retry.Success, retry.ErrorMessage ?? "Retry transcription failed.");
+        Assert(fixture.Provider.Hashes.Count == 2 &&
+               fixture.Provider.Hashes[1] != firstHash &&
+               recording.State == MeetingRecordingState.TranscriptReady &&
+               recording.TranscriptionChunkFiles.SequenceEqual(new[] { "mixed.wav" }) &&
+               fixture.Snapshot().MeetingRecordings.Single(item =>
+                   item.Id == recording.Id.ToString("N")).TranscriptText ==
+                   fixture.Provider.TranscriptFor(recording.Id),
+            "Retry must use current mixed bytes and expose only the newly generated transcript.");
+    }
+
+    private static async Task CompactTranscriptionRejectsMissingMixedTrack()
+    {
+        await using var fixture = new TranscriptionFixture();
+        var recording = fixture.AddCompactWithoutMixed();
+
+        var result = await fixture.SendAsync(recording.Id);
+        Assert(!result.Success &&
+               recording.State == MeetingRecordingState.Failed &&
+               recording.LastError.Contains("finalized mixed", StringComparison.OrdinalIgnoreCase) &&
+               fixture.Processor.Requests.Count == 0 &&
+               fixture.Provider.Requests.Count == 0,
+            "Compact recording without a valid Mixed artifact must fail without microphone/system fallback.");
+    }
+
+    private static async Task OversizedCompactChunksDeriveFromMixedTrack()
+    {
+        const long maximumChunkBytes = 256 * 1024;
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var systemPath = Path.Combine(directory, "system.m4a");
+            var microphonePath = Path.Combine(directory, "microphone.m4a");
+            File.WriteAllBytes(systemPath, Encoding.UTF8.GetBytes("system-only-fixture"));
+            File.WriteAllBytes(microphonePath, Encoding.UTF8.GetBytes("microphone-only-fixture"));
+            await using (var writer = new MediaFoundationAacTrackWriter())
+            {
+                await writer.StartAsync(new RecordingTrackWriterStartRequest(
+                    MeetingRecordingTrackKind.Mixed,
+                    directory,
+                    "mixed",
+                    PreferredChannels: 1));
+                await WriteSyntheticToneAsync(writer, TimeSpan.FromSeconds(35), 735);
+                var artifact = await writer.CompleteAsync();
+                Assert(artifact.ValidationState == MeetingRecordingValidationState.Valid,
+                    "Oversized mixed fixture did not finalize.");
+            }
+
+            var mixedPath = Path.Combine(directory, "mixed.m4a");
+            Assert(new FileInfo(mixedPath).Length > maximumChunkBytes,
+                "Oversized fixture must exceed the configured chunk limit.");
+            var staleChunk = Path.Combine(directory, "transcription-999.m4a");
+            File.WriteAllBytes(staleChunk, Encoding.UTF8.GetBytes("stale"));
+            var processor = new MeetingAudioProcessor();
+            var result = await processor.ProcessAsync(new MeetingAudioProcessingRequest(
+                Guid.NewGuid(),
+                directory,
+                systemPath,
+                null,
+                microphonePath,
+                null,
+                MaximumChunkBytes: maximumChunkBytes,
+                ExistingMixedAudioPath: mixedPath,
+                RecordingFormat: MeetingRecordingFormat.AacM4a));
+
+            var chunkNames = result.OrderedChunkPaths.Select(Path.GetFileName).ToList();
+            Assert(result.MixedAudioPath == mixedPath &&
+                   result.OrderedChunkPaths.Count > 1 &&
+                   !File.Exists(staleChunk) &&
+                   chunkNames.SequenceEqual(chunkNames.OrderBy(name => name, StringComparer.Ordinal)) &&
+                   result.OrderedChunkPaths.All(path =>
+                       path.StartsWith(directory, StringComparison.OrdinalIgnoreCase) &&
+                       Path.GetFileName(path).StartsWith("transcription-", StringComparison.Ordinal) &&
+                       new FileInfo(path).Length <= maximumChunkBytes &&
+                       ComputeFileSha256(path).Length == 64 &&
+                       !string.Equals(path, systemPath, StringComparison.OrdinalIgnoreCase) &&
+                       !string.Equals(path, microphonePath, StringComparison.OrdinalIgnoreCase)),
+                "Oversized Compact chunks must be ordered current-folder artifacts derived only from mixed.m4a.");
         }
         finally
         {
@@ -1099,7 +1366,8 @@ internal static class Program
 
     private static async Task WriteSyntheticToneAsync(
         IRecordingTrackWriter writer,
-        TimeSpan duration)
+        TimeSpan duration,
+        double frequency = 440)
     {
         const int frameCount = 960;
         var totalFrames = (long)Math.Ceiling(
@@ -1111,7 +1379,8 @@ internal static class Program
                 writer.InputFormat.SampleRate,
                 writer.InputFormat.Channels,
                 startFrame,
-                count));
+                count,
+                frequency));
         }
     }
 
@@ -1119,13 +1388,14 @@ internal static class Program
         int sampleRate,
         int channels,
         long startFrame,
-        int frameCount)
+        int frameCount,
+        double frequency = 440)
     {
         var bytes = new byte[frameCount * channels * sizeof(short)];
         for (var frame = 0; frame < frameCount; frame++)
         {
             var sample = (short)(Math.Sin(
-                2 * Math.PI * 440 * (startFrame + frame) / sampleRate) * 8_000);
+                2 * Math.PI * frequency * (startFrame + frame) / sampleRate) * 8_000);
             for (var channel = 0; channel < channels; channel++)
             {
                 var offset = (frame * channels + channel) * sizeof(short);
@@ -1139,6 +1409,49 @@ internal static class Program
             startFrame * 10_000_000L / sampleRate,
             frameCount * 10_000_000L / sampleRate);
     }
+
+    private static MeetingRecordingTrackArtifact CreateFinalTrackArtifact(
+        MeetingRecordingTrackKind kind,
+        string fileName,
+        long bytes = 1_024,
+        double durationSeconds = 1) => new()
+    {
+        Kind = kind,
+        FileName = fileName,
+        Container = Path.GetExtension(fileName).Equals(".m4a", StringComparison.OrdinalIgnoreCase)
+            ? "MPEG-4/M4A"
+            : "WAV",
+        Codec = Path.GetExtension(fileName).Equals(".m4a", StringComparison.OrdinalIgnoreCase)
+            ? "AAC-LC"
+            : "PCM 16-bit",
+        SampleRate = 48_000,
+        ChannelCount = kind == MeetingRecordingTrackKind.System ? 2 : 1,
+        Bitrate = 96_000,
+        DurationSeconds = durationSeconds,
+        Bytes = bytes,
+        HasAudioFrames = true,
+        FinalizationState = MeetingRecordingFinalizationState.Finalized,
+        ValidationState = MeetingRecordingValidationState.Valid
+    };
+
+    private static void WriteWaveTone(string path, double frequency)
+    {
+        const int sampleRate = 16_000;
+        const int sampleCount = 8_000;
+        var samples = new byte[sampleCount * sizeof(short)];
+        for (var index = 0; index < sampleCount; index++)
+        {
+            var sample = (short)(Math.Sin(2 * Math.PI * frequency * index / sampleRate) * 8_000);
+            samples[index * 2] = (byte)(sample & 0xff);
+            samples[index * 2 + 1] = (byte)((sample >> 8) & 0xff);
+        }
+
+        using var writer = new WaveFileWriter(path, new WaveFormat(sampleRate, 16, 1));
+        writer.Write(samples, 0, samples.Length);
+    }
+
+    private static string ComputeFileSha256(string path) =>
+        Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
 
     private static string CreateTemporaryDirectory()
     {
@@ -1325,6 +1638,246 @@ internal static class Program
         }
 
         public void Dispose() => _factory.Record(_session, "Release");
+    }
+
+    private sealed class CapturingMultipartHandler : HttpMessageHandler
+    {
+        public byte[] UploadedBytes { get; private set; } = Array.Empty<byte>();
+        public string FileName { get; private set; } = string.Empty;
+        public string ContentType { get; private set; } = string.Empty;
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var multipart = request.Content as MultipartFormDataContent ??
+                            throw new InvalidOperationException("Expected multipart transcription request.");
+            var file = multipart.FirstOrDefault(content =>
+                string.Equals(
+                    content.Headers.ContentDisposition?.Name?.Trim('"'),
+                    "file",
+                    StringComparison.Ordinal)) ??
+                       throw new InvalidOperationException("Multipart request has no audio file part.");
+            UploadedBytes = await file.ReadAsByteArrayAsync(cancellationToken);
+            FileName = (file.Headers.ContentDisposition?.FileNameStar ??
+                        file.Headers.ContentDisposition?.FileName ?? string.Empty).Trim('"');
+            ContentType = file.Headers.ContentType?.MediaType ?? string.Empty;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"text\":\"synthetic transcript\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        }
+    }
+
+    private sealed class TranscriptionFixture : IAsyncDisposable
+    {
+        private readonly string _directory = CreateTemporaryDirectory();
+
+        public TranscriptionFixture()
+        {
+            State = AppState.CreateDefault();
+            Meeting = new MeetingItem
+            {
+                ProjectId = State.Projects[0].Id,
+                Title = "Transcription fixture MEET",
+                StartsAtUtc = DateTimeOffset.UtcNow,
+                DurationMinutes = 30,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            State.Meetings.Add(Meeting);
+            Store = new AppStateStore(_directory);
+            Storage = new MeetingRecordingStorage(_directory);
+            Processor = new PassthroughAudioProcessor();
+            Provider = new CapturingTranscriptionProvider();
+            var settings = new LocalAppSettings
+            {
+                MeetingAssistant = new MeetingAssistantSettings
+                {
+                    ProviderUploadDisclosureAccepted = true,
+                    TranscriptionModel = "test-model",
+                    Language = MeetingTranscriptLanguage.Russian
+                }
+            };
+            Coordinator = new MeetingAssistantCoordinator(
+                State,
+                settings,
+                _directory,
+                () => Store.Save(State),
+                () => { },
+                () => StateChangedCount++,
+                new FakeMeetingRecorder(),
+                Processor,
+                Provider,
+                new UnusedAnalysisProvider(),
+                (message, _) => Diagnostics.Add(message));
+            Handler = new MeetingAssistantWorkspaceCommandHandler(Coordinator);
+        }
+
+        public AppState State { get; }
+        public MeetingItem Meeting { get; }
+        public AppStateStore Store { get; }
+        public MeetingRecordingStorage Storage { get; }
+        public PassthroughAudioProcessor Processor { get; }
+        public CapturingTranscriptionProvider Provider { get; }
+        public MeetingAssistantCoordinator Coordinator { get; }
+        public MeetingAssistantWorkspaceCommandHandler Handler { get; }
+        public List<string> Diagnostics { get; } = new();
+        public int StateChangedCount { get; private set; }
+
+        public MeetingRecording AddRecordedWav(string label, double frequency)
+        {
+            var id = Guid.NewGuid();
+            var layout = Storage.CreateLayout(Meeting.Id, id);
+            WriteWaveTone(layout.MixedAudioPath, frequency);
+            using var reader = new WaveFileReader(layout.MixedAudioPath);
+            var info = new FileInfo(layout.MixedAudioPath);
+            var recording = new MeetingRecording
+            {
+                Id = id,
+                MeetId = Meeting.Id,
+                SourceKind = MeetingRecordingSourceKind.ManualMeet,
+                State = MeetingRecordingState.Recorded,
+                RecordingFormat = MeetingRecordingFormat.Wav,
+                RecordingFolderRelativePath = layout.RelativeFolder,
+                MixedAudioFile = Path.GetFileName(layout.MixedAudioPath),
+                Tracks = new List<MeetingRecordingTrackArtifact>
+                {
+                    CreateFinalTrackArtifact(
+                        MeetingRecordingTrackKind.Mixed,
+                        Path.GetFileName(layout.MixedAudioPath),
+                        info.Length,
+                        reader.TotalTime.TotalSeconds)
+                },
+                LastError = label,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            State.MeetingRecordings.Add(recording);
+            Store.Save(State);
+            return recording;
+        }
+
+        public MeetingRecording AddCompactWithoutMixed()
+        {
+            var id = Guid.NewGuid();
+            var layout = Storage.CreateLayout(Meeting.Id, id);
+            File.WriteAllBytes(Path.Combine(layout.AbsoluteFolder, "system.m4a"), new byte[] { 1, 2, 3 });
+            File.WriteAllBytes(Path.Combine(layout.AbsoluteFolder, "microphone.m4a"), new byte[] { 4, 5, 6 });
+            var recording = new MeetingRecording
+            {
+                Id = id,
+                MeetId = Meeting.Id,
+                SourceKind = MeetingRecordingSourceKind.ManualMeet,
+                State = MeetingRecordingState.Recorded,
+                RecordingFormat = MeetingRecordingFormat.AacM4a,
+                RecordingFolderRelativePath = layout.RelativeFolder,
+                SystemAudioFile = "system.m4a",
+                MicrophoneFile = "microphone.m4a",
+                Tracks = new List<MeetingRecordingTrackArtifact>
+                {
+                    CreateFinalTrackArtifact(MeetingRecordingTrackKind.System, "system.m4a"),
+                    CreateFinalTrackArtifact(MeetingRecordingTrackKind.Microphone, "microphone.m4a")
+                },
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            State.MeetingRecordings.Add(recording);
+            Store.Save(State);
+            return recording;
+        }
+
+        public async Task<WorkspaceCommandResult> SendAsync(Guid recordingId)
+        {
+            var command = JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1,
+                commandId = Guid.NewGuid().ToString("N"),
+                type = "transcribeMeetingRecording",
+                payload = new
+                {
+                    recordingId = recordingId.ToString("N"),
+                    acceptUploadDisclosure = true
+                }
+            });
+            return await Handler.TryHandleAsync(command) ??
+                   throw new InvalidOperationException("Transcription command was not recognized.");
+        }
+
+        public WorkspaceSnapshot Snapshot() => WorkspaceSnapshotFactory.Create(
+            State,
+            mode: WorkspaceSnapshotFactory.ConnectedMode,
+            transcriptLoader: Coordinator.LoadTranscriptText);
+
+        public async ValueTask DisposeAsync()
+        {
+            await Coordinator.DisposeAsync();
+            DeleteTemporaryDirectory(_directory);
+        }
+    }
+
+    private sealed class PassthroughAudioProcessor : IMeetingAudioProcessor
+    {
+        public List<MeetingAudioProcessingRequest> Requests { get; } = new();
+
+        public Task<MeetingAudioProcessingResult> ProcessAsync(
+            MeetingAudioProcessingRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Requests.Add(request);
+            var path = request.ExistingMixedAudioPath ??
+                       throw new InvalidDataException("Synthetic processor requires mixed audio.");
+            using var reader = new AudioFileReader(path);
+            return Task.FromResult(new MeetingAudioProcessingResult(
+                path,
+                new[] { path },
+                reader.TotalTime));
+        }
+    }
+
+    private sealed class CapturingTranscriptionProvider : ITranscriptionProvider
+    {
+        private readonly Dictionary<Guid, string> _latestTranscripts = new();
+
+        public string Name => "Synthetic";
+        public List<TranscriptionProviderRequest> Requests { get; } = new();
+        public List<string> Hashes { get; } = new();
+        public Action? BeforeTranscribe { get; set; }
+
+        public Task<TranscriptionProviderResponse> TranscribeAsync(
+            TranscriptionProviderRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            BeforeTranscribe?.Invoke();
+            Requests.Add(request);
+            var hash = ComputeFileSha256(request.AudioPath);
+            Hashes.Add(hash);
+            var recordingId = request.RecordingId ??
+                              throw new InvalidOperationException("Recording ID was not forwarded to provider.");
+            var text = $"transcript-{hash[..12]}";
+            _latestTranscripts[recordingId] = text;
+            return Task.FromResult(new TranscriptionProviderResponse(
+                JsonSerializer.Serialize(new { text }),
+                text,
+                new[]
+                {
+                    new TranscriptSegment
+                    {
+                        Index = 0,
+                        StartSeconds = request.ChunkOffset.TotalSeconds,
+                        EndSeconds = request.ChunkOffset.TotalSeconds + 1,
+                        Text = text
+                    }
+                },
+                "ru"));
+        }
+
+        public string TranscriptFor(Guid recordingId) => _latestTranscripts[recordingId];
     }
 
     private sealed class RecordingFixture : IAsyncDisposable

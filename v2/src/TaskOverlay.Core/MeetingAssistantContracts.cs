@@ -84,7 +84,9 @@ public sealed record TranscriptionProviderRequest(
     string AudioPath,
     string Model,
     MeetingTranscriptLanguage Language,
-    TimeSpan ChunkOffset);
+    TimeSpan ChunkOffset,
+    Guid? RecordingId = null,
+    Guid? MeetingId = null);
 
 public sealed record TranscriptionProviderResponse(
     string RawJson,

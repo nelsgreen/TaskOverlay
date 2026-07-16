@@ -11,7 +11,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
-using NAudio.Wave;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
@@ -359,17 +358,30 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
         try
         {
+            Report(
+                $"MEET transcription started: recordingId={recordingId:N}; " +
+                $"meetId={FormatOptionalId(recording.MeetId)}; " +
+                $"model={_localSettings.MeetingAssistant.TranscriptionModel}; " +
+                $"language={_localSettings.MeetingAssistant.Language}.");
             if (!service.MarkProcessing(recordingId))
             {
                 return MeetingAssistantOperationResult.Fail(
                     "Recording is not ready for transcription.");
             }
 
-            Persist(recording);
             var folder = _storage.ResolveFolder(recording.RecordingFolderRelativePath);
             var systemPath = ResolveOptional(recording, recording.SystemAudioFile);
             var microphonePath = ResolveOptional(recording, recording.MicrophoneFile);
-            var mixedPath = ResolveOptional(recording, recording.MixedAudioFile);
+            var mixedPath = ResolveMixedPathForTranscription(recording);
+            await ReportTranscriptionInputsAsync(
+                recording,
+                folder,
+                systemPath,
+                microphonePath,
+                mixedPath,
+                token);
+            ClearPreviousTranscriptionArtifacts(recording, folder);
+            Persist(recording);
             var mixedBitrate = recording.Tracks.FirstOrDefault(track =>
                 track.Kind == MeetingRecordingTrackKind.Mixed)?.Bitrate ?? 96_000;
             var processing = await _audioProcessor.ProcessAsync(
@@ -384,6 +396,24 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                     RecordingFormat: recording.RecordingFormat,
                     MixedAudioBitrate: mixedBitrate),
                 token);
+            var sourceFingerprint = await TranscriptionAudioDiagnostics.InspectAsync(
+                processing.MixedAudioPath,
+                token);
+            if (recording.RecordingFormat == MeetingRecordingFormat.AacM4a &&
+                !PathsEqual(sourceFingerprint.FullPath, mixedPath))
+            {
+                throw new InvalidDataException(
+                    "Compact transcription did not retain the finalized mixed track as its source.");
+            }
+
+            Report(
+                $"MEET transcription source selected: recordingId={recordingId:N}; " +
+                $"meetId={FormatOptionalId(recording.MeetId)}; " +
+                $"path={sourceFingerprint.FullPath}; fileName={sourceFingerprint.FileName}; " +
+                $"bytes={sourceFingerprint.Bytes}; " +
+                $"durationSeconds={sourceFingerprint.Duration.TotalSeconds:F3}; " +
+                $"sha256={sourceFingerprint.Sha256}; " +
+                $"chunkCount={processing.OrderedChunkPaths.Count}.");
             if (!service.MarkTranscribing(recordingId))
             {
                 throw new InvalidOperationException(
@@ -398,20 +428,40 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 .ToList();
             Persist(recording);
 
+            var chunkFingerprints = new List<TranscriptionAudioFingerprint>();
+            for (var index = 0; index < processing.OrderedChunkPaths.Count; index++)
+            {
+                var chunkPath = processing.OrderedChunkPaths[index];
+                EnsureFileInsideFolder(chunkPath, folder);
+                var fingerprint = await TranscriptionAudioDiagnostics.InspectAsync(
+                    chunkPath,
+                    token);
+                chunkFingerprints.Add(fingerprint);
+                Report(
+                    $"MEET transcription chunk prepared: recordingId={recordingId:N}; " +
+                    $"meetId={FormatOptionalId(recording.MeetId)}; index={index}; " +
+                    $"path={fingerprint.FullPath}; fileName={fingerprint.FileName}; " +
+                    $"bytes={fingerprint.Bytes}; " +
+                    $"durationSeconds={fingerprint.Duration.TotalSeconds:F3}; " +
+                    $"sha256={fingerprint.Sha256}.");
+            }
+
             var responses = new List<TranscriptionProviderResponse>();
             var offset = TimeSpan.Zero;
-            foreach (var chunkPath in processing.OrderedChunkPaths)
+            foreach (var chunk in chunkFingerprints)
             {
                 token.ThrowIfCancellationRequested();
                 var response = await _transcriptionProvider.TranscribeAsync(
                     new TranscriptionProviderRequest(
-                        chunkPath,
+                        chunk.FullPath,
                         _localSettings.MeetingAssistant.TranscriptionModel,
                         _localSettings.MeetingAssistant.Language,
-                        offset),
+                        offset,
+                        recordingId,
+                        recording.MeetId),
                     token);
                 responses.Add(response);
-                offset += ReadAudioDuration(chunkPath);
+                offset += chunk.Duration;
             }
 
             var normalized = ComposeTranscript(
@@ -427,14 +477,26 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             MeetingRecordingStorage.WriteTextAtomic(
                 layout.TranscriptMarkdownPath,
                 BuildTranscriptMarkdown(normalized));
-            service.MarkTranscriptReady(
-                recordingId,
-                Path.GetFileName(processing.MixedAudioPath),
-                processing.OrderedChunkPaths.Select(Path.GetFileName).Cast<string>().ToList(),
-                Path.GetFileName(layout.TranscriptRawPath),
-                Path.GetFileName(layout.TranscriptPath),
-                Path.GetFileName(layout.TranscriptMarkdownPath));
+            if (!service.MarkTranscriptReady(
+                    recordingId,
+                    Path.GetFileName(processing.MixedAudioPath),
+                    processing.OrderedChunkPaths.Select(Path.GetFileName).Cast<string>().ToList(),
+                    Path.GetFileName(layout.TranscriptRawPath),
+                    Path.GetFileName(layout.TranscriptPath),
+                    Path.GetFileName(layout.TranscriptMarkdownPath)))
+            {
+                throw new InvalidOperationException(
+                    "Transcript could not be associated with its recording.");
+            }
+
             Persist(recording);
+            Report(
+                $"MEET transcription completed: recordingId={recordingId:N}; " +
+                $"meetId={FormatOptionalId(recording.MeetId)}; " +
+                $"sourceFile={sourceFingerprint.FileName}; " +
+                $"sourceSha256={sourceFingerprint.Sha256}; " +
+                $"chunks={chunkFingerprints.Count}; " +
+                $"transcriptPath={layout.TranscriptPath}.");
             return new MeetingAssistantOperationResult(true, RecordingId: recordingId);
         }
         catch (OperationCanceledException)
@@ -956,6 +1018,154 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         _stateChanged();
     }
 
+    private string? ResolveMixedPathForTranscription(MeetingRecording recording)
+    {
+        var compatibilityPath = ResolveOptional(recording, recording.MixedAudioFile);
+        if (recording.RecordingFormat != MeetingRecordingFormat.AacM4a)
+        {
+            return compatibilityPath;
+        }
+
+        var validMixedTracks = recording.Tracks
+            .Where(track =>
+                track.Kind == MeetingRecordingTrackKind.Mixed &&
+                track.FinalizationState == MeetingRecordingFinalizationState.Finalized &&
+                track.ValidationState == MeetingRecordingValidationState.Valid &&
+                !string.IsNullOrWhiteSpace(track.FileName))
+            .ToList();
+        if (validMixedTracks.Count != 1 ||
+            string.IsNullOrWhiteSpace(recording.MixedAudioFile) ||
+            !string.Equals(
+                recording.MixedAudioFile,
+                validMixedTracks[0].FileName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                "Compact transcription requires metadata for exactly one finalized mixed M4A track.");
+        }
+
+        return _storage.ResolveFile(recording, validMixedTracks[0].FileName);
+    }
+
+    private void ClearPreviousTranscriptionArtifacts(
+        MeetingRecording recording,
+        string folder)
+    {
+        foreach (var path in Directory.EnumerateFiles(
+                     folder,
+                     "transcription-*.*",
+                     SearchOption.TopDirectoryOnly))
+        {
+            var extension = Path.GetExtension(path);
+            if (extension.Equals(".m4a", StringComparison.OrdinalIgnoreCase) ||
+                extension.Equals(".wav", StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(path);
+            }
+        }
+
+        var layout = LayoutFor(recording);
+        File.Delete(layout.TranscriptRawPath);
+        File.Delete(layout.TranscriptPath);
+        File.Delete(layout.TranscriptMarkdownPath);
+        recording.TranscriptionChunkFiles.Clear();
+        recording.TranscriptRawFile = string.Empty;
+        recording.TranscriptFile = string.Empty;
+        recording.TranscriptMarkdownFile = string.Empty;
+    }
+
+    private async Task ReportTranscriptionInputsAsync(
+        MeetingRecording recording,
+        string folder,
+        string? systemPath,
+        string? microphonePath,
+        string? mixedPath,
+        CancellationToken cancellationToken)
+    {
+        Report(
+            $"MEET transcription metadata resolved: recordingId={recording.Id:N}; " +
+            $"meetId={FormatOptionalId(recording.MeetId)}; folder={folder}; " +
+            $"format={recording.RecordingFormat}; " +
+            $"systemFile={EmptyAsNone(recording.SystemAudioFile)}; " +
+            $"microphoneFile={EmptyAsNone(recording.MicrophoneFile)}; " +
+            $"mixedFile={EmptyAsNone(recording.MixedAudioFile)}.");
+        foreach (var track in recording.Tracks)
+        {
+            Report(
+                $"MEET transcription track metadata: recordingId={recording.Id:N}; " +
+                $"kind={track.Kind}; fileName={EmptyAsNone(track.FileName)}; " +
+                $"bytes={track.Bytes}; durationSeconds={track.DurationSeconds:F3}; " +
+                $"finalization={track.FinalizationState}; validation={track.ValidationState}.");
+        }
+
+        await ReportResolvedAudioAsync(recording, "system", systemPath, cancellationToken);
+        await ReportResolvedAudioAsync(recording, "microphone", microphonePath, cancellationToken);
+        await ReportResolvedAudioAsync(recording, "mixed", mixedPath, cancellationToken);
+    }
+
+    private async Task ReportResolvedAudioAsync(
+        MeetingRecording recording,
+        string label,
+        string? path,
+        CancellationToken cancellationToken)
+    {
+        if (path is null || !File.Exists(path))
+        {
+            Report(
+                $"MEET transcription resolved audio: recordingId={recording.Id:N}; " +
+                $"kind={label}; path={path ?? "none"}; exists=False.");
+            return;
+        }
+
+        try
+        {
+            var fingerprint = await TranscriptionAudioDiagnostics.InspectAsync(
+                path,
+                cancellationToken);
+            Report(
+                $"MEET transcription resolved audio: recordingId={recording.Id:N}; " +
+                $"kind={label}; path={fingerprint.FullPath}; exists=True; " +
+                $"bytes={fingerprint.Bytes}; durationSeconds={fingerprint.Duration.TotalSeconds:F3}; " +
+                $"sha256={fingerprint.Sha256}.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (
+            ex is IOException or
+            UnauthorizedAccessException or
+            InvalidDataException or
+            NotSupportedException)
+        {
+            Report(
+                $"MEET transcription audio diagnostics failed: " +
+                $"recordingId={recording.Id:N}; kind={label}; path={path}.",
+                ex);
+        }
+    }
+
+    private static void EnsureFileInsideFolder(string path, string folder)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var fullFolder = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar) +
+                         Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(fullFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                "A transcription chunk is outside its recording folder.");
+        }
+    }
+
+    private static bool PathsEqual(string left, string? right) =>
+        right is not null && string.Equals(
+            Path.GetFullPath(left),
+            Path.GetFullPath(right),
+            StringComparison.OrdinalIgnoreCase);
+
+    private static string EmptyAsNone(string value) =>
+        string.IsNullOrWhiteSpace(value) ? "none" : value;
+
     private MeetingRecordingLayout LayoutFor(MeetingRecording recording)
     {
         var folder = _storage.ResolveFolder(recording.RecordingFolderRelativePath);
@@ -974,12 +1184,6 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
     private string? ResolveOptional(MeetingRecording recording, string fileName) =>
         string.IsNullOrWhiteSpace(fileName) ? null : _storage.ResolveFile(recording, fileName);
-
-    private static TimeSpan ReadAudioDuration(string path)
-    {
-        using var reader = new AudioFileReader(path);
-        return reader.TotalTime;
-    }
 
     private static MeetingRecordingTrackArtifact CloneTrack(
         MeetingRecordingTrackArtifact track) => new()

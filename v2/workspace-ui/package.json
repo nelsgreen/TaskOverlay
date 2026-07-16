@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:recording-controls": "node --test lib/meeting-recording-controls.test.mjs",
+    "test:recording-selection": "node --test lib/meeting-recording-selection.test.mjs",
     "test:meet-modal": "node --test lib/meet-modal-policy.test.mjs"
   },
   "dependencies": {

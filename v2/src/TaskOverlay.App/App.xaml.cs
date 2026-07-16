@@ -100,7 +100,9 @@ public partial class App : System.Windows.Application
                 new WindowsMeetingRecorder(
                     (message, exception) => _diagnostics.Log(message, exception)),
                 new MeetingAudioProcessor(),
-                new OpenAiTranscriptionProvider(() => _openAiApiKeyStore.LoadKey()),
+                new OpenAiTranscriptionProvider(
+                    () => _openAiApiKeyStore.LoadKey(),
+                    diagnostic: (message, exception) => _diagnostics.Log(message, exception)),
                 new OpenAiMeetingAnalysisProvider(() => _openAiApiKeyStore.LoadKey()),
                 (message, exception) => _diagnostics.Log(message, exception));
             _meetingAssistantCommandHandler = new MeetingAssistantWorkspaceCommandHandler(

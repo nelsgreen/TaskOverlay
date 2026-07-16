@@ -164,7 +164,9 @@ public sealed class MeetingRecordingService
             MeetingRecordingState.Processing,
             now,
             MeetingRecordingState.Recorded,
-            MeetingRecordingState.Failed);
+            MeetingRecordingState.Failed,
+            MeetingRecordingState.TranscriptReady,
+            MeetingRecordingState.Ready);
 
     public bool MarkTranscribing(Guid recordingId, DateTimeOffset? now = null) =>
         TryTransition(
