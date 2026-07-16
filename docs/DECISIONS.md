@@ -137,6 +137,28 @@ item.
   backups do not copy audio or transcript files. The optional OpenAI API key
   is protected separately with Windows DPAPI and is never stored in
   `state.json` or logs.
+- The MEET workspace uses exactly three top-level tabs: Details, Sources, and
+  Review. Sources owns recordings, managed imports, transcript versions, and
+  manual screenshots; Review combines the explicitly active transcript with
+  analysis and visual references. Transcript, Analysis, and Context are not
+  separate top-level tabs.
+- Imported audio and transcripts are copied into deterministic MEET-relative
+  managed storage. `state.json` stores provenance and safe relative metadata,
+  never the original external absolute path. Audio processing ranges are
+  non-destructive and never alter the managed original.
+- A MEET can retain multiple generated/imported transcript versions and points
+  to one active transcript. Analysis records both transcript ID and revision
+  ID, and a revision mismatch is surfaced as stale analysis that is re-run only
+  by an explicit user action.
+- Speaker identity is separate from presentation: normalized segments reference
+  stable `SpeakerId` values, while transcript-level mappings store
+  `OriginalLabel`, `DisplayName`, and `IsCurrentUser`. Renaming or merging
+  speakers must not rewrite original imported/provider artifacts. Global
+  speaker editing UI is intentionally deferred.
+- Screenshots are explicit user-selected Window/Display captures, stored as
+  managed PNG artifacts with UTC time and active-recording offset when one is
+  available. There is no silent/periodic capture, video, OCR, or multimodal AI
+  processing in this slice.
 - Transcription and structured meeting analysis use provider interfaces.
   ProposedActions never mutate state directly: the user reviews and selects
   actions, and apply routes through existing TaskOverlay domain services.
@@ -205,8 +227,9 @@ item.
   foundation PR (expanded export shipped later - see the Context Pack entry
   below).
 - Modal-based creation remains appropriate for large editors. MEET now uses one
-  dedicated responsive Workspace modal because recording, transcript,
-  analysis, Context, and scheduling no longer fit the narrow Details column.
+  dedicated responsive Workspace modal with Details / Sources / Review because
+  recording, transcript, analysis, Context, and scheduling no longer fit the
+  narrow Details column.
   TASK Details intentionally remains in the right sidebar. Closing the MEET
   modal never owns or stops the process-level recording/finalization runtime.
 - Task Details Context block (done): a compact, Task-only card in Task

@@ -24,6 +24,9 @@ public partial class WorkspaceWindow : Window
     private readonly Func<MeetingRecording, string?>? _transcriptLoader;
     private readonly Func<Guid?>? _activeRecordingIdLoader;
     private readonly Action<string, Exception?>? _diagnostic;
+    private readonly Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>?
+        _meetingTranscriptLoader;
+    private readonly Func<MeetingScreenshot, string?>? _screenshotThumbnailLoader;
     private bool _initialized;
 
     public WorkspaceWindow(
@@ -34,7 +37,10 @@ public partial class WorkspaceWindow : Window
             runtimeCommandHandler = null,
         Func<MeetingRecording, string?>? transcriptLoader = null,
         Func<Guid?>? activeRecordingIdLoader = null,
-        Action<string, Exception?>? diagnostic = null)
+        Action<string, Exception?>? diagnostic = null,
+        Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>?
+            meetingTranscriptLoader = null,
+        Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _commandDispatcher = new WorkspaceCommandDispatcher(
@@ -45,6 +51,8 @@ public partial class WorkspaceWindow : Window
         _transcriptLoader = transcriptLoader;
         _activeRecordingIdLoader = activeRecordingIdLoader;
         _diagnostic = diagnostic;
+        _meetingTranscriptLoader = meetingTranscriptLoader;
+        _screenshotThumbnailLoader = screenshotThumbnailLoader;
         InitializeComponent();
     }
 
@@ -219,7 +227,9 @@ public partial class WorkspaceWindow : Window
             _state,
             mode: WorkspaceSnapshotFactory.ConnectedMode,
             transcriptLoader: _transcriptLoader,
-            activeMeetingRecordingId: _activeRecordingIdLoader?.Invoke());
+            activeMeetingRecordingId: _activeRecordingIdLoader?.Invoke(),
+            meetingTranscriptLoader: _meetingTranscriptLoader,
+            screenshotThumbnailLoader: _screenshotThumbnailLoader);
         SendMessage(snapshot);
     }
 

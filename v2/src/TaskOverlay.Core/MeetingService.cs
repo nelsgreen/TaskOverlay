@@ -98,6 +98,15 @@ public sealed class MeetingService
             analysis.MeetId = null;
             analysis.UpdatedAtUtc = timestamp;
         }
+
+        foreach (var transcript in (_state.MeetingTranscripts ?? new())
+                     .Where(transcript => transcript.MeetId == meetingId))
+        {
+            transcript.MeetId = null;
+            transcript.UpdatedAtUtc = timestamp;
+        }
+
+        _state.MeetingScreenshots?.RemoveAll(screenshot => screenshot.MeetId == meetingId);
         return true;
     }
 

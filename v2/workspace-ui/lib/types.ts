@@ -140,6 +140,7 @@ export interface MeetItem {
   /** optional id of a related Task */
   linkedTaskId?: string
   recordingPolicy?: MeetingRecordingPolicy
+  activeTranscriptId?: string
 }
 
 export type MeetingRecordingPolicy = "Inherit" | "Manual" | "AutoRecord"
@@ -158,11 +159,17 @@ export type MeetingRecordingState =
 export interface MeetingRecordingSnapshot {
   id: string
   meetingId: string | null
-  sourceKind: "ScheduledMeet" | "ManualMeet" | "Emergency"
+  sourceKind: "ScheduledMeet" | "ManualMeet" | "Emergency" | "Imported"
   state: MeetingRecordingState
   startedAtUtc: string | null
   stoppedAtUtc: string | null
-  recordingFormat: "AacM4a" | "Wav"
+  recordingFormat: "AacM4a" | "Wav" | "Mp3"
+  originalFileName: string
+  managedFileName: string
+  importedAtUtc: string | null
+  importedFileBytes: number
+  processFromSeconds: number | null
+  processUntilSeconds: number | null
   durationSeconds: number
   totalBytes: number
   systemAudioHealth: "Unknown" | "Healthy" | "Unavailable" | "Failed"
@@ -225,7 +232,10 @@ export interface MeetingProposedActionSnapshot {
 
 export interface MeetingAnalysisSnapshot {
   id: string
-  recordingId: string
+  recordingId: string | null
+  transcriptId: string
+  transcriptRevisionId: string
+  isStale: boolean
   meetingId: string | null
   state: "Pending" | "Analyzing" | "ReadyForReview" | "PartiallyApplied" | "Applied" | "Failed"
   provider: string
@@ -243,6 +253,63 @@ export interface MeetingAnalysisSnapshot {
   lastError: string
   createdAtUtc: string
   updatedAtUtc: string
+}
+
+export interface MeetingTranscriptSegmentSnapshot {
+  index: number
+  startSeconds: number | null
+  endSeconds: number | null
+  text: string
+  speakerId: string | null
+  speakerName: string | null
+}
+
+export interface MeetingTranscriptSpeakerSnapshot {
+  speakerId: string
+  originalLabel: string
+  displayName: string
+  isCurrentUser: boolean
+}
+
+export interface MeetingTranscriptSnapshot {
+  id: string
+  meetingId: string
+  recordingId: string | null
+  origin: "Generated" | "Imported"
+  format: "NormalizedJson" | "PlainText" | "Markdown" | "SubRip" | "WebVtt"
+  provider: string
+  sourceLabel: string
+  originalFileName: string
+  importedAtUtc: string | null
+  hasTimestamps: boolean
+  hasSpeakerLabels: boolean
+  isActive: boolean
+  revisionId: string
+  originalAvailable: boolean
+  normalizedAvailable: boolean
+  markdownAvailable: boolean
+  text: string
+  segments: MeetingTranscriptSegmentSnapshot[]
+  speakers: MeetingTranscriptSpeakerSnapshot[]
+  warnings: string[]
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
+export interface MeetingScreenshotSnapshot {
+  id: string
+  meetingId: string
+  recordingId: string | null
+  capturedAtUtc: string
+  offsetFromRecordingStartSeconds: number | null
+  fileName: string
+  width: number
+  height: number
+  sourceKind: "Window" | "Display"
+  sourceLabel: string
+  bytes: number
+  isAvailable: boolean
+  thumbnailDataUrl: string | null
 }
 
 /** Which panel mode is active in the right panel */
@@ -301,7 +368,7 @@ export interface ProjectScope {
 }
 
 export interface WorkspaceSnapshotContract {
-  schemaVersion: 3
+  schemaVersion: 4
   generatedAtUtc: string
   mode: "readonly" | "connected"
   projects: WorkspaceProjectSnapshot[]
@@ -310,6 +377,8 @@ export interface WorkspaceSnapshotContract {
   taskWorkSessions: WorkspaceTaskWorkSessionSnapshot[]
   meetings: WorkspaceMeetingSnapshot[]
   meetingRecordings: MeetingRecordingSnapshot[]
+  meetingTranscripts: MeetingTranscriptSnapshot[]
+  meetingScreenshots: MeetingScreenshotSnapshot[]
   meetingAnalyses: MeetingAnalysisSnapshot[]
   activeMeetingRecordingId: string | null
   contextSources?: WorkspaceContextSourceSnapshot[]
@@ -434,6 +503,7 @@ export interface WorkspaceMeetingSnapshot {
   location: string
   link: string
   linkedTaskId: string | null
+  activeTranscriptId: string | null
   recordingPolicy: MeetingRecordingPolicy
   createdAtUtc: string
   updatedAtUtc: string
@@ -633,6 +703,7 @@ export type WorkspaceMeetingAssistantCommand =
   | { type: "stopMeetingRecording"; recordingId: string }
   | { type: "transcribeMeetingRecording"; recordingId: string; acceptUploadDisclosure: boolean }
   | { type: "analyzeMeetingRecording"; recordingId: string }
+  | { type: "analyzeMeetingTranscript"; transcriptId: string }
   | { type: "cancelMeetingProcessing"; recordingId: string }
   | { type: "setMeetingRecordingPolicy"; meetingId: string; policy: MeetingRecordingPolicy }
   | { type: "setMeetingRecordingFormat"; format: "AacM4a" | "Wav" }
@@ -641,6 +712,24 @@ export type WorkspaceMeetingAssistantCommand =
   | { type: "linkMeetingRecording"; recordingId: string; meetingId: string }
   | { type: "createMeetingFromRecording"; recordingId: string; projectId: string; title: string }
   | { type: "openMeetingRecordingFolder"; recordingId: string }
+  | { type: "importMeetingAudio"; meetingId: string }
+  | {
+      type: "setImportedAudioRange"
+      recordingId: string
+      fromSeconds: number | null
+      untilSeconds: number | null
+    }
+  | { type: "importMeetingTranscript"; meetingId: string; sourceLabel?: string }
+  | { type: "setActiveMeetingTranscript"; meetingId: string; transcriptId: string }
+  | { type: "deleteMeetingTranscript"; transcriptId: string }
+  | {
+      type: "openMeetingTranscriptArtifact"
+      transcriptId: string
+      artifact: "original" | "normalized" | "markdown"
+    }
+  | { type: "captureMeetingScreenshot"; meetingId: string }
+  | { type: "openMeetingScreenshot"; screenshotId: string }
+  | { type: "deleteMeetingScreenshot"; screenshotId: string }
   | { type: "openMeetingLink"; meetingId: string }
   | {
       type: "applyMeetingProposedActions"

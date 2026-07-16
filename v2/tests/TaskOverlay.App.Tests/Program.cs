@@ -52,6 +52,8 @@ internal static class Program
             ("transcription retry clears stale artifacts", TranscriptionRetryClearsStaleArtifacts),
             ("compact transcription rejects missing mixed track", CompactTranscriptionRejectsMissingMixedTrack),
             ("oversized compact chunks derive from mixed track", OversizedCompactChunksDeriveFromMixedTrack),
+            ("imported audio is managed and range bounded", ImportedAudioIsManagedAndRangeBounded),
+            ("meeting source commands persist and refresh", MeetingSourceCommandsPersistAndRefresh),
             ("recording format setting is local and defaults compact", RecordingFormatSettingIsLocalAndDefaultsCompact),
             ("legacy WAV migration and interrupted recovery are idempotent", LegacyWavMigrationAndInterruptedRecoveryAreIdempotent)
         };
@@ -1298,6 +1300,212 @@ internal static class Program
         }
     }
 
+    private static async Task ImportedAudioIsManagedAndRangeBounded()
+    {
+        var importDirectory = CreateTemporaryDirectory();
+        try
+        {
+            var sourcePath = Path.Combine(importDirectory, "external-source.wav");
+            WriteWaveTone(sourcePath, 525);
+            var interaction = new FakeMeetingSourceInteraction { AudioPath = sourcePath };
+            await using var fixture = new TranscriptionFixture(interaction);
+
+            var unsupportedPath = Path.Combine(importDirectory, "external-source.flac");
+            File.WriteAllText(unsupportedPath, "unsupported fixture");
+            interaction.AudioPath = unsupportedPath;
+            var unsupported = await fixture.SendCommandAsync(
+                "importMeetingAudio",
+                new { meetingId = fixture.Meeting.Id.ToString("N") });
+            Assert(!unsupported.Success && fixture.State.MeetingRecordings.Count == 0,
+                "Unsupported audio formats should fail clearly without creating metadata.");
+            interaction.AudioPath = sourcePath;
+
+            var import = await fixture.SendCommandAsync(
+                "importMeetingAudio",
+                new { meetingId = fixture.Meeting.Id.ToString("N") });
+            Assert(import.Success, import.ErrorMessage ?? "Audio import failed.");
+            var recording = fixture.State.MeetingRecordings.Single();
+            var folder = fixture.Storage.ResolveFolder(recording.RecordingFolderRelativePath);
+            var managedPath = Path.Combine(folder, recording.ManagedFileName);
+            Assert(recording.SourceKind == MeetingRecordingSourceKind.Imported &&
+                   recording.OriginalFileName == "external-source.wav" &&
+                   recording.MixedAudioFile == recording.ManagedFileName &&
+                   File.Exists(managedPath),
+                "Imported audio should be copied into managed storage with provenance metadata.");
+
+            File.Delete(sourcePath);
+            Assert(File.Exists(managedPath),
+                "The managed audio copy must survive deletion of the external source.");
+
+            var range = await fixture.SendCommandAsync(
+                "setImportedAudioRange",
+                new
+                {
+                    recordingId = recording.Id.ToString("N"),
+                    fromSeconds = 0.1,
+                    untilSeconds = 0.4
+                });
+            var invalidRange = await fixture.SendCommandAsync(
+                "setImportedAudioRange",
+                new
+                {
+                    recordingId = recording.Id.ToString("N"),
+                    fromSeconds = 0.4,
+                    untilSeconds = 0.1
+                });
+            Assert(range.Success && !invalidRange.Success &&
+                   recording.ProcessFromSeconds == 0.1 &&
+                   recording.ProcessUntilSeconds == 0.4,
+                "Imported audio ranges should validate without mutating the managed original.");
+
+            var transcription = await fixture.SendAsync(recording.Id);
+            Assert(transcription.Success &&
+                   fixture.Processor.Requests.Single().ProcessFromSeconds == 0.1 &&
+                   fixture.Processor.Requests.Single().ProcessUntilSeconds == 0.4,
+                "The connected transcription path should forward the selected import range.");
+
+            var processingDirectory = Path.Combine(importDirectory, "range-output");
+            Directory.CreateDirectory(processingDirectory);
+            var processed = await new MeetingAudioProcessor().ProcessAsync(
+                new MeetingAudioProcessingRequest(
+                    Guid.NewGuid(),
+                    processingDirectory,
+                    null,
+                    null,
+                    null,
+                    null,
+                    ExistingMixedAudioPath: managedPath,
+                    RecordingFormat: MeetingRecordingFormat.Wav,
+                    ProcessFromSeconds: 0.1,
+                    ProcessUntilSeconds: 0.4));
+            Assert(Math.Abs(processed.Duration.TotalSeconds - 0.3) < 0.02 &&
+                   processed.OrderedChunkPaths.Count == 1 &&
+                   processed.OrderedChunkPaths.All(path =>
+                       Path.GetExtension(path).Equals(".m4a", StringComparison.OrdinalIgnoreCase)) &&
+                   !File.Exists(Path.Combine(processingDirectory, "mixed.wav")),
+                "Range processing should encode only the selected interval without a full WAV intermediary.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(importDirectory);
+        }
+    }
+
+    private static async Task MeetingSourceCommandsPersistAndRefresh()
+    {
+        var importDirectory = CreateTemporaryDirectory();
+        try
+        {
+            var transcriptPath = Path.Combine(importDirectory, "meeting.srt");
+            File.WriteAllText(
+                transcriptPath,
+                "1\n00:00:01,000 --> 00:00:02,000\nA: Decision one\n\n" +
+                "2\n00:00:02,000 --> 00:00:03,000\nB: Follow-up\n");
+            var screenshotPath = Path.Combine(importDirectory, "capture.png");
+            File.WriteAllBytes(
+                screenshotPath,
+                Convert.FromBase64String(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="));
+            var capturedAtUtc = DateTimeOffset.Parse("2026-07-16T17:00:00Z");
+            var interaction = new FakeMeetingSourceInteraction
+            {
+                TranscriptPath = transcriptPath,
+                Screenshot = new MeetingScreenshotCaptureResult(
+                    screenshotPath,
+                    1,
+                    1,
+                    MeetingScreenshotSourceKind.Window,
+                    "Test window",
+                    capturedAtUtc)
+            };
+            var analysisProvider = new CapturingAnalysisProvider();
+            await using var fixture = new TranscriptionFixture(interaction, analysisProvider);
+
+            var import = await fixture.SendCommandAsync(
+                "importMeetingTranscript",
+                new
+                {
+                    meetingId = fixture.Meeting.Id.ToString("N"),
+                    sourceLabel = "Manual SRT"
+                });
+            Assert(import.Success, import.ErrorMessage ?? "Transcript import failed.");
+            var transcript = fixture.State.MeetingTranscripts.Single();
+            Assert(fixture.Store.Load().MeetingTranscripts.Single().Id == transcript.Id &&
+                   fixture.Meeting.ActiveTranscriptId == transcript.Id,
+                "Connected transcript import should save and select the durable version.");
+
+            var analyze = await fixture.SendCommandAsync(
+                "analyzeMeetingTranscript",
+                new { transcriptId = transcript.Id.ToString("N") });
+            Assert(analyze.Success && analysisProvider.Requests.Single().RecordingId is null &&
+                   analysisProvider.Requests.Single().TranscriptId == transcript.Id &&
+                   analysisProvider.Requests.Single().TranscriptRevisionId == transcript.RevisionId &&
+                   analysisProvider.Requests.Single().Transcript.Text.Contains(
+                       "A: Decision one",
+                       StringComparison.Ordinal),
+                "An imported transcript should be analyzable directly with its current revision.");
+
+            var screenshot = await fixture.SendCommandAsync(
+                "captureMeetingScreenshot",
+                new { meetingId = fixture.Meeting.Id.ToString("N") });
+            var untimedScreenshot = fixture.State.MeetingScreenshots.Single();
+            Assert(screenshot.Success &&
+                   untimedScreenshot.CapturedAtUtc == capturedAtUtc &&
+                   untimedScreenshot.RecordingId is null &&
+                   untimedScreenshot.OffsetFromRecordingStartSeconds is null &&
+                   !File.Exists(screenshotPath),
+                "A screenshot outside recording should persist without a recording offset and clean its temporary source.");
+
+            var start = await fixture.SendCommandAsync(
+                "startMeetingRecording",
+                new { meetingId = fixture.Meeting.Id.ToString("N") });
+            Assert(start.Success, start.ErrorMessage ?? "Recording start failed.");
+            var activeRecording = fixture.State.MeetingRecordings.Single();
+            var activeScreenshotPath = Path.Combine(importDirectory, "capture-active.png");
+            File.WriteAllBytes(
+                activeScreenshotPath,
+                Convert.FromBase64String(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="));
+            interaction.Screenshot = new MeetingScreenshotCaptureResult(
+                activeScreenshotPath,
+                1,
+                1,
+                MeetingScreenshotSourceKind.Display,
+                "Test display",
+                activeRecording.StartedAtUtc!.Value.AddSeconds(7));
+            var activeCapture = await fixture.SendCommandAsync(
+                "captureMeetingScreenshot",
+                new { meetingId = fixture.Meeting.Id.ToString("N") });
+            var timedScreenshot = fixture.State.MeetingScreenshots.Single(item =>
+                item.Id != untimedScreenshot.Id);
+            Assert(activeCapture.Success &&
+                   timedScreenshot.RecordingId == activeRecording.Id &&
+                   Math.Abs(timedScreenshot.OffsetFromRecordingStartSeconds!.Value - 7) < 0.01,
+                "A screenshot during recording should retain the active recording ID and timestamp offset.");
+            var stop = await fixture.SendCommandAsync(
+                "stopMeetingRecording",
+                new { recordingId = activeRecording.Id.ToString("N") });
+            Assert(stop.Success, stop.ErrorMessage ?? "Recording stop failed.");
+
+            var saved = fixture.Store.Load();
+            Assert(saved.MeetingTranscripts.Count == 1 &&
+                   saved.MeetingAnalyses.Count == 1 &&
+                   saved.MeetingScreenshots.Count == 2,
+                "Transcript, analysis, and screenshot metadata should persist through AppStateStore.");
+
+            var snapshot = fixture.SnapshotWithSources();
+            Assert(snapshot.MeetingTranscripts.Single().Segments.Count == 2 &&
+                   snapshot.MeetingAnalyses.Single().TranscriptRevisionId ==
+                   transcript.RevisionId.ToString("N") &&
+                   snapshot.MeetingScreenshots.All(item => item.IsAvailable),
+                "A fresh connected snapshot should expose all newly saved MEET sources immediately.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(importDirectory);
+        }
+    }
+
     private static Task RecordingFormatSettingIsLocalAndDefaultsCompact()
     {
         var directory = CreateTemporaryDirectory();
@@ -1728,11 +1936,56 @@ internal static class Program
         }
     }
 
+    private sealed class FakeMeetingSourceInteraction : IMeetingSourceInteraction
+    {
+        public string? AudioPath { get; set; }
+        public string? TranscriptPath { get; set; }
+        public MeetingScreenshotCaptureResult? Screenshot { get; set; }
+
+        public string? PickAudioFile() => AudioPath;
+
+        public string? PickTranscriptFile() => TranscriptPath;
+
+        public MeetingScreenshotCaptureResult? CaptureScreenshot() => Screenshot;
+    }
+
+    private sealed class CapturingAnalysisProvider : IMeetingAnalysisProvider
+    {
+        public string Name => "Synthetic analysis";
+        public List<MeetingAnalysisProviderRequest> Requests { get; } = new();
+
+        public Task<MeetingAnalysisProviderResponse> AnalyzeAsync(
+            MeetingAnalysisProviderRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Requests.Add(request);
+            var analysis = new MeetingAnalysis
+            {
+                RecordingId = request.RecordingId,
+                TranscriptId = request.TranscriptId,
+                TranscriptRevisionId = request.TranscriptRevisionId,
+                MeetId = request.MeetId,
+                State = MeetingAnalysisState.ReadyForReview,
+                Provider = Name,
+                Model = request.Model,
+                Summary = "Synthetic source analysis",
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            return Task.FromResult(new MeetingAnalysisProviderResponse(
+                "{\"summary\":\"Synthetic source analysis\"}",
+                analysis));
+        }
+    }
+
     private sealed class TranscriptionFixture : IAsyncDisposable
     {
         private readonly string _directory = CreateTemporaryDirectory();
 
-        public TranscriptionFixture()
+        public TranscriptionFixture(
+            IMeetingSourceInteraction? sourceInteraction = null,
+            IMeetingAnalysisProvider? analysisProvider = null)
         {
             State = AppState.CreateDefault();
             Meeting = new MeetingItem
@@ -1768,9 +2021,11 @@ internal static class Program
                 new FakeMeetingRecorder(),
                 Processor,
                 Provider,
-                new UnusedAnalysisProvider(),
+                analysisProvider ?? new UnusedAnalysisProvider(),
                 (message, _) => Diagnostics.Add(message));
-            Handler = new MeetingAssistantWorkspaceCommandHandler(Coordinator);
+            Handler = new MeetingAssistantWorkspaceCommandHandler(
+                Coordinator,
+                sourceInteraction);
         }
 
         public AppState State { get; }
@@ -1848,25 +2103,39 @@ internal static class Program
 
         public async Task<WorkspaceCommandResult> SendAsync(Guid recordingId)
         {
+            return await SendCommandAsync(
+                "transcribeMeetingRecording",
+                new
+                {
+                    recordingId = recordingId.ToString("N"),
+                    acceptUploadDisclosure = true
+                });
+        }
+
+        public async Task<WorkspaceCommandResult> SendCommandAsync(string type, object payload)
+        {
             var command = JsonSerializer.Serialize(new
             {
                 schemaVersion = 1,
                 commandId = Guid.NewGuid().ToString("N"),
-                type = "transcribeMeetingRecording",
-                payload = new
-                {
-                    recordingId = recordingId.ToString("N"),
-                    acceptUploadDisclosure = true
-                }
+                type,
+                payload
             });
             return await Handler.TryHandleAsync(command) ??
-                   throw new InvalidOperationException("Transcription command was not recognized.");
+                   throw new InvalidOperationException("Meeting source command was not recognized.");
         }
 
         public WorkspaceSnapshot Snapshot() => WorkspaceSnapshotFactory.Create(
             State,
             mode: WorkspaceSnapshotFactory.ConnectedMode,
             transcriptLoader: Coordinator.LoadTranscriptText);
+
+        public WorkspaceSnapshot SnapshotWithSources() => WorkspaceSnapshotFactory.Create(
+            State,
+            mode: WorkspaceSnapshotFactory.ConnectedMode,
+            transcriptLoader: Coordinator.LoadTranscriptText,
+            meetingTranscriptLoader: Coordinator.LoadTranscriptContent,
+            screenshotThumbnailLoader: Coordinator.LoadScreenshotThumbnailDataUrl);
 
         public async ValueTask DisposeAsync()
         {

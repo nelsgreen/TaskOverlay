@@ -18,6 +18,8 @@ public static class StateMigrator
         state.ContextSources ??= new List<SourceDocument>();
         state.ContextItems ??= new List<ContextItem>();
         state.MeetingRecordings ??= new List<MeetingRecording>();
+        state.MeetingTranscripts ??= new List<MeetingTranscript>();
+        state.MeetingScreenshots ??= new List<MeetingScreenshot>();
         state.MeetingAnalyses ??= new List<MeetingAnalysis>();
         state.WorkspaceSettings ??= new WorkspaceSettings();
         state.TelegramCapture ??= new TelegramCaptureSettings();
@@ -44,6 +46,10 @@ public static class StateMigrator
                     // intentionally maps to legacy WAV through the enum's zero value.
                     state.SchemaVersion = 5;
                     break;
+                case 5:
+                    MigrateMeetingSourcesV5ToV6(state);
+                    state.SchemaVersion = 6;
+                    break;
                 default:
                     throw new InvalidDataException(
                         $"Unsupported schema version: {state.SchemaVersion}.");
@@ -51,6 +57,60 @@ public static class StateMigrator
         }
 
         return state;
+    }
+
+    private static void MigrateMeetingSourcesV5ToV6(AppState state)
+    {
+        state.MeetingTranscripts ??= new List<MeetingTranscript>();
+        state.MeetingScreenshots ??= new List<MeetingScreenshot>();
+        foreach (var recording in state.MeetingRecordings.Where(recording =>
+                     recording.MeetId.HasValue &&
+                     !string.IsNullOrWhiteSpace(recording.TranscriptFile)))
+        {
+            if (state.MeetingTranscripts.Any(transcript => transcript.RecordingId == recording.Id))
+            {
+                continue;
+            }
+
+            var timestamp = recording.UpdatedAtUtc == default
+                ? recording.CreatedAtUtc == default
+                    ? DateTimeOffset.UtcNow
+                    : recording.CreatedAtUtc
+                : recording.UpdatedAtUtc;
+            var transcript = new MeetingTranscript
+            {
+                Id = recording.Id,
+                MeetId = recording.MeetId!.Value,
+                RecordingId = recording.Id,
+                Origin = MeetingTranscriptOrigin.Generated,
+                Format = MeetingTranscriptFormat.NormalizedJson,
+                Provider = "TaskOverlay",
+                SourceLabel = "TaskOverlay",
+                StorageFolderRelativePath = recording.RecordingFolderRelativePath,
+                OriginalArtifactFile = string.IsNullOrWhiteSpace(recording.TranscriptRawFile)
+                    ? recording.TranscriptFile
+                    : recording.TranscriptRawFile,
+                NormalizedArtifactFile = recording.TranscriptFile,
+                MarkdownArtifactFile = recording.TranscriptMarkdownFile,
+                HasTimestamps = true,
+                RevisionId = Guid.NewGuid(),
+                CreatedAtUtc = timestamp,
+                UpdatedAtUtc = timestamp
+            };
+            state.MeetingTranscripts.Add(transcript);
+            var meeting = state.Meetings.FirstOrDefault(item => item.Id == transcript.MeetId);
+            if (meeting is not null && meeting.ActiveTranscriptId is null)
+            {
+                meeting.ActiveTranscriptId = transcript.Id;
+            }
+
+            foreach (var analysis in state.MeetingAnalyses.Where(analysis =>
+                         analysis.RecordingId == recording.Id))
+            {
+                analysis.TranscriptId ??= transcript.Id;
+                analysis.TranscriptRevisionId ??= transcript.RevisionId;
+            }
+        }
     }
 
     private static void MigrateV1ToV2(AppState state)
@@ -130,6 +190,18 @@ public static class StateMigrator
         if (state.MeetingRecordings is null)
         {
             state.MeetingRecordings = new List<MeetingRecording>();
+            changed = true;
+        }
+
+        if (state.MeetingTranscripts is null)
+        {
+            state.MeetingTranscripts = new List<MeetingTranscript>();
+            changed = true;
+        }
+
+        if (state.MeetingScreenshots is null)
+        {
+            state.MeetingScreenshots = new List<MeetingScreenshot>();
             changed = true;
         }
 
@@ -622,6 +694,34 @@ public static class StateMigrator
 
             changed |= NormalizeRecordingFileNames(recording);
             changed |= RepairRecordingTracks(recording);
+            recording.OriginalFileName = NormalizeBounded(recording.OriginalFileName, 500);
+            recording.ManagedFileName = NormalizeManagedFileName(recording.ManagedFileName);
+            if (recording.ImportedFileBytes < 0)
+            {
+                recording.ImportedFileBytes = 0;
+                changed = true;
+            }
+
+            var importedDuration = recording.Tracks
+                .Where(track => track.Kind == MeetingRecordingTrackKind.Mixed)
+                .Select(track => track.DurationSeconds)
+                .DefaultIfEmpty(0)
+                .Max();
+            if (recording.SourceKind != MeetingRecordingSourceKind.Imported &&
+                (recording.ProcessFromSeconds.HasValue || recording.ProcessUntilSeconds.HasValue) ||
+                recording.ProcessFromSeconds is < 0 ||
+                recording.ProcessUntilSeconds is <= 0 ||
+                recording.ProcessFromSeconds is double from &&
+                recording.ProcessUntilSeconds is double until && until <= from ||
+                importedDuration > 0 && recording.ProcessFromSeconds is double rangeStart &&
+                rangeStart >= importedDuration ||
+                importedDuration > 0 && recording.ProcessUntilSeconds is double rangeEnd &&
+                rangeEnd > importedDuration + 0.01)
+            {
+                recording.ProcessFromSeconds = null;
+                recording.ProcessUntilSeconds = null;
+                changed = true;
+            }
             recording.LastError = NormalizeBounded(recording.LastError, 2_000);
             if (recording.CreatedAtUtc == default)
             {
@@ -636,14 +736,252 @@ public static class StateMigrator
             }
         }
 
+        var transcriptIds = new HashSet<Guid>();
+        foreach (var transcript in state.MeetingTranscripts.ToList())
+        {
+            var ownerRecording = transcript.RecordingId is Guid linkedRecordingId
+                ? state.MeetingRecordings.FirstOrDefault(recording => recording.Id == linkedRecordingId)
+                : null;
+            if (ownerRecording is not null && transcript.MeetId != ownerRecording.MeetId)
+            {
+                transcript.MeetId = ownerRecording.MeetId;
+                changed = true;
+            }
+            else if (transcript.MeetId is Guid transcriptMeetId &&
+                     !meetingIds.Contains(transcriptMeetId))
+            {
+                transcript.MeetId = null;
+                changed = true;
+            }
+
+            if (transcript.Id == Guid.Empty || !transcriptIds.Add(transcript.Id))
+            {
+                transcript.Id = Guid.NewGuid();
+                transcriptIds.Add(transcript.Id);
+                changed = true;
+            }
+
+            if (transcript.RecordingId is Guid transcriptRecordingId &&
+                !recordingIds.Contains(transcriptRecordingId))
+            {
+                transcript.RecordingId = null;
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(transcript.Origin))
+            {
+                transcript.Origin = transcript.RecordingId.HasValue
+                    ? MeetingTranscriptOrigin.Generated
+                    : MeetingTranscriptOrigin.Imported;
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(transcript.Format))
+            {
+                transcript.Format = MeetingTranscriptFormat.NormalizedJson;
+                changed = true;
+            }
+
+            var transcriptFolder = RecordingPathPolicy.NormalizeRelativePath(
+                transcript.StorageFolderRelativePath);
+            if (!RecordingPathPolicy.IsSafeRelativePath(transcriptFolder) &&
+                transcript.RecordingId is Guid ownerRecordingId)
+            {
+                transcriptFolder = state.MeetingRecordings
+                    .First(recording => recording.Id == ownerRecordingId)
+                    .RecordingFolderRelativePath;
+            }
+
+            if (!RecordingPathPolicy.IsSafeRelativePath(transcriptFolder))
+            {
+                state.MeetingTranscripts.Remove(transcript);
+                transcriptIds.Remove(transcript.Id);
+                changed = true;
+                continue;
+            }
+
+            if (transcript.StorageFolderRelativePath != transcriptFolder)
+            {
+                transcript.StorageFolderRelativePath = transcriptFolder;
+                changed = true;
+            }
+
+            transcript.Provider = NormalizeBounded(transcript.Provider, 100);
+            transcript.Model = NormalizeBounded(transcript.Model, 100);
+            transcript.SourceLabel = NormalizeBounded(transcript.SourceLabel, 200);
+            transcript.OriginalFileName = NormalizeBounded(transcript.OriginalFileName, 500);
+            transcript.OriginalArtifactFile = NormalizeManagedFileName(transcript.OriginalArtifactFile);
+            transcript.NormalizedArtifactFile = NormalizeManagedFileName(transcript.NormalizedArtifactFile);
+            transcript.MarkdownArtifactFile = NormalizeManagedFileName(transcript.MarkdownArtifactFile);
+            transcript.ImportWarnings ??= new List<string>();
+            transcript.ImportWarnings = transcript.ImportWarnings
+                .Where(warning => !string.IsNullOrWhiteSpace(warning))
+                .Select(warning => NormalizeBounded(warning, 500))
+                .Take(100)
+                .ToList();
+            transcript.Speakers ??= new List<TranscriptSpeaker>();
+            var speakerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var speaker in transcript.Speakers.ToList())
+            {
+                speaker.OriginalLabel = NormalizeBounded(speaker.OriginalLabel, 200);
+                speaker.DisplayName = NormalizeBounded(speaker.DisplayName, 200);
+                speaker.SpeakerId = NormalizeBounded(speaker.SpeakerId, 100);
+                if (speaker.SpeakerId.Length == 0 || !speakerIds.Add(speaker.SpeakerId))
+                {
+                    transcript.Speakers.Remove(speaker);
+                    changed = true;
+                }
+            }
+
+            if (transcript.RevisionId == Guid.Empty)
+            {
+                transcript.RevisionId = Guid.NewGuid();
+                changed = true;
+            }
+
+            if (transcript.CreatedAtUtc == default)
+            {
+                transcript.CreatedAtUtc = transcript.ImportedAtUtc ?? DateTimeOffset.UtcNow;
+                changed = true;
+            }
+
+            if (transcript.UpdatedAtUtc == default)
+            {
+                transcript.UpdatedAtUtc = transcript.CreatedAtUtc;
+                changed = true;
+            }
+        }
+
+        foreach (var meeting in state.Meetings)
+        {
+            if (meeting.ActiveTranscriptId is Guid activeTranscriptId &&
+                !state.MeetingTranscripts.Any(transcript =>
+                transcript.Id == activeTranscriptId && transcript.MeetId == meeting.Id))
+            {
+                meeting.ActiveTranscriptId = null;
+                changed = true;
+            }
+
+            if (meeting.ActiveTranscriptId is null)
+            {
+                var fallback = state.MeetingTranscripts
+                    .Where(transcript => transcript.MeetId == meeting.Id)
+                    .OrderByDescending(transcript => transcript.CreatedAtUtc)
+                    .Select(transcript => (Guid?)transcript.Id)
+                    .FirstOrDefault();
+                if (fallback.HasValue)
+                {
+                    meeting.ActiveTranscriptId = fallback;
+                    changed = true;
+                }
+            }
+        }
+
+        var screenshotIds = new HashSet<Guid>();
+        foreach (var screenshot in state.MeetingScreenshots.ToList())
+        {
+            var folder = RecordingPathPolicy.NormalizeRelativePath(
+                screenshot.StorageFolderRelativePath);
+            if (!meetingIds.Contains(screenshot.MeetId) ||
+                !RecordingPathPolicy.IsSafeRelativePath(folder) ||
+                NormalizeManagedFileName(screenshot.FileName).Length == 0 ||
+                screenshot.Width <= 0 || screenshot.Height <= 0)
+            {
+                state.MeetingScreenshots.Remove(screenshot);
+                changed = true;
+                continue;
+            }
+
+            if (screenshot.Id == Guid.Empty || !screenshotIds.Add(screenshot.Id))
+            {
+                screenshot.Id = Guid.NewGuid();
+                screenshotIds.Add(screenshot.Id);
+                changed = true;
+            }
+
+            if (screenshot.RecordingId is Guid screenshotRecordingId &&
+                (!recordingIds.Contains(screenshotRecordingId) ||
+                 state.MeetingRecordings.First(recording => recording.Id == screenshotRecordingId)
+                     .MeetId != screenshot.MeetId))
+            {
+                screenshot.RecordingId = null;
+                screenshot.OffsetFromRecordingStartSeconds = null;
+                changed = true;
+            }
+
+            screenshot.StorageFolderRelativePath = folder;
+            screenshot.FileName = NormalizeManagedFileName(screenshot.FileName);
+            screenshot.SourceLabel = NormalizeBounded(screenshot.SourceLabel, 500);
+            screenshot.Bytes = Math.Max(0, screenshot.Bytes);
+            if (screenshot.OffsetFromRecordingStartSeconds is < 0)
+            {
+                screenshot.OffsetFromRecordingStartSeconds = null;
+                changed = true;
+            }
+
+            if (!Enum.IsDefined(screenshot.SourceKind))
+            {
+                screenshot.SourceKind = MeetingScreenshotSourceKind.Display;
+                changed = true;
+            }
+
+            if (screenshot.CapturedAtUtc == default)
+            {
+                screenshot.CapturedAtUtc = DateTimeOffset.UtcNow;
+                changed = true;
+            }
+        }
+
         var analysisIds = new HashSet<Guid>();
         foreach (var analysis in state.MeetingAnalyses.ToList())
         {
-            if (!recordingIds.Contains(analysis.RecordingId))
+            if (analysis.TranscriptId is null && analysis.RecordingId is Guid legacyRecordingId)
+            {
+                var generated = state.MeetingTranscripts.FirstOrDefault(transcript =>
+                    transcript.RecordingId == legacyRecordingId);
+                if (generated is not null)
+                {
+                    analysis.TranscriptId = generated.Id;
+                    analysis.TranscriptRevisionId ??= generated.RevisionId;
+                    changed = true;
+                }
+            }
+
+            if (analysis.RecordingId is Guid analysisRecordingId &&
+                !recordingIds.Contains(analysisRecordingId))
+            {
+                analysis.RecordingId = null;
+                changed = true;
+            }
+
+            if (analysis.TranscriptId is not Guid analysisTranscriptId ||
+                !transcriptIds.Contains(analysisTranscriptId))
             {
                 state.MeetingAnalyses.Remove(analysis);
                 changed = true;
                 continue;
+            }
+
+            if (analysis.TranscriptRevisionId is null)
+            {
+                analysis.TranscriptRevisionId = state.MeetingTranscripts
+                    .First(transcript => transcript.Id == analysisTranscriptId)
+                    .RevisionId;
+                changed = true;
+            }
+
+            var analysisTranscript = state.MeetingTranscripts
+                .First(transcript => transcript.Id == analysisTranscriptId);
+            if (analysis.RecordingId != analysisTranscript.RecordingId)
+            {
+                analysis.RecordingId = analysisTranscript.RecordingId;
+                changed = true;
+            }
+
+            if (analysis.MeetId != analysisTranscript.MeetId)
+            {
+                analysis.MeetId = analysisTranscript.MeetId;
+                changed = true;
             }
 
             if (analysis.Id == Guid.Empty || !analysisIds.Add(analysis.Id))
@@ -738,7 +1076,7 @@ public static class StateMigrator
                 task.SourceReferences = task.SourceReferences
                     .Where(reference =>
                         reference is not null &&
-                        recordingIds.Contains(reference.RecordingId) &&
+                        (reference.RecordingId is null || recordingIds.Contains(reference.RecordingId.Value)) &&
                         analysisIds.Contains(reference.AnalysisId))
                     .GroupBy(reference => reference.ProposedActionId)
                     .Select(group => group.First())
@@ -1101,5 +1439,16 @@ public static class StateMigrator
         }
 
         return changed;
+    }
+
+    private static string NormalizeManagedFileName(string? value)
+    {
+        var fileName = value?.Trim() ?? string.Empty;
+        return fileName.Length == 0 ||
+               Path.IsPathRooted(fileName) ||
+               fileName.Contains("..", StringComparison.Ordinal) ||
+               !string.Equals(fileName, Path.GetFileName(fileName), StringComparison.Ordinal)
+            ? string.Empty
+            : fileName;
     }
 }

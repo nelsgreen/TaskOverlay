@@ -410,6 +410,22 @@ Active product scope:
     ProposedActions use one large Workspace modal. TASK Details remains in the
     right sidebar, and closing the MEET modal does not stop recording or
     finalization.
+- The MEET source/review workspace is implemented as one responsive modal with
+  `Details / Sources / Review`:
+  - Details owns scheduling, agenda, linked task, and compact linked context;
+  - Sources owns local recordings, managed M4A/WAV/MP3 imports, non-destructive
+    processing ranges, generated/imported TXT/MD/SRT/VTT transcripts, explicit
+    active transcript selection, and manual user-selected PNG screenshots;
+  - imported originals are copied into managed MEET storage and remain usable
+    if the external source is moved or deleted;
+  - Review combines the active transcript, its revision-bound analysis,
+    timestamped screenshot references, ProposedActions, and an intentionally
+    empty future project-context-update area;
+  - transcript segments use stable speaker IDs while transcript-level mappings
+    own original labels, display names, and the current-user marker; original
+    imported/provider artifacts remain unchanged;
+  - changing a transcript revision marks prior analysis stale and requires an
+    explicit re-run.
 - Recurrence, calendar sync, direct meeting-platform APIs, and live
   transcription remain later work.
 - Handle next MEET countdown.
@@ -418,7 +434,15 @@ Active product scope:
   - recording-device hot-plug and degraded-track recovery polish;
   - periodic finalized M4A segments to bound unexpected-process crash loss;
   - richer emergency-recording inbox and classification flow;
-  - transcript editing/search and ContextHUB source promotion;
+  - transcript search and ContextHUB source promotion;
+  - transcript editor actions: rename speaker globally, mark speaker as You,
+    merge speakers, edit individual segments, and explicitly re-run stale
+    analysis after transcript edits;
+  - user speaker identification and known-speaker samples;
+  - AI-proposed ContextItem candidates with explicit review, Meeting Brief,
+    overlay meeting mode, and live transcription/copilot;
+  - OCR/multimodal screenshot analysis and video recording;
+  - Meeting Assistant Settings redesign;
   - additional transcription/analysis providers, including local Whisper;
   - chunk retry/progress polish and recording retention controls.
 

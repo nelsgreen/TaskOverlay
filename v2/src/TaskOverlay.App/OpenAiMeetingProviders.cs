@@ -386,6 +386,8 @@ public sealed class OpenAiMeetingAnalysisProvider : IMeetingAnalysisProvider
         var analysis = new MeetingAnalysis
         {
             RecordingId = request.RecordingId,
+            TranscriptId = request.TranscriptId,
+            TranscriptRevisionId = request.TranscriptRevisionId,
             MeetId = request.MeetId,
             State = MeetingAnalysisState.ReadyForReview,
             Provider = provider,

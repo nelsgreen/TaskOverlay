@@ -52,18 +52,40 @@ public sealed class MeetingAudioProcessor : IMeetingAudioProcessor
         EnsureFinalizedAudioPath(mixedPath);
         var duration = ReadDuration(mixedPath);
         var extension = Path.GetExtension(mixedPath);
+        var rangeStart = TimeSpan.FromSeconds(request.ProcessFromSeconds ?? 0);
+        var rangeEnd = TimeSpan.FromSeconds(request.ProcessUntilSeconds ?? duration.TotalSeconds);
+        if (rangeStart < TimeSpan.Zero || rangeStart >= duration ||
+            rangeEnd <= rangeStart || rangeEnd > duration.Add(TimeSpan.FromMilliseconds(10)))
+        {
+            throw new InvalidDataException("The selected audio processing range is invalid.");
+        }
+
+        var hasRange = request.ProcessFromSeconds.HasValue || request.ProcessUntilSeconds.HasValue;
         IReadOnlyList<string> chunks;
-        if (new FileInfo(mixedPath).Length <= request.MaximumChunkBytes)
+        if (hasRange || extension.Equals(".mp3", StringComparison.OrdinalIgnoreCase))
+        {
+            chunks = await EncodeAudioIntoM4aChunksAsync(
+                mixedPath,
+                request.RecordingFolder,
+                request.MaximumChunkBytes,
+                request.MixedAudioBitrate,
+                rangeStart,
+                rangeEnd,
+                cancellationToken);
+        }
+        else if (new FileInfo(mixedPath).Length <= request.MaximumChunkBytes)
         {
             chunks = new[] { mixedPath };
         }
         else if (extension.Equals(".m4a", StringComparison.OrdinalIgnoreCase))
         {
-            chunks = await SplitM4aIntoChunksAsync(
+            chunks = await EncodeAudioIntoM4aChunksAsync(
                 mixedPath,
                 request.RecordingFolder,
                 request.MaximumChunkBytes,
                 request.MixedAudioBitrate,
+                TimeSpan.Zero,
+                duration,
                 cancellationToken);
         }
         else if (extension.Equals(".wav", StringComparison.OrdinalIgnoreCase))
@@ -79,7 +101,7 @@ public sealed class MeetingAudioProcessor : IMeetingAudioProcessor
                 "The finalized mixed recording has an unsupported audio container.");
         }
 
-        return new MeetingAudioProcessingResult(mixedPath, chunks, duration);
+        return new MeetingAudioProcessingResult(mixedPath, chunks, rangeEnd - rangeStart);
     }
 
     private static MeetingAudioProcessingResult ProcessLegacySourceTracks(
@@ -169,11 +191,13 @@ public sealed class MeetingAudioProcessor : IMeetingAudioProcessor
         }
     }
 
-    private static async Task<IReadOnlyList<string>> SplitM4aIntoChunksAsync(
+    private static async Task<IReadOnlyList<string>> EncodeAudioIntoM4aChunksAsync(
         string mixedPath,
         string recordingFolder,
         long maximumChunkBytes,
         int bitrate,
+        TimeSpan rangeStart,
+        TimeSpan rangeEnd,
         CancellationToken cancellationToken)
     {
         if (maximumChunkBytes < 256 * 1024)
@@ -184,7 +208,11 @@ public sealed class MeetingAudioProcessor : IMeetingAudioProcessor
         }
 
         using var reader = new AudioFileReader(mixedPath);
-        var source = ToMono(reader);
+        reader.CurrentTime = rangeStart;
+        ISampleProvider source = new OffsetSampleProvider(ToMono(reader))
+        {
+            Take = rangeEnd - rangeStart
+        };
         var chunks = new List<string>();
         var chunkIndex = 0;
         var endOfInput = false;

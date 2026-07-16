@@ -228,6 +228,10 @@ internal static class Program
             ("meeting proposed actions require confirmation", MeetingProposedActionsRequireConfirmation),
             ("meeting assistant migration and snapshot", MeetingAssistantMigrationAndSnapshot),
             ("meeting assistant persistence roundtrip", MeetingAssistantPersistenceRoundtrip),
+            ("meeting source schema v5 migration", MeetingSourceSchemaV5Migration),
+            ("meeting transcript imports and stable speakers", MeetingTranscriptImportsAndStableSpeakers),
+            ("meeting source persistence and snapshot", MeetingSourcePersistenceAndSnapshot),
+            ("meeting source malformed state repair", MeetingSourceMalformedStateRepair),
             ("meeting assistant secrets excluded from shared state", MeetingAssistantSecretsExcludedFromSharedState)
         };
 
@@ -4321,7 +4325,7 @@ internal static class Program
         var waitingSnapshot = snapshot.Tasks.Single(task =>
             task.Id == waiting.Id.ToString("N"));
 
-        Assert(snapshot.SchemaVersion == 3, "Workspace contract version should be 3.");
+        Assert(snapshot.SchemaVersion == 4, "Workspace contract version should be 4.");
         Assert(snapshot.Mode == "readonly", "Workspace contract should be read-only.");
         Assert(
             WorkspaceSnapshotFactory.Create(
@@ -4355,7 +4359,7 @@ internal static class Program
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
         var document = JsonDocument.Parse(json);
-        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 3,
+        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 4,
             "Serialized workspace contract should use camelCase fields.");
         Assert(document.RootElement.GetProperty("mode").GetString() == "readonly",
             "Serialized workspace contract mode mismatch.");
@@ -7492,10 +7496,10 @@ internal static class Program
         Assert(migrated.Meetings.Single().Id == meeting.Id,
             "Migration must preserve existing MEET data.");
         var snapshot = WorkspaceSnapshotFactory.Create(migrated, now);
-        Assert(snapshot.SchemaVersion == 3 &&
+        Assert(snapshot.SchemaVersion == 4 &&
                snapshot.MeetingRecordings.Count == 0 &&
                snapshot.MeetingAnalyses.Count == 0,
-            "Old states should produce a valid schema 3 Workspace snapshot.");
+            "Old states should produce a valid schema 4 Workspace snapshot.");
     }
 
     private static void MeetingAssistantPersistenceRoundtrip()
@@ -7548,9 +7552,27 @@ internal static class Program
                 SourceSegmentEnd = 18.0,
                 SourceExcerpt = "Please send the notes."
             };
+            var transcript = new MeetingTranscript
+            {
+                MeetId = meeting.Id,
+                RecordingId = recording.Id,
+                Origin = MeetingTranscriptOrigin.Generated,
+                Format = MeetingTranscriptFormat.NormalizedJson,
+                Provider = "OpenAI",
+                SourceLabel = "TaskOverlay",
+                StorageFolderRelativePath = recording.RecordingFolderRelativePath,
+                OriginalArtifactFile = "transcript.raw.json",
+                NormalizedArtifactFile = "transcript.json",
+                MarkdownArtifactFile = "transcript.md",
+                HasTimestamps = true,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
             var analysis = new MeetingAnalysis
             {
                 RecordingId = recording.Id,
+                TranscriptId = transcript.Id,
+                TranscriptRevisionId = transcript.RevisionId,
                 MeetId = meeting.Id,
                 State = MeetingAnalysisState.ReadyForReview,
                 Provider = "OpenAI",
@@ -7560,7 +7582,9 @@ internal static class Program
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now
             };
+            meeting.ActiveTranscriptId = transcript.Id;
             state.MeetingRecordings.Add(recording);
+            state.MeetingTranscripts.Add(transcript);
             state.MeetingAnalyses.Add(analysis);
             var store = new AppStateStore(directory);
             store.Save(state);
@@ -7588,6 +7612,412 @@ internal static class Program
                    action.Id.ToString("N"),
                 "Reloaded state should expose matching recording and assistant data in Workspace.");
         });
+    }
+
+    private static void MeetingSourceSchemaV5Migration()
+    {
+        var now = DateTimeOffset.Parse("2026-07-16T14:30:00Z");
+        var state = CreateMeetingAssistantState(now, out var meeting);
+        state.SchemaVersion = 5;
+        var recording = new MeetingRecording
+        {
+            MeetId = meeting.Id,
+            SourceKind = MeetingRecordingSourceKind.ScheduledMeet,
+            State = MeetingRecordingState.Ready,
+            RecordingFolderRelativePath =
+                $"meetings/{meeting.Id:N}/recordings/{Guid.NewGuid():N}",
+            TranscriptRawFile = "transcript.raw.json",
+            TranscriptFile = "transcript.json",
+            TranscriptMarkdownFile = "transcript.md",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        var analysis = new MeetingAnalysis
+        {
+            RecordingId = recording.Id,
+            MeetId = meeting.Id,
+            State = MeetingAnalysisState.ReadyForReview,
+            Summary = "Legacy analysis",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.MeetingRecordings.Add(recording);
+        state.MeetingAnalyses.Add(analysis);
+
+        StateMigrator.Migrate(state);
+
+        var transcript = state.MeetingTranscripts.Single();
+        Assert(state.SchemaVersion == 6 &&
+               transcript.RecordingId == recording.Id &&
+               transcript.MeetId == meeting.Id &&
+               transcript.OriginalArtifactFile == "transcript.raw.json" &&
+               transcript.NormalizedArtifactFile == "transcript.json" &&
+               meeting.ActiveTranscriptId == transcript.Id,
+            "Schema 5 recording artifacts should migrate into one active durable transcript version.");
+        Assert(analysis.TranscriptId == transcript.Id &&
+               analysis.TranscriptRevisionId == transcript.RevisionId,
+            "A migrated analysis should record the transcript revision it consumed.");
+
+        StateMigrator.Migrate(state);
+        Assert(state.MeetingTranscripts.Count == 1,
+            "Meeting source migration should be idempotent.");
+    }
+
+    private static void MeetingTranscriptImportsAndStableSpeakers()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-16T15:00:00Z");
+            var stateDirectory = Path.Combine(directory, "state");
+            var importDirectory = Path.Combine(directory, "imports");
+            Directory.CreateDirectory(stateDirectory);
+            Directory.CreateDirectory(importDirectory);
+            var state = CreateMeetingAssistantState(now, out var meeting);
+            var storage = new MeetingSourceStorage(stateDirectory);
+            var service = new MeetingTranscriptService(state, storage);
+            var txtPath = Path.Combine(importDirectory, "notes.txt");
+            var markdownPath = Path.Combine(importDirectory, "notes.md");
+            var srtPath = Path.Combine(importDirectory, "call.srt");
+            var vttPath = Path.Combine(importDirectory, "call.vtt");
+            File.WriteAllText(txtPath, "Plain source notes.");
+            File.WriteAllText(markdownPath, "# Source notes\n\nKept as imported.");
+            File.WriteAllText(
+                srtPath,
+                "1\n00:00:01,000 --> 00:00:02,000\nA: First point\n\n" +
+                "2\n00:00:02,000 --> 00:00:03,500\nB: Second point\n\n" +
+                "3\n00:00:04,000 --> 00:00:05,000\nA: Follow-up\n");
+            File.WriteAllText(
+                vttPath,
+                "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v C>VTT point</v>\n\n" +
+                "Malformed cue without a timestamp\n");
+
+            var plain = service.Import(meeting.Id, txtPath, "TXT import", now);
+            var markdown = service.Import(meeting.Id, markdownPath, "Markdown import", now.AddSeconds(1));
+            var diarized = service.Import(meeting.Id, srtPath, "SRT import", now.AddSeconds(2));
+            var webVtt = service.Import(meeting.Id, vttPath, "VTT import", now.AddSeconds(3));
+
+            Assert(state.MeetingTranscripts.Count == 4 &&
+                   meeting.ActiveTranscriptId == plain.Id &&
+                   service.Load(plain).Text == "Plain source notes." &&
+                   service.Load(markdown).Text.Contains("Kept as imported.", StringComparison.Ordinal) &&
+                   service.Load(webVtt).HasTimestamps &&
+                   webVtt.ImportWarnings.Count == 1,
+                "TXT, Markdown, SRT, and VTT imports should coexist and retain explicit warnings.");
+
+            var normalized = service.Load(diarized);
+            var speakerA = normalized.Speakers.Single(speaker => speaker.OriginalLabel == "A");
+            var speakerB = normalized.Speakers.Single(speaker => speaker.OriginalLabel == "B");
+            Assert(normalized.Segments.Count(segment => segment.SpeakerId == speakerA.SpeakerId) == 2 &&
+                   normalized.Segments.Single(segment => segment.Speaker == "B").SpeakerId == speakerB.SpeakerId,
+                "Repeated diarized labels should migrate to stable speaker identities.");
+
+            var legacyNormalized = new NormalizedTranscript
+            {
+                Speakers = new List<TranscriptSpeaker>
+                {
+                    new() { OriginalLabel = "C", DisplayName = "Speaker C" }
+                },
+                Segments = new List<TranscriptSegment>
+                {
+                    new() { Index = 0, Speaker = "C", Text = "Legacy label" }
+                }
+            };
+            TranscriptSpeakerMapping.EnsureStableSpeakers(legacyNormalized);
+            Assert(legacyNormalized.Speakers.Single().SpeakerId.Length > 0 &&
+                   legacyNormalized.Segments.Single().SpeakerId ==
+                   legacyNormalized.Speakers.Single().SpeakerId,
+                "Existing A/B/C metadata without IDs should link safely to newly stable identities.");
+
+            var originalPath = storage.ResolveTranscriptFile(diarized, diarized.OriginalArtifactFile);
+            var originalBefore = File.ReadAllText(originalPath);
+            speakerA.DisplayName = "You";
+            speakerA.IsCurrentUser = true;
+            diarized.Speakers = normalized.Speakers.Select(speaker => new TranscriptSpeaker
+            {
+                SpeakerId = speaker.SpeakerId,
+                OriginalLabel = speaker.OriginalLabel,
+                DisplayName = speaker.DisplayName,
+                IsCurrentUser = speaker.IsCurrentUser
+            }).ToList();
+            normalized.Speakers = diarized.Speakers;
+            diarized.RevisionId = Guid.NewGuid();
+            normalized.RevisionId = diarized.RevisionId;
+            storage.WriteTranscript(diarized, normalized);
+
+            var analysisInput = TranscriptSpeakerMapping.BuildAnalysisText(normalized, diarized.Speakers);
+            Assert(analysisInput.Split("You:", StringSplitOptions.None).Length - 1 == 2 &&
+                   analysisInput.Contains("B: Second point", StringComparison.Ordinal) &&
+                   !analysisInput.Contains("A:", StringComparison.Ordinal),
+                "Changing one speaker mapping should affect every matching segment without changing another speaker.");
+            Assert(File.ReadAllText(originalPath) == originalBefore,
+                "Speaker mapping changes must not rewrite the unchanged original transcript artifact.");
+
+            Assert(service.SetActive(meeting.Id, webVtt.Id, now.AddMinutes(1)) &&
+                   meeting.ActiveTranscriptId == webVtt.Id &&
+                   service.Delete(webVtt.Id, now.AddMinutes(2)) &&
+                   meeting.ActiveTranscriptId != webVtt.Id &&
+                   state.MeetingTranscripts.Count == 3,
+                "Active transcript selection and deletion should preserve the remaining versions.");
+
+            var sharedFolderRelative =
+                $"meetings/{meeting.Id:N}/recordings/{Guid.NewGuid():N}";
+            var sharedFolder = storage.ResolveFolder(sharedFolderRelative);
+            Directory.CreateDirectory(sharedFolder);
+            var audioPath = Path.Combine(sharedFolder, "mixed.m4a");
+            File.WriteAllBytes(audioPath, new byte[] { 1, 2, 3, 4 });
+            foreach (var fileName in new[]
+                     {
+                         "transcript.raw.json",
+                         "transcript.json",
+                         "transcript.md"
+                     })
+            {
+                File.WriteAllText(Path.Combine(sharedFolder, fileName), "legacy transcript");
+            }
+
+            var legacySharedTranscript = new MeetingTranscript
+            {
+                MeetId = meeting.Id,
+                Origin = MeetingTranscriptOrigin.Generated,
+                StorageFolderRelativePath = sharedFolderRelative,
+                OriginalArtifactFile = "transcript.raw.json",
+                NormalizedArtifactFile = "transcript.json",
+                MarkdownArtifactFile = "transcript.md",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.MeetingTranscripts.Add(legacySharedTranscript);
+            Assert(service.Delete(legacySharedTranscript.Id, now.AddMinutes(3)) &&
+                   File.Exists(audioPath) &&
+                   !File.Exists(Path.Combine(sharedFolder, "transcript.json")),
+                "Deleting a migrated transcript must preserve audio in its shared recording folder.");
+        });
+    }
+
+    private static void MeetingSourcePersistenceAndSnapshot()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-16T16:00:00Z");
+            var state = CreateMeetingAssistantState(now, out var meeting);
+            var transcript = new MeetingTranscript
+            {
+                MeetId = meeting.Id,
+                Origin = MeetingTranscriptOrigin.Imported,
+                Format = MeetingTranscriptFormat.SubRip,
+                Provider = "External",
+                SourceLabel = "Imported SRT",
+                OriginalFileName = "meeting.srt",
+                ImportedAtUtc = now,
+                StorageFolderRelativePath = $"meetings/{meeting.Id:N}/transcripts/{Guid.NewGuid():N}",
+                OriginalArtifactFile = "original.srt",
+                NormalizedArtifactFile = "transcript.json",
+                MarkdownArtifactFile = "transcript.md",
+                HasTimestamps = true,
+                HasSpeakerLabels = true,
+                Speakers = new List<TranscriptSpeaker>
+                {
+                    new()
+                    {
+                        SpeakerId = "speaker-a",
+                        OriginalLabel = "A",
+                        DisplayName = "Alex"
+                    }
+                },
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            var screenshot = new MeetingScreenshot
+            {
+                MeetId = meeting.Id,
+                CapturedAtUtc = now.AddMinutes(2),
+                StorageFolderRelativePath = $"meetings/{meeting.Id:N}/screenshots",
+                FileName = $"{Guid.NewGuid():N}.png",
+                Width = 1280,
+                Height = 720,
+                SourceKind = MeetingScreenshotSourceKind.Window,
+                SourceLabel = "Workspace",
+                Bytes = 1234
+            };
+            var analysis = new MeetingAnalysis
+            {
+                MeetId = meeting.Id,
+                TranscriptId = transcript.Id,
+                TranscriptRevisionId = transcript.RevisionId,
+                State = MeetingAnalysisState.ReadyForReview,
+                Summary = "Current analysis",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            meeting.ActiveTranscriptId = transcript.Id;
+            state.MeetingTranscripts.Add(transcript);
+            state.MeetingScreenshots.Add(screenshot);
+            state.MeetingAnalyses.Add(analysis);
+            var store = new AppStateStore(directory);
+            store.Save(state);
+
+            var loaded = store.Load();
+            var loadedTranscript = loaded.MeetingTranscripts.Single();
+            var normalized = new NormalizedTranscript
+            {
+                TranscriptId = loadedTranscript.Id,
+                RevisionId = loadedTranscript.RevisionId,
+                Text = "Original line",
+                HasTimestamps = true,
+                Speakers = loadedTranscript.Speakers,
+                Segments = new List<TranscriptSegment>
+                {
+                    new()
+                    {
+                        Index = 0,
+                        StartSeconds = 2,
+                        EndSeconds = 3,
+                        Text = "Original line",
+                        Speaker = "A",
+                        SpeakerId = "speaker-a"
+                    }
+                }
+            };
+            var currentSnapshot = WorkspaceSnapshotFactory.Create(
+                loaded,
+                now,
+                WorkspaceSnapshotFactory.ConnectedMode,
+                meetingTranscriptLoader: _ => new MeetingTranscriptSnapshotContent(
+                    normalized,
+                    OriginalAvailable: true,
+                    NormalizedAvailable: true,
+                    MarkdownAvailable: true),
+                screenshotThumbnailLoader: _ => "data:image/png;base64,AA==");
+            Assert(currentSnapshot.MeetingTranscripts.Single().Speakers.Single().DisplayName == "Alex" &&
+                   currentSnapshot.MeetingTranscripts.Single().Segments.Single().SpeakerName == "Alex" &&
+                   currentSnapshot.MeetingScreenshots.Single().IsAvailable &&
+                   !currentSnapshot.MeetingAnalyses.Single().IsStale,
+                "Persisted sources should roundtrip into a connected Workspace snapshot.");
+
+            loadedTranscript.RevisionId = Guid.NewGuid();
+            var staleSnapshot = WorkspaceSnapshotFactory.Create(
+                loaded,
+                now,
+                WorkspaceSnapshotFactory.ConnectedMode,
+                meetingTranscriptLoader: _ => new MeetingTranscriptSnapshotContent(
+                    normalized,
+                    OriginalAvailable: true,
+                    NormalizedAvailable: true,
+                    MarkdownAvailable: true),
+                screenshotThumbnailLoader: _ => null);
+            Assert(staleSnapshot.MeetingAnalyses.Single().IsStale &&
+                   !staleSnapshot.MeetingScreenshots.Single().IsAvailable,
+                "A changed transcript revision should mark old analysis stale while missing screenshots remain safe.");
+
+            Assert(new MeetingService(loaded).Delete(meeting.Id, now.AddMinutes(3)) &&
+                   loaded.MeetingTranscripts.Single().MeetId is null &&
+                   loaded.MeetingAnalyses.Single().MeetId is null &&
+                   loaded.MeetingScreenshots.Count == 0,
+                "Deleting a MEET should preserve transcript and analysis provenance while removing owned screenshots.");
+        });
+    }
+
+    private static void MeetingSourceMalformedStateRepair()
+    {
+        var now = DateTimeOffset.Parse("2026-07-16T16:30:00Z");
+        var state = CreateMeetingAssistantState(now, out var ownerMeeting);
+        var otherMeeting = new MeetingItem
+        {
+            ProjectId = ownerMeeting.ProjectId,
+            Title = "Other MEET",
+            StartsAtUtc = now.AddHours(1),
+            DurationMinutes = 30,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.Meetings.Add(otherMeeting);
+        var recording = new MeetingRecording
+        {
+            MeetId = ownerMeeting.Id,
+            SourceKind = MeetingRecordingSourceKind.Imported,
+            State = MeetingRecordingState.Recorded,
+            RecordingFormat = MeetingRecordingFormat.Wav,
+            RecordingFolderRelativePath =
+                $"meetings/{ownerMeeting.Id:N}/recordings/{Guid.NewGuid():N}",
+            MixedAudioFile = "imported-original.wav",
+            ManagedFileName = "imported-original.wav",
+            ProcessFromSeconds = 12,
+            ProcessUntilSeconds = 20,
+            Tracks = new List<MeetingRecordingTrackArtifact>
+            {
+                new()
+                {
+                    Kind = MeetingRecordingTrackKind.Mixed,
+                    FileName = "imported-original.wav",
+                    DurationSeconds = 10,
+                    HasAudioFrames = true,
+                    FinalizationState = MeetingRecordingFinalizationState.Finalized,
+                    ValidationState = MeetingRecordingValidationState.Valid
+                }
+            },
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.MeetingRecordings.Add(recording);
+        var transcript = new MeetingTranscript
+        {
+            MeetId = otherMeeting.Id,
+            RecordingId = recording.Id,
+            Origin = MeetingTranscriptOrigin.Generated,
+            StorageFolderRelativePath = recording.RecordingFolderRelativePath,
+            OriginalArtifactFile = "transcript.raw.json",
+            NormalizedArtifactFile = "transcript.json",
+            MarkdownArtifactFile = "transcript.md",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.MeetingTranscripts.Add(transcript);
+        var screenshot = new MeetingScreenshot
+        {
+            MeetId = otherMeeting.Id,
+            RecordingId = recording.Id,
+            OffsetFromRecordingStartSeconds = 3,
+            StorageFolderRelativePath = $"meetings/{otherMeeting.Id:N}/screenshots",
+            FileName = "capture.png",
+            Width = 100,
+            Height = 100,
+            CapturedAtUtc = now
+        };
+        state.MeetingScreenshots.Add(screenshot);
+        state.MeetingScreenshots.Add(new MeetingScreenshot
+        {
+            MeetId = ownerMeeting.Id,
+            StorageFolderRelativePath = $"meetings/{ownerMeeting.Id:N}/screenshots",
+            FileName = "invalid.png",
+            Width = 0,
+            Height = 100,
+            CapturedAtUtc = now
+        });
+        var analysis = new MeetingAnalysis
+        {
+            RecordingId = null,
+            TranscriptId = transcript.Id,
+            TranscriptRevisionId = transcript.RevisionId,
+            MeetId = otherMeeting.Id,
+            State = MeetingAnalysisState.ReadyForReview,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.MeetingAnalyses.Add(analysis);
+
+        Assert(StateMigrator.RepairCurrentState(state),
+            "Malformed meeting source relationships should be repaired.");
+        Assert(recording.ProcessFromSeconds is null &&
+               recording.ProcessUntilSeconds is null,
+            "An imported processing range outside the managed audio duration should be cleared.");
+        Assert(transcript.MeetId == ownerMeeting.Id &&
+               analysis.MeetId == ownerMeeting.Id &&
+               analysis.RecordingId == recording.Id,
+            "Transcript and analysis provenance should follow the owning recording.");
+        Assert(state.MeetingScreenshots.Count == 1 &&
+               screenshot.RecordingId is null &&
+               screenshot.OffsetFromRecordingStartSeconds is null,
+            "Invalid screenshots should be dropped and mismatched recording offsets detached safely.");
     }
 
     private static void MeetingAssistantSecretsExcludedFromSharedState()

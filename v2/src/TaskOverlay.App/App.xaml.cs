@@ -106,7 +106,8 @@ public partial class App : System.Windows.Application
                 new OpenAiMeetingAnalysisProvider(() => _openAiApiKeyStore.LoadKey()),
                 (message, exception) => _diagnostics.Log(message, exception));
             _meetingAssistantCommandHandler = new MeetingAssistantWorkspaceCommandHandler(
-                _meetingAssistantCoordinator);
+                _meetingAssistantCoordinator,
+                new WindowsMeetingSourceInteraction());
             if (MvpProjectSeeder.EnsureSeedProjects(_state))
             {
                 PersistState();
@@ -1145,7 +1146,15 @@ public partial class App : System.Windows.Application
                 _meetingAssistantCoordinator is null
                     ? null
                     : () => _meetingAssistantCoordinator.RuntimeStatus.RecordingId,
-                (message, exception) => _diagnostics?.Log(message, exception));
+                (message, exception) => _diagnostics?.Log(message, exception),
+                _meetingAssistantCoordinator is null
+                    ? null
+                    : transcript =>
+                        _meetingAssistantCoordinator.LoadTranscriptContent(transcript),
+                _meetingAssistantCoordinator is null
+                    ? null
+                    : screenshot =>
+                        _meetingAssistantCoordinator.LoadScreenshotThumbnailDataUrl(screenshot));
             _workspaceWindow.Closed += WorkspaceWindow_OnClosed;
         }
 

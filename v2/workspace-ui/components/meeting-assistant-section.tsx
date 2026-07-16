@@ -44,6 +44,8 @@ interface Props {
   commandError?: string | null
   onClearError?: () => void
   onCommand: (command: WorkspaceMeetingAssistantCommand) => boolean
+  showAnalysis?: boolean
+  showTranscript?: boolean
 }
 
 const statusOptions: Status[] = ["TODO", "FOCUS", "WAIT", "DONE"]
@@ -65,6 +67,8 @@ export function MeetingAssistantSection({
   commandError,
   onClearError,
   onCommand,
+  showAnalysis = true,
+  showTranscript = true,
 }: Props) {
   const meetingRecordings = useMemo(
     () => recordings
@@ -303,6 +307,7 @@ export function MeetingAssistantSection({
               isProcessing={isProcessing}
               readOnly={readOnly}
               send={send}
+              showTranscript={showTranscript}
               onStartAnother={recordingControls.mode === "start" ? () => {
                 if (send({ type: "startMeetingRecording", meetingId: meet.id })) {
                   setPendingRecordingAction("start")
@@ -311,7 +316,7 @@ export function MeetingAssistantSection({
             />
           )}
 
-          {selectedAnalysis && (
+          {showAnalysis && selectedAnalysis && (
             <AnalysisReview
               analysis={selectedAnalysis}
               projects={projects}
@@ -399,6 +404,7 @@ function RecordingCard({
   readOnly,
   send,
   onStartAnother,
+  showTranscript,
 }: {
   recording: MeetingRecordingSnapshot
   isRuntimeActive: boolean
@@ -406,7 +412,19 @@ function RecordingCard({
   readOnly: boolean
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
   onStartAnother?: () => void
+  showTranscript: boolean
 }) {
+  const [rangeFrom, setRangeFrom] = useState(
+    recording.processFromSeconds == null ? "" : String(recording.processFromSeconds),
+  )
+  const [rangeUntil, setRangeUntil] = useState(
+    recording.processUntilSeconds == null ? "" : String(recording.processUntilSeconds),
+  )
+  useEffect(() => {
+    setRangeFrom(recording.processFromSeconds == null ? "" : String(recording.processFromSeconds))
+    setRangeUntil(recording.processUntilSeconds == null ? "" : String(recording.processUntilSeconds))
+  }, [recording.id, recording.processFromSeconds, recording.processUntilSeconds])
+
   const canTranscribe = !recording.keepLocalOnly
     && recording.hasMixedAudio
     && ["Recorded", "TranscriptReady", "Ready", "Failed"].includes(recording.state)
@@ -451,7 +469,83 @@ function RecordingCard({
         {recording.recordingFormat === "Wav" && (
           <p className="text-amber-300">Lossless WAV recordings use substantially more disk space.</p>
         )}
+        {recording.sourceKind === "Imported" && (
+          <p className="break-words">
+            Origin: <strong className="text-foreground">Imported</strong>
+            {recording.originalFileName ? ` - ${recording.originalFileName}` : ""}
+          </p>
+        )}
       </div>
+
+      {recording.sourceKind === "Imported" && (
+        <div className="space-y-2 rounded border border-border/70 bg-card/30 p-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Processing range (seconds)
+            </span>
+            <button
+              type="button"
+              disabled={readOnly || isProcessing}
+              onClick={() => {
+                setRangeFrom("")
+                setRangeUntil("")
+                send({
+                  type: "setImportedAudioRange",
+                  recordingId: recording.id,
+                  fromSeconds: null,
+                  untilSeconds: null,
+                })
+              }}
+              className="text-[10px] font-medium text-status-meet disabled:opacity-40"
+            >
+              Use full recording
+            </button>
+          </div>
+          <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
+            <input
+              type="number"
+              min={0}
+              step="0.1"
+              value={rangeFrom}
+              onChange={(event) => setRangeFrom(event.target.value)}
+              placeholder="From"
+              className="h-7 min-w-0 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+            />
+            <input
+              type="number"
+              min={0}
+              max={recording.durationSeconds || undefined}
+              step="0.1"
+              value={rangeUntil}
+              onChange={(event) => setRangeUntil(event.target.value)}
+              placeholder="Until"
+              className="h-7 min-w-0 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+            />
+            <button
+              type="button"
+              disabled={readOnly || isProcessing}
+              onClick={() => {
+                const from = rangeFrom.trim() ? Number(rangeFrom) : null
+                const until = rangeUntil.trim() ? Number(rangeUntil) : null
+                if ((from !== null && !Number.isFinite(from)) ||
+                    (until !== null && !Number.isFinite(until))) return
+                send({
+                  type: "setImportedAudioRange",
+                  recordingId: recording.id,
+                  fromSeconds: from,
+                  untilSeconds: until,
+                })
+              }}
+              className="h-7 rounded border border-border px-2 text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
+            >
+              Apply
+            </button>
+          </div>
+          <p className="text-[9px] text-muted-foreground">
+            The managed original remains unchanged. Only transcription input is ranged.
+          </p>
+        </div>
+      )}
 
       {transcriptionSource && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded border border-status-meet/25 bg-status-meet/5 px-2 py-1.5 text-[10px] text-muted-foreground">
@@ -584,7 +678,7 @@ function RecordingCard({
         </p>
       )}
 
-      {recording.transcriptText && (
+      {showTranscript && recording.transcriptText && (
         <details className="rounded-md border border-border p-2">
           <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Transcript
@@ -598,7 +692,7 @@ function RecordingCard({
   )
 }
 
-function AnalysisReview({
+export function AnalysisReview({
   analysis,
   projects,
   readOnly,
@@ -902,7 +996,9 @@ function formatTrackHealth(health: MeetingRecordingSnapshot["systemAudioHealth"]
 }
 
 function formatRecordingFormat(format: MeetingRecordingSnapshot["recordingFormat"]): string {
-  return format === "Wav" ? "WAV" : "AAC/M4A"
+  if (format === "Wav") return "WAV"
+  if (format === "Mp3") return "MP3"
+  return "AAC/M4A"
 }
 
 function formatDuration(seconds: number): string {

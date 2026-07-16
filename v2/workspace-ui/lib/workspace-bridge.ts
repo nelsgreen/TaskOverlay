@@ -5,6 +5,8 @@ import type {
   MeetItem,
   MeetingAnalysisSnapshot,
   MeetingRecordingSnapshot,
+  MeetingScreenshotSnapshot,
+  MeetingTranscriptSnapshot,
   Project,
   Section,
   TabKey,
@@ -59,6 +61,8 @@ export interface WorkspaceData {
   timelineItems: TimelineItem[]
   meetItems: MeetItem[]
   meetingRecordings: MeetingRecordingSnapshot[]
+  meetingTranscripts: MeetingTranscriptSnapshot[]
+  meetingScreenshots: MeetingScreenshotSnapshot[]
   meetingAnalyses: MeetingAnalysisSnapshot[]
   activeMeetingRecordingId: string | null
   contextSources: WorkspaceContextSourceSnapshot[]
@@ -261,7 +265,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
 function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceSnapshotContract>
-  return candidate.schemaVersion === 3 &&
+  return candidate.schemaVersion === 4 &&
     (candidate.mode === "readonly" || candidate.mode === "connected") &&
     typeof candidate.generatedAtUtc === "string" &&
     Array.isArray(candidate.projects) &&
@@ -270,6 +274,8 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
     Array.isArray(candidate.taskWorkSessions) &&
     Array.isArray(candidate.meetings) &&
     Array.isArray(candidate.meetingRecordings) &&
+    Array.isArray(candidate.meetingTranscripts) &&
+    Array.isArray(candidate.meetingScreenshots) &&
     Array.isArray(candidate.meetingAnalyses) &&
     (candidate.activeMeetingRecordingId === null ||
       typeof candidate.activeMeetingRecordingId === "string") &&
@@ -331,6 +337,8 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     timelineItems,
     meetItems,
     meetingRecordings: snapshot.meetingRecordings,
+    meetingTranscripts: snapshot.meetingTranscripts,
+    meetingScreenshots: snapshot.meetingScreenshots,
     meetingAnalyses: snapshot.meetingAnalyses,
     activeMeetingRecordingId: snapshot.activeMeetingRecordingId,
     // Snapshot rows are used as-is (ids already snapshot-format); ?? [] keeps
@@ -363,6 +371,7 @@ function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): Me
     location: source.location || undefined,
     link: source.link || undefined,
     linkedTaskId: source.linkedTaskId ?? undefined,
+    activeTranscriptId: source.activeTranscriptId ?? undefined,
     recordingPolicy: source.recordingPolicy,
   }
 }

@@ -7,6 +7,8 @@ import type {
   MeetItem,
   MeetingAnalysisSnapshot,
   MeetingRecordingSnapshot,
+  MeetingScreenshotSnapshot,
+  MeetingTranscriptSnapshot,
   Project,
   Section,
   Task,
@@ -17,8 +19,13 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { shouldCloseMeetModal, type MeetModalCloseReason } from "@/lib/meet-modal-policy"
+import {
+  MEET_WORKSPACE_TABS,
+  shouldShowMeetDetailsActions,
+  type MeetWorkspaceTab,
+} from "@/lib/meet-workspace-policy"
 import { MeetContextBlock } from "./task-context-block"
-import { MeetingAssistantSection } from "./meeting-assistant-section"
+import { MeetingReviewWorkspace, MeetingSourcesWorkspace } from "./meet-sources-review"
 
 interface Props {
   meet: MeetItem | null
@@ -43,6 +50,8 @@ interface Props {
   sections?: Section[]
   meetItems?: MeetItem[]
   meetingRecordings?: MeetingRecordingSnapshot[]
+  meetingTranscripts?: MeetingTranscriptSnapshot[]
+  meetingScreenshots?: MeetingScreenshotSnapshot[]
   meetingAnalyses?: MeetingAnalysisSnapshot[]
   activeRecording?: MeetingRecordingSnapshot | null
   activeRecordingOwnerTitle?: string
@@ -121,6 +130,8 @@ export function MeetDetailsModal({
   sections = [],
   meetItems = [],
   meetingRecordings = [],
+  meetingTranscripts = [],
+  meetingScreenshots = [],
   meetingAnalyses = [],
   activeRecording = null,
   activeRecordingOwnerTitle,
@@ -129,6 +140,7 @@ export function MeetDetailsModal({
   onMeetingAssistantCommand,
 }: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
+  const [activeTab, setActiveTab] = useState<MeetWorkspaceTab>("details")
   const sessionBaseRef = useRef<MeetItem | null>(meet)
   const draftRef = useRef<MeetItem | null>(meet)
   const titleInputRef = useRef<HTMLInputElement>(null)
@@ -144,6 +156,10 @@ export function MeetDetailsModal({
     draftRef.current = meet
     sessionBaseRef.current = meet
   }, [meet])
+
+  useEffect(() => {
+    setActiveTab("details")
+  }, [meet?.id])
 
   useEffect(() => {
     if (!focusTitle || !meet || meet.id !== draft?.id) return
@@ -226,6 +242,28 @@ export function MeetDetailsModal({
 
       {/* scrollbar-gutter:stable — same fix as Task Details: reserve the scrollbar's
           width so hovering/expanding a card never reflows the panel horizontally. */}
+      <div className="flex shrink-0 items-center gap-1 border-b border-border bg-background/35 px-4 py-1.5">
+        {MEET_WORKSPACE_TABS.map((tab) => (
+          <button
+            type="button"
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={cn(
+              "h-8 rounded-md px-3 text-[11px] font-semibold capitalize transition-colors",
+              activeTab === tab
+                ? "bg-status-meet/15 text-status-meet"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            {tab}
+          </button>
+        ))}
+        {dirty && activeTab !== "details" && (
+          <span className="ml-auto text-[10px] text-amber-300">Unsaved Details changes</span>
+        )}
+      </div>
+
+      {shouldShowMeetDetailsActions(activeTab) && (
       <fieldset disabled={readOnly} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable] disabled:opacity-70">
         <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
           <div className="min-w-0 space-y-3">
@@ -441,22 +479,6 @@ export function MeetDetailsModal({
           <div className="min-w-0 space-y-3">
 
         {/* ── Recording assistant and Context ── */}
-        {onMeetingAssistantCommand && (
-          <MeetingAssistantSection
-            meet={draft}
-            projects={projects}
-            recordings={meetingRecordings}
-            analyses={meetingAnalyses}
-            unclassifiedRecordings={meetingRecordings.filter((recording) => !recording.meetingId)}
-            activeRecording={activeRecording}
-            activeRecordingOwnerTitle={activeRecordingOwnerTitle}
-            readOnly={readOnly}
-            commandError={meetingAssistantError}
-            onClearError={onClearMeetingAssistantError}
-            onCommand={onMeetingAssistantCommand}
-          />
-        )}
-
         {onContextCommand && onOpenContextHub && (
           <MeetContextBlock
             meet={draft}
@@ -482,8 +504,42 @@ export function MeetDetailsModal({
           </div>
         </div>
       </fieldset>
+      )}
+
+      {activeTab === "sources" && (
+        <MeetingSourcesWorkspace
+          meet={draft}
+          projects={projects}
+          recordings={meetingRecordings}
+          transcripts={meetingTranscripts}
+          screenshots={meetingScreenshots}
+          analyses={meetingAnalyses}
+          activeRecording={activeRecording}
+          activeRecordingOwnerTitle={activeRecordingOwnerTitle}
+          readOnly={readOnly}
+          commandError={meetingAssistantError}
+          onClearError={onClearMeetingAssistantError}
+          onCommand={onMeetingAssistantCommand}
+        />
+      )}
+
+      {activeTab === "review" && (
+        <MeetingReviewWorkspace
+          meet={draft}
+          projects={projects}
+          recordings={meetingRecordings}
+          transcripts={meetingTranscripts}
+          screenshots={meetingScreenshots}
+          analyses={meetingAnalyses}
+          activeRecording={activeRecording}
+          activeRecordingOwnerTitle={activeRecordingOwnerTitle}
+          readOnly={readOnly}
+          onCommand={onMeetingAssistantCommand}
+        />
+      )}
 
       {/* Bottom actions */}
+      {activeTab === "details" && (
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
         <button
           disabled={readOnly}
@@ -531,6 +587,7 @@ export function MeetDetailsModal({
           </button>
         </div>
       </div>
+      )}
       </div>
     </div>
   )

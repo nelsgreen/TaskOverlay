@@ -161,6 +161,8 @@ export function TaskManager() {
   const taskWorkSessions = bridge.data?.taskWorkSessions ?? mockTaskWorkSessions
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
   const meetingRecordings = bridge.data?.meetingRecordings ?? []
+  const meetingTranscripts = bridge.data?.meetingTranscripts ?? []
+  const meetingScreenshots = bridge.data?.meetingScreenshots ?? []
   const meetingAnalyses = bridge.data?.meetingAnalyses ?? []
   const activeMeetingRecording = meetingRecordings.find((recording) =>
     recording.id === bridge.data?.activeMeetingRecordingId) ?? null
@@ -1838,6 +1840,8 @@ export function TaskManager() {
           sections={sections}
           meetItems={meetItems}
           meetingRecordings={meetingRecordings}
+          meetingTranscripts={meetingTranscripts}
+          meetingScreenshots={meetingScreenshots}
           meetingAnalyses={meetingAnalyses}
           activeRecording={activeMeetingRecording}
           activeRecordingOwnerTitle={activeMeetingRecordingOwnerTitle}
