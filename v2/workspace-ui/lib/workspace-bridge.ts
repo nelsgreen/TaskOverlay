@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type {
   MeetItem,
+  MeetingAnalysisSnapshot,
+  MeetingRecordingSnapshot,
   Project,
   Section,
   TabKey,
@@ -21,6 +23,7 @@ import type {
   WorkspaceCreateSectionCommand,
   WorkspaceCreateTaskCommand,
   WorkspaceMeetingCommand,
+  WorkspaceMeetingAssistantCommand,
   WorkspaceSectionCommand,
   WorkspaceSnapshotContract,
   WorkspaceTaskCommand,
@@ -55,6 +58,9 @@ export interface WorkspaceData {
   activeNowTaskIds: string[]
   timelineItems: TimelineItem[]
   meetItems: MeetItem[]
+  meetingRecordings: MeetingRecordingSnapshot[]
+  meetingAnalyses: MeetingAnalysisSnapshot[]
+  activeMeetingRecordingId: string | null
   contextSources: WorkspaceContextSourceSnapshot[]
   contextItems: WorkspaceContextItemSnapshot[]
   context: WorkspaceContextSnapshot
@@ -81,6 +87,7 @@ export interface WorkspaceBridgeState {
   sendMeetingCommand(command: WorkspaceMeetingCommand): boolean
   sendTaskWorkSessionCommand(command: WorkspaceTaskWorkSessionCommand): boolean
   sendContextHubCommand(command: WorkspaceContextHubCommand): boolean
+  sendMeetingAssistantCommand(command: WorkspaceMeetingAssistantCommand): boolean
   clearError(): void
   clearLastCreatedTaskId(): void
   clearLastCreatedSectionId(): void
@@ -201,6 +208,9 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const sendContextHubCommand = useCallback((command: WorkspaceContextHubCommand): boolean =>
     postCommand(command), [postCommand])
 
+  const sendMeetingAssistantCommand = useCallback((command: WorkspaceMeetingAssistantCommand): boolean =>
+    postCommand(command), [postCommand])
+
   const clearError = useCallback(() => setError(null), [])
   const clearLastCreatedTaskId = useCallback(() => setLastCreatedTaskId(null), [])
   const clearLastCreatedSectionId = useCallback(() => setLastCreatedSectionId(null), [])
@@ -226,6 +236,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     sendMeetingCommand,
     sendTaskWorkSessionCommand,
     sendContextHubCommand,
+    sendMeetingAssistantCommand,
     clearError,
     clearLastCreatedTaskId,
     clearLastCreatedSectionId,
@@ -250,7 +261,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
 function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceSnapshotContract>
-  return candidate.schemaVersion === 2 &&
+  return candidate.schemaVersion === 3 &&
     (candidate.mode === "readonly" || candidate.mode === "connected") &&
     typeof candidate.generatedAtUtc === "string" &&
     Array.isArray(candidate.projects) &&
@@ -258,6 +269,10 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
     Array.isArray(candidate.tasks) &&
     Array.isArray(candidate.taskWorkSessions) &&
     Array.isArray(candidate.meetings) &&
+    Array.isArray(candidate.meetingRecordings) &&
+    Array.isArray(candidate.meetingAnalyses) &&
+    (candidate.activeMeetingRecordingId === null ||
+      typeof candidate.activeMeetingRecordingId === "string") &&
     Array.isArray(candidate.activeNow) &&
     Array.isArray(candidate.timelineItems) &&
     isWorkspaceContext(candidate.context)
@@ -315,6 +330,9 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     activeNowTaskIds: snapshot.activeNow.map((item) => item.taskId),
     timelineItems,
     meetItems,
+    meetingRecordings: snapshot.meetingRecordings,
+    meetingAnalyses: snapshot.meetingAnalyses,
+    activeMeetingRecordingId: snapshot.activeMeetingRecordingId,
     // Snapshot rows are used as-is (ids already snapshot-format); ?? [] keeps
     // a host built before ContextHUB from breaking the whole snapshot.
     contextSources: snapshot.contextSources ?? [],
@@ -345,6 +363,7 @@ function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): Me
     location: source.location || undefined,
     link: source.link || undefined,
     linkedTaskId: source.linkedTaskId ?? undefined,
+    recordingPolicy: source.recordingPolicy,
   }
 }
 

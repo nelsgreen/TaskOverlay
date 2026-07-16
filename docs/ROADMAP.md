@@ -16,10 +16,11 @@ the backlog into a full release plan.
 6. FUCKUP marker MVP.
 7. Global Ctrl+Z later, as architecture-level work - not a quick add-on.
 
-Do not start AI ProposedActions yet. AI later must follow: raw input ->
-SourceDocument/Capture -> `AIAnalysisRun` -> `ProposedAction[]` -> Review UI ->
-apply through existing services, never a direct mutation without explicit
-user confirmation (see DECISIONS "ContextHUB").
+The MEET Assistant foundation implements the first bounded ProposedActions
+review/apply path. Future AI work must keep the same rule: raw input ->
+analysis -> `ProposedAction[]` -> Review UI -> apply through existing services,
+never a direct mutation without explicit user confirmation (see DECISIONS
+"ContextHUB").
 
 ## Near-Term Reliability / Polish
 
@@ -79,14 +80,23 @@ user confirmation (see DECISIONS "ContextHUB").
 2. MEET Timeline display/navigation - implemented.
 3. MEET creation and drag/drop rescheduling from Calendar - implemented.
 4. Handle next MEET countdown.
-5. Local recording.
-6. Emergency recording.
-7. Post-meeting transcription.
-8. AI meeting analysis.
-9. Suggested tasks review/create selected.
+5. Local recording - Compact direct AAC/M4A foundation implemented with
+   microphone, system, and mixed tracks, strict per-writer MTA thread ownership,
+   bounded queues, concise retryable failure UI, and optional Lossless WAV.
+6. Emergency recording and later classification - foundation implemented.
+7. Post-meeting transcription - connected optional OpenAI provider implemented.
+8. Structured meeting analysis - connected optional OpenAI provider implemented.
+9. Suggested actions review/apply selected - foundation implemented; no
+   automatic mutations.
+10. Dedicated connected MEET modal - implemented for create/edit, recording,
+    transcript, analysis, ProposedActions, and Context; TASK Details remains in
+    the right sidebar and modal close does not stop recording.
+11. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
+    loss, device recovery, retention, transcript editing/search, ContextHUB
+    promotion, and additional/local providers.
 
-Recording, transcription, AI analysis, recurrence, calendar sync, and external
-meeting-provider APIs remain intentionally outside the Basic MEET MVP.
+Recurrence, calendar sync, live transcription, and external meeting-platform
+APIs remain intentionally later work.
 
 ## Task Quality
 
@@ -146,8 +156,9 @@ meeting-provider APIs remain intentionally outside the Basic MEET MVP.
    only - no AI, no external API calls, no automatic analysis, no task/MEET
    creation, no AppState mutation.
 5. Manual source import polish.
-6. Later: OpenAI meeting analysis, transcription output, Telegram capture -
-   all writing drafts for explicit user review, never auto-creating.
+6. MEET recording/transcription/analysis foundation is implemented with
+   explicit ProposedActions review; transcript promotion into ContextHUB and
+   broader capture interpretation remain later work and must never auto-create.
 
 ## Telegram Capture
 

@@ -25,6 +25,7 @@ public partial class App : System.Windows.Application
     private Forms.ToolStripMenuItem? _workingModeMenuItem;
     private Forms.ToolStripMenuItem? _collapsedHandleMenuItem;
     private Forms.ToolStripMenuItem? _pinnedExpandedMenuItem;
+    private Forms.ToolStripMenuItem? _meetingRecordingMenuItem;
     private GlobalHotkeyManager? _hotkeyManager;
     private AppStateStore? _stateStore;
     private LocalSettingsStore? _localSettingsStore;
@@ -32,15 +33,20 @@ public partial class App : System.Windows.Application
     private TelegramTokenStore? _telegramTokenStore;
     private TelegramBotApiClient? _telegramBotApiClient;
     private TelegramPollingService? _telegramPollingService;
+    private OpenAiApiKeyStore? _openAiApiKeyStore;
+    private MeetingAssistantCoordinator? _meetingAssistantCoordinator;
+    private MeetingAssistantWorkspaceCommandHandler? _meetingAssistantCommandHandler;
     private BackupService? _backupService;
     private AppState? _state;
     private AppDiagnostics? _diagnostics;
     private SingleInstanceGuard? _singleInstanceGuard;
     private DispatcherTimer? _reminderTimer;
     private DispatcherTimer? _backupTimer;
+    private DispatcherTimer? _meetingAutoRecordTimer;
     private readonly SemaphoreSlim _backupGate = new(1, 1);
     private BackupFolderCheckResult? _latestBackupCheck;
     private bool _stateWritesSuppressed;
+    private bool _meetingAutoRecordTickRunning;
     private volatile bool _isShuttingDown;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -81,6 +87,26 @@ public partial class App : System.Windows.Application
                 _stateStore.StatePath,
                 (message, exception) => _diagnostics.Log(message, exception));
             _state = _stateStore.Load();
+            _openAiApiKeyStore = new OpenAiApiKeyStore(
+                _diagnostics.StateDirectory,
+                (message, exception) => _diagnostics.Log(message, exception));
+            _meetingAssistantCoordinator = new MeetingAssistantCoordinator(
+                _state,
+                _localSettings,
+                _diagnostics.StateDirectory,
+                PersistMeetingAssistantState,
+                SaveLocalSettings,
+                OnMeetingAssistantStateChanged,
+                new WindowsMeetingRecorder(
+                    (message, exception) => _diagnostics.Log(message, exception)),
+                new MeetingAudioProcessor(),
+                new OpenAiTranscriptionProvider(
+                    () => _openAiApiKeyStore.LoadKey(),
+                    diagnostic: (message, exception) => _diagnostics.Log(message, exception)),
+                new OpenAiMeetingAnalysisProvider(() => _openAiApiKeyStore.LoadKey()),
+                (message, exception) => _diagnostics.Log(message, exception));
+            _meetingAssistantCommandHandler = new MeetingAssistantWorkspaceCommandHandler(
+                _meetingAssistantCoordinator);
             if (MvpProjectSeeder.EnsureSeedProjects(_state))
             {
                 PersistState();
@@ -97,6 +123,7 @@ public partial class App : System.Windows.Application
             RegisterGlobalHotkeys();
             StartReminderTimer();
             StartBackupTimer();
+            StartMeetingAutoRecordTimer();
             _diagnostics.Log("Application startup completed.");
         }
         catch (Exception ex)
@@ -120,6 +147,8 @@ public partial class App : System.Windows.Application
         DisposeGlobalHotkeys();
         StopReminderTimer();
         StopBackupTimer();
+        StopMeetingAutoRecordTimer();
+        StopMeetingAssistantForExit();
         try
         {
             _dueAttentionWindow?.CloseForExit();
@@ -216,6 +245,11 @@ public partial class App : System.Windows.Application
             "Open Workspace",
             null,
             (_, _) => RunCommand("Tray", "Open Workspace", ShowWorkspace));
+        _meetingRecordingMenuItem = new Forms.ToolStripMenuItem(
+            "Start emergency recording",
+            null,
+            async (_, _) => await ToggleEmergencyRecordingFromTrayAsync());
+        _trayMenu.Items.Add(_meetingRecordingMenuItem);
         _trayMenu.Items.Add(
             "Open Tree Manager",
             null,
@@ -865,6 +899,175 @@ public partial class App : System.Windows.Application
         _backupTimer = null;
     }
 
+    private void StartMeetingAutoRecordTimer()
+    {
+        if (_meetingAutoRecordTimer is not null ||
+            _meetingAssistantCoordinator is null)
+        {
+            return;
+        }
+
+        _meetingAutoRecordTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(10)
+        };
+        _meetingAutoRecordTimer.Tick += MeetingAutoRecordTimer_OnTick;
+        _meetingAutoRecordTimer.Start();
+        _ = RunMeetingAutoRecordTickAsync();
+    }
+
+    private async void MeetingAutoRecordTimer_OnTick(object? sender, EventArgs e)
+    {
+        await RunMeetingAutoRecordTickAsync();
+    }
+
+    private async Task RunMeetingAutoRecordTickAsync()
+    {
+        if (_meetingAutoRecordTickRunning ||
+            _isShuttingDown ||
+            _meetingAssistantCoordinator is null)
+        {
+            UpdateMeetingRecordingIndicator();
+            return;
+        }
+
+        _meetingAutoRecordTickRunning = true;
+        try
+        {
+            await _meetingAssistantCoordinator.TickAutoRecordAsync();
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("Automatic MEET recording scheduler failed.", ex);
+        }
+        finally
+        {
+            _meetingAutoRecordTickRunning = false;
+            UpdateMeetingRecordingIndicator();
+        }
+    }
+
+    private void StopMeetingAutoRecordTimer()
+    {
+        if (_meetingAutoRecordTimer is null)
+        {
+            return;
+        }
+
+        _meetingAutoRecordTimer.Stop();
+        _meetingAutoRecordTimer.Tick -= MeetingAutoRecordTimer_OnTick;
+        _meetingAutoRecordTimer = null;
+    }
+
+    private async Task ToggleEmergencyRecordingFromTrayAsync()
+    {
+        if (_meetingAssistantCoordinator is null || _isShuttingDown)
+        {
+            return;
+        }
+
+        MeetingAssistantOperationResult result;
+        var activeRecordingId = _meetingAssistantCoordinator.RuntimeStatus.RecordingId;
+        if (activeRecordingId is null)
+        {
+            result = await _meetingAssistantCoordinator.StartEmergencyAsync();
+        }
+        else
+        {
+            result = await _meetingAssistantCoordinator.StopAsync(activeRecordingId.Value);
+        }
+
+        if (!result.Success)
+        {
+            ShowMeetingAssistantTrayMessage(
+                result.Error ?? "Meeting recording command failed.",
+                Forms.ToolTipIcon.Warning);
+        }
+
+        UpdateMeetingRecordingIndicator();
+    }
+
+    private void OnMeetingAssistantStateChanged()
+    {
+        _workspaceWindow?.RefreshFromExternalChange();
+        UpdateMeetingRecordingIndicator();
+    }
+
+    private void UpdateMeetingRecordingIndicator()
+    {
+        var activeRecordingId = _meetingAssistantCoordinator?.RuntimeStatus.RecordingId;
+        var active = activeRecordingId is Guid recordingId && _state is not null
+            ? new MeetingRecordingService(_state).Find(recordingId)
+            : null;
+        if (_meetingRecordingMenuItem is not null)
+        {
+            _meetingRecordingMenuItem.Text = activeRecordingId is null
+                ? "Start emergency recording"
+                : "Stop current recording";
+        }
+
+        if (_trayIcon is null)
+        {
+            return;
+        }
+
+        if (active?.StartedAtUtc is DateTimeOffset startedAt)
+        {
+            var elapsed = DateTimeOffset.UtcNow - startedAt;
+            _trayIcon.Text = $"TaskOverlay REC {elapsed:hh\\:mm\\:ss}";
+        }
+        else
+        {
+            _trayIcon.Text = "TaskOverlay v2";
+        }
+    }
+
+    private void ShowMeetingAssistantTrayMessage(
+        string message,
+        Forms.ToolTipIcon icon)
+    {
+        try
+        {
+            _trayIcon?.ShowBalloonTip(
+                5_000,
+                "TaskOverlay MEET Recording",
+                message,
+                icon);
+        }
+        catch
+        {
+            // Tray feedback must not affect recording behavior.
+        }
+    }
+
+    private void StopMeetingAssistantForExit()
+    {
+        if (_meetingAssistantCoordinator is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            _meetingAssistantCoordinator.StopForShutdownAsync(timeout.Token)
+                .GetAwaiter()
+                .GetResult();
+            _meetingAssistantCoordinator.DisposeAsync().AsTask()
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("MEET Recording service shutdown failed.", ex);
+        }
+        finally
+        {
+            _meetingAssistantCoordinator = null;
+            _meetingAssistantCommandHandler = null;
+        }
+    }
+
     private void ShowSettings()
     {
         ShowUtilityShell(AppWindowKind.Settings);
@@ -930,7 +1133,19 @@ public partial class App : System.Windows.Application
             _workspaceWindow = new WorkspaceWindow(
                 _state,
                 PersistWorkspaceState,
-                RefreshTaskPresentations);
+                RefreshTaskPresentations,
+                _meetingAssistantCommandHandler is null
+                    ? null
+                    : (json, token) =>
+                        _meetingAssistantCommandHandler.TryHandleAsync(json, token),
+                _meetingAssistantCoordinator is null
+                    ? null
+                    : recording =>
+                        _meetingAssistantCoordinator.LoadTranscriptText(recording),
+                _meetingAssistantCoordinator is null
+                    ? null
+                    : () => _meetingAssistantCoordinator.RuntimeStatus.RecordingId,
+                (message, exception) => _diagnostics?.Log(message, exception));
             _workspaceWindow.Closed += WorkspaceWindow_OnClosed;
         }
 
@@ -1053,7 +1268,16 @@ public partial class App : System.Windows.Application
                 TestTelegramConnectionAsync,
                 GetTelegramCaptureDiagnostics,
                 PollTelegramNowAsync,
-                OpenContextHubFromSettings),
+                OpenContextHubFromSettings,
+                GetMeetingAssistantSettings,
+                SaveLocalSettings,
+                GetMeetingMicrophoneDevices,
+                GetMeetingSystemOutputDevices,
+                () => _meetingAssistantCoordinator?.RuntimeStatus.RecordingId is not null,
+                OpenMeetingRecordingsFolder,
+                HasOpenAiApiKey,
+                SaveOpenAiApiKey,
+                ClearOpenAiApiKey),
             active => _overlayWindow?.SetModalInteractionActive(active));
         _utilityShellWindow.ActiveTabChanged += UtilityShellWindow_OnActiveTabChanged;
         _utilityShellWindow.Closed += UtilityShellWindow_OnClosed;
@@ -1544,7 +1768,7 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private void BeginShutdown(string reason)
+    private async void BeginShutdown(string reason)
     {
         if (_isShuttingDown)
         {
@@ -1557,6 +1781,19 @@ public partial class App : System.Windows.Application
         _telegramPollingService?.Stop();
         StopReminderTimer();
         StopBackupTimer();
+        StopMeetingAutoRecordTimer();
+        if (_meetingAssistantCoordinator is not null)
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                await _meetingAssistantCoordinator.StopForShutdownAsync(timeout.Token);
+            }
+            catch (Exception ex)
+            {
+                _diagnostics?.Log("Active MEET recording could not be finalized during shutdown.", ex);
+            }
+        }
         CaptureUtilityShellGeometry();
         StopOverlayAndPersist();
         DisposeGlobalHotkeys();
@@ -1629,6 +1866,77 @@ public partial class App : System.Windows.Application
         catch (Exception ex)
         {
             _diagnostics?.Log("Workspace state save failed.", ex);
+            throw;
+        }
+    }
+
+    private MeetingAssistantSettings GetMeetingAssistantSettings()
+    {
+        if (_localSettings is null)
+        {
+            throw new InvalidOperationException(
+                "Local settings are not available before startup completes.");
+        }
+
+        _localSettings.MeetingAssistant ??= new MeetingAssistantSettings();
+        _localSettings.MeetingAssistant.Normalize();
+        return _localSettings.MeetingAssistant;
+    }
+
+    private IReadOnlyList<AudioDeviceDescriptor> GetMeetingMicrophoneDevices()
+    {
+        try
+        {
+            return _meetingAssistantCoordinator?.MicrophoneDevices ??
+                   Array.Empty<AudioDeviceDescriptor>();
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("Microphone device enumeration failed.", ex);
+            return Array.Empty<AudioDeviceDescriptor>();
+        }
+    }
+
+    private IReadOnlyList<AudioDeviceDescriptor> GetMeetingSystemOutputDevices()
+    {
+        try
+        {
+            return _meetingAssistantCoordinator?.SystemOutputDevices ??
+                   Array.Empty<AudioDeviceDescriptor>();
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("System output device enumeration failed.", ex);
+            return Array.Empty<AudioDeviceDescriptor>();
+        }
+    }
+
+    private bool OpenMeetingRecordingsFolder() =>
+        _meetingAssistantCoordinator?.OpenRecordingsRoot() == true;
+
+    private bool HasOpenAiApiKey() => _openAiApiKeyStore?.HasKey() == true;
+
+    private bool SaveOpenAiApiKey(string apiKey) =>
+        _openAiApiKeyStore?.SaveKey(apiKey) == true;
+
+    private bool ClearOpenAiApiKey() =>
+        _openAiApiKeyStore?.ClearKey() == true;
+
+    private void PersistMeetingAssistantState()
+    {
+        if (_stateWritesSuppressed || _stateStore is null || _state is null)
+        {
+            throw new InvalidOperationException(
+                "Meeting Assistant state cannot be saved while persistence is unavailable.");
+        }
+
+        try
+        {
+            _stateStore.Save(_state);
+        }
+        catch (Exception ex)
+        {
+            _diagnostics?.Log("Meeting Assistant state save failed.", ex);
             throw;
         }
     }

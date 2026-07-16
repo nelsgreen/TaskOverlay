@@ -386,38 +386,41 @@ Active product scope:
 - Calendar is the MEET planning/creation surface, including visual
   drag/drop rescheduling through the connected `updateMeeting` path.
 - Default meeting duration is 30 minutes.
-- Recording, transcription, AI analysis, recurrence, calendar sync, and direct
-  provider APIs remain later work.
+- Connected MEET recording and Meeting Assistant foundation is implemented:
+  - explicit per-MEET recording policy: Off / Ask / Auto;
+  - Compact direct AAC/M4A is the default, with microphone, system, and mixed
+    tracks encoded through Windows Media Foundation and no full-meeting WAV
+    intermediate;
+  - Lossless WAV is a separate optional large-file mode and existing WAV
+    recordings remain compatible;
+  - one active recording at a time, restart recovery, and emergency recording;
+  - optional OpenAI transcription and structured meeting analysis through
+    provider interfaces;
+  - transcript, analysis, and selected ProposedActions require explicit user
+    review before existing TaskOverlay services apply mutations;
+  - audio and transcript files stay local and automatic backups contain only
+    recording metadata.
+  - every Media Foundation Sink Writer is created, written, finalized, and
+    released on its own dedicated MTA owner thread; capture callbacks only post
+    to bounded queues;
+  - failed finalization keeps recoverable `*.current.m4a` files and exposes a
+    compact retry message; HRESULT/IID details stay in diagnostics and a
+    collapsed technical-details section;
+  - MEET create/view/edit, recording history, transcript, analysis, and
+    ProposedActions use one large Workspace modal. TASK Details remains in the
+    right sidebar, and closing the MEET modal does not stop recording or
+    finalization.
+- Recurrence, calendar sync, direct meeting-platform APIs, and live
+  transcription remain later work.
 - Handle next MEET countdown.
-- Local MEET recording MVP:
-  - Start/Stop from MEET;
-  - record system audio + mic locally;
-  - no OpenAI yet.
-- Emergency recording:
-  - start first, classify later;
-  - save as new MEET / link existing / keep recording only / transcribe /
-    delete.
-- Post-meeting transcription:
-  - explicit upload;
-  - save transcript json/md.
-- Meeting analysis:
-  - decisions;
-  - my tasks;
-  - others' tasks;
-  - waiting for;
-  - risks;
-  - questions.
-- Suggested tasks from meeting:
-  - no auto-create;
-  - user reviews checkbox list and creates selected tasks.
-- Provider abstraction:
-  - `ITranscriptionProvider`;
-  - `IMeetingAnalysisProvider`;
-  - OpenAI first, AssemblyAI/Deepgram/Local Whisper later.
-- Two-track audio:
-  - mic + system audio locally;
-  - default process mixed;
-  - better mode keeps both tracks.
+- Recording follow-ups:
+  - artifact/manual QA across real microphone and output-device combinations;
+  - recording-device hot-plug and degraded-track recovery polish;
+  - periodic finalized M4A segments to bound unexpected-process crash loss;
+  - richer emergency-recording inbox and classification flow;
+  - transcript editing/search and ContextHUB source promotion;
+  - additional transcription/analysis providers, including local Whisper;
+  - chunk retry/progress polish and recording retention controls.
 
 ## Task Quality And Neuroinclusive Planning
 

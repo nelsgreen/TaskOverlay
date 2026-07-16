@@ -38,7 +38,7 @@ import { StatusBoard } from "./status-board"
 import { TimelineView } from "./timeline-view"
 import { CalendarView } from "./calendar-view"
 import { DetailsPanel } from "./details-panel"
-import { MeetDetailsPanel } from "./meet-details-panel"
+import { MeetDetailsModal } from "./meet-details-panel"
 import { ActiveNowStrip } from "./active-now-strip"
 import { WorkstreamsView, WorkstreamDetailPanel, deriveWorkstreamState, isRootSection } from "./workstreams-view"
 import {
@@ -103,6 +103,8 @@ export function TaskManager() {
   const [mockTaskWorkSessions, setMockTaskWorkSessions] = useState<TaskWorkSession[]>([])
   const [mockMeetItems, setMockMeetItems] = useState<MeetItem[]>(initialMeetItems)
   const [meetingDraft, setMeetingDraft] = useState<MeetItem | null>(null)
+  const [meetModalOpen, setMeetModalOpen] = useState(false)
+  const [pendingMeetDeleteId, setPendingMeetDeleteId] = useState<string | null>(null)
   // Sections need local state in mock mode so "Add workstream" stays usable for
   // orientation; connected mode always uses the authoritative snapshot sections.
   const [mockSectionList, setMockSectionList] = useState<Section[]>(mockSections)
@@ -158,6 +160,13 @@ export function TaskManager() {
   const tasks = bridge.data?.tasks ?? mockTasks
   const taskWorkSessions = bridge.data?.taskWorkSessions ?? mockTaskWorkSessions
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
+  const meetingRecordings = bridge.data?.meetingRecordings ?? []
+  const meetingAnalyses = bridge.data?.meetingAnalyses ?? []
+  const activeMeetingRecording = meetingRecordings.find((recording) =>
+    recording.id === bridge.data?.activeMeetingRecordingId) ?? null
+  const activeMeetingRecordingOwnerTitle = activeMeetingRecording?.meetingId
+    ? meetItems.find((meeting) => meeting.id === activeMeetingRecording.meetingId)?.title
+    : undefined
   const calendarMeetItems = useMemo(
     () => meetingDraft ? [...meetItems.filter((meeting) => meeting.id !== meetingDraft.id), meetingDraft] : meetItems,
     [meetItems, meetingDraft],
@@ -365,6 +374,7 @@ export function TaskManager() {
     }
     setSelectedTimelineItemId(timelineItemId)
     setSelection({ kind: "meet", id: meetId })
+    setMeetModalOpen(true)
   }
   const selectMeet = (meetId: string) => {
     const meet = calendarMeetItems.find((candidate) => candidate.id === meetId)
@@ -373,6 +383,7 @@ export function TaskManager() {
     }
     setSelectedTimelineItemId(meetId === MEETING_DRAFT_ID ? null : `meet:${meetId}`)
     setSelection({ kind: "meet", id: meetId })
+    setMeetModalOpen(true)
   }
   // The single project used for the Tree tab (Tree is single-project by design)
   const treeProjectId = selectedProjectIds[0] ?? projects[0].id
@@ -1277,12 +1288,13 @@ export function TaskManager() {
     if (id === MEETING_DRAFT_ID) {
       setMeetingDraft(null)
       setSelection(null)
+      setMeetModalOpen(false)
       return
     }
     if (connected) {
-      bridge.sendMeetingCommand({ type: "deleteMeeting", meetingId: id })
-      setSelection(null)
-      setSelectedTimelineItemId(null)
+      if (bridge.sendMeetingCommand({ type: "deleteMeeting", meetingId: id })) {
+        setPendingMeetDeleteId(id)
+      }
       return
     }
     if (bridged) return
@@ -1291,7 +1303,18 @@ export function TaskManager() {
       setSelection(null)
       setSelectedTimelineItemId(null)
     }
+    setMeetModalOpen(false)
   }
+
+  useEffect(() => {
+    if (!pendingMeetDeleteId || meetItems.some((meeting) => meeting.id === pendingMeetDeleteId)) return
+    setPendingMeetDeleteId(null)
+    setMeetModalOpen(false)
+    setSelection((selected) => selected?.kind === "meet" && selected.id === pendingMeetDeleteId
+      ? null
+      : selected)
+    setSelectedTimelineItemId((selected) => selected === `meet:${pendingMeetDeleteId}` ? null : selected)
+  }, [pendingMeetDeleteId, meetItems])
 
   const handleMoveMeet = (meetId: string, startsAtUtc: string, durationMinutes: number) => {
     if (meetId === MEETING_DRAFT_ID && meetingDraft) {
@@ -1326,7 +1349,8 @@ export function TaskManager() {
           }
         : m))
     }
-    selectMeet(meetId)
+    setSelection({ kind: "meet", id: meetId })
+    setSelectedTimelineItemId(`meet:${meetId}`)
   }
 
   const handleCreateMeeting = (dateKey?: string, startMin?: number) => {
@@ -1338,6 +1362,7 @@ export function TaskManager() {
     setTab("calendar")
     setMeetingDraft(draft)
     setSelection({ kind: "meet", id: draft.id })
+    setMeetModalOpen(true)
     setPendingTitleFocusMeetId(draft.id)
     setSelectedTimelineItemId(null)
   }
@@ -1366,6 +1391,7 @@ export function TaskManager() {
     setSelection({ kind: "meet", id })
     setSelectedTimelineItemId(`meet:${id}`)
     setMeetingDraft(null)
+    setMeetModalOpen(true)
     bridge.clearLastCreatedMeetingId()
   }, [bridge.lastCreatedMeetingId, meetItems, bridge.clearLastCreatedMeetingId])
 
@@ -1501,6 +1527,15 @@ export function TaskManager() {
             onContextPack={handleProjectContextPack}
             contextPackDisabled={!singleProjectScope}
             contextPackHint={contextPackHint}
+            activeRecording={activeMeetingRecording}
+            onStopRecording={activeMeetingRecording ? () => {
+              if (window.confirm("Stop the active recording and finalize its local files?")) {
+                bridge.sendMeetingAssistantCommand({
+                  type: "stopMeetingRecording",
+                  recordingId: activeMeetingRecording.id,
+                })
+              }
+            } : undefined}
           />
           <ProjectScopeBar
             projects={projects}
@@ -1729,24 +1764,6 @@ export function TaskManager() {
               onOpenSelection={setContextHubSelection}
               readOnly={readOnly}
             />
-          ) : selection?.kind === "meet" && selectedMeet ? (
-            <MeetDetailsPanel
-              meet={selectedMeet}
-              projects={projects}
-              tasks={tasks}
-              onApply={handleApplyMeet}
-              onDelete={handleDeleteMeet}
-              onOpenLinkedTask={selectTask}
-              focusTitle={selectedMeet.id === pendingTitleFocusMeetId}
-              onTitleFocused={() => setPendingTitleFocusMeetId(null)}
-              readOnly={readOnly}
-              contextSources={contextSources}
-              contextItems={contextItems}
-              onContextCommand={handleContextHubCommand}
-              onOpenContextHub={() => setTab("contexthub")}
-              sections={sections}
-              meetItems={meetItems}
-            />
           ) : tab === "workstreams" && !selectedTask && selectedWorkstreamSection && selectedWorkstreamProject ? (
             <WorkstreamDetailPanel
               section={selectedWorkstreamSection}
@@ -1794,6 +1811,43 @@ export function TaskManager() {
         collapsed={activeNowCollapsed}
         onCollapsedChange={setActiveNowCollapsed}
       />
+
+      {meetModalOpen && selectedMeet && (
+        <MeetDetailsModal
+          meet={selectedMeet}
+          projects={projects}
+          tasks={tasks}
+          onApply={handleApplyMeet}
+          onDelete={handleDeleteMeet}
+          onClose={() => {
+            setMeetModalOpen(false)
+            if (selectedMeet.id === MEETING_DRAFT_ID) {
+              setMeetingDraft(null)
+              setSelection(null)
+              setPendingTitleFocusMeetId(null)
+            }
+          }}
+          onOpenLinkedTask={selectTask}
+          focusTitle={selectedMeet.id === pendingTitleFocusMeetId}
+          onTitleFocused={() => setPendingTitleFocusMeetId(null)}
+          readOnly={readOnly}
+          contextSources={contextSources}
+          contextItems={contextItems}
+          onContextCommand={handleContextHubCommand}
+          onOpenContextHub={() => setTab("contexthub")}
+          sections={sections}
+          meetItems={meetItems}
+          meetingRecordings={meetingRecordings}
+          meetingAnalyses={meetingAnalyses}
+          activeRecording={activeMeetingRecording}
+          activeRecordingOwnerTitle={activeMeetingRecordingOwnerTitle}
+          meetingAssistantError={bridge.error}
+          onClearMeetingAssistantError={bridge.clearError}
+          onMeetingAssistantCommand={connected
+            ? bridge.sendMeetingAssistantCommand
+            : undefined}
+        />
+      )}
 
       {contextPackModal && (
         <ContextPackModal

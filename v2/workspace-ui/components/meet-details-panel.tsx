@@ -1,19 +1,24 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { CalendarDays, Clock, ExternalLink, MapPin, Save, Trash2, UndoDot, Video } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { CalendarDays, Clock, ExternalLink, MapPin, Save, Trash2, UndoDot, Video, X } from "lucide-react"
 import type {
   MeetDuration,
   MeetItem,
+  MeetingAnalysisSnapshot,
+  MeetingRecordingSnapshot,
   Project,
   Section,
   Task,
   WorkspaceContextHubCommand,
   WorkspaceContextItemSnapshot,
   WorkspaceContextSourceSnapshot,
+  WorkspaceMeetingAssistantCommand,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { shouldCloseMeetModal, type MeetModalCloseReason } from "@/lib/meet-modal-policy"
 import { MeetContextBlock } from "./task-context-block"
+import { MeetingAssistantSection } from "./meeting-assistant-section"
 
 interface Props {
   meet: MeetItem | null
@@ -22,6 +27,7 @@ interface Props {
   /** Called on every draft change — auto-apply */
   onApply: (meet: MeetItem) => void
   onDelete: (id: string) => void
+  onClose: () => void
   onOpenLinkedTask?: (taskId: string) => void
   focusTitle?: boolean
   onTitleFocused?: () => void
@@ -36,6 +42,13 @@ interface Props {
   /** Sections + all MEETs, for the Context block's Context Pack export (linked task path, related MEETs). */
   sections?: Section[]
   meetItems?: MeetItem[]
+  meetingRecordings?: MeetingRecordingSnapshot[]
+  meetingAnalyses?: MeetingAnalysisSnapshot[]
+  activeRecording?: MeetingRecordingSnapshot | null
+  activeRecordingOwnerTitle?: string
+  meetingAssistantError?: string | null
+  onClearMeetingAssistantError?: () => void
+  onMeetingAssistantCommand?: (command: WorkspaceMeetingAssistantCommand) => boolean
 }
 
 const durationOptions: { value: MeetDuration; label: string }[] = [
@@ -90,12 +103,13 @@ function computeEndTime(start: string, dur: MeetDuration): string {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`
 }
 
-export function MeetDetailsPanel({
+export function MeetDetailsModal({
   meet,
   projects,
   tasks,
   onApply,
   onDelete,
+  onClose,
   onOpenLinkedTask,
   focusTitle = false,
   onTitleFocused,
@@ -106,13 +120,28 @@ export function MeetDetailsPanel({
   onOpenContextHub,
   sections = [],
   meetItems = [],
+  meetingRecordings = [],
+  meetingAnalyses = [],
+  activeRecording = null,
+  activeRecordingOwnerTitle,
+  meetingAssistantError = null,
+  onClearMeetingAssistantError,
+  onMeetingAssistantCommand,
 }: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
   const sessionBaseRef = useRef<MeetItem | null>(meet)
+  const draftRef = useRef<MeetItem | null>(meet)
   const titleInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    const current = draftRef.current
+    const base = sessionBaseRef.current
+    const sameMeeting = current?.id === meet?.id && base?.id === meet?.id
+    const hasLocalChanges = sameMeeting && JSON.stringify(current) !== JSON.stringify(base)
+    if (hasLocalChanges && JSON.stringify(current) !== JSON.stringify(meet)) return
+
     setDraft(meet)
+    draftRef.current = meet
     sessionBaseRef.current = meet
   }, [meet])
 
@@ -125,23 +154,35 @@ export function MeetDetailsPanel({
     })
   }, [focusTitle, meet, draft?.id, onTitleFocused])
 
-  if (!draft) {
-    return (
-      <aside className="flex h-full w-full flex-col border-l border-border bg-sidebar">
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-          <div className="flex size-12 items-center justify-center rounded-full bg-accent">
-            <Video className="size-5 text-muted-foreground" />
-          </div>
-          <p className="text-sm font-medium text-foreground">No meeting selected</p>
-          <p className="text-xs text-muted-foreground">Click a MEET row in the timeline to view details.</p>
-        </div>
-      </aside>
+  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(sessionBaseRef.current)
+  const requestClose = useCallback((reason: MeetModalCloseReason) => {
+    const canClose = shouldCloseMeetModal(
+      reason,
+      dirty,
+      () => window.confirm("Discard unsaved MEET changes?"),
     )
+    if (canClose) onClose()
+    return canClose
+  }, [dirty, onClose])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") requestClose("escape")
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [requestClose])
+
+  if (!draft) {
+    return null
   }
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(sessionBaseRef.current)
   const set = <K extends keyof MeetItem>(key: K, value: MeetItem[K]) =>
-    setDraft((d) => (d ? { ...d, [key]: value } : d))
+    setDraft((current) => {
+      const next = current ? { ...current, [key]: value } : current
+      draftRef.current = next
+      return next
+    })
 
   const datePresets = getDatePresets()
   const endTime = draft.endTime || (draft.duration !== "custom" ? computeEndTime(draft.startTime, draft.duration) : "")
@@ -150,19 +191,44 @@ export function MeetDetailsPanel({
   const hasMissingLinkedTask = !!draft.linkedTaskId && !linkedTask
 
   return (
-    <aside className="flex h-full w-full flex-col border-l border-border bg-sidebar">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/75 p-3 backdrop-blur-sm sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="meet-details-title"
+    >
+      <div className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-[1180px] flex-col overflow-hidden rounded-xl border border-border bg-sidebar shadow-2xl shadow-black/60 sm:max-h-[calc(100vh-3rem)]">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold text-foreground">Details</h2>
-        <span className="flex items-center gap-1.5 rounded-md bg-status-meet/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-status-meet">
-          <Video className="size-3" />
-          Meet
-        </span>
+        <div className="min-w-0">
+          <h2 id="meet-details-title" className="truncate text-sm font-semibold text-foreground">
+            {draft.id === "meeting-draft" ? "Create MEET" : "MEET details"}
+          </h2>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            Calendar item, context, recording, and Meeting Assistant
+          </p>
+        </div>
+        <div className="ml-3 flex shrink-0 items-center gap-2">
+          <span className="flex items-center gap-1.5 rounded-md bg-status-meet/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-status-meet">
+            <Video className="size-3" />
+            Meet
+          </span>
+          <button
+            type="button"
+            onClick={() => requestClose("explicit")}
+            aria-label="Close MEET details"
+            className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
       </div>
 
       {/* scrollbar-gutter:stable — same fix as Task Details: reserve the scrollbar's
           width so hovering/expanding a card never reflows the panel horizontally. */}
-      <fieldset disabled={readOnly} className="flex-1 space-y-3 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable] disabled:opacity-70">
+      <fieldset disabled={readOnly} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable] disabled:opacity-70">
+        <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
+          <div className="min-w-0 space-y-3">
 
         {/* ── Title ── */}
         <div>
@@ -210,7 +276,7 @@ export function MeetDetailsPanel({
             <div className="flex gap-1.5">
               {datePresets.map((p) => (
                 <button
-                  key={p.value}
+                  key={`${p.label}:${p.value}`}
                   onClick={() => set("date", p.value)}
                   className={cn(
                     "flex-1 rounded border px-1 py-1.5 text-center text-[10px] font-medium transition-colors",
@@ -354,7 +420,9 @@ export function MeetDetailsPanel({
               {onOpenLinkedTask && (
                 <button
                   type="button"
-                  onClick={() => onOpenLinkedTask(linkedTask.id)}
+                  onClick={() => {
+                    if (requestClose("navigate")) onOpenLinkedTask(linkedTask.id)
+                  }}
                   className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   <ExternalLink className="size-3" />
@@ -369,7 +437,26 @@ export function MeetDetailsPanel({
           )}
         </div>
 
-        {/* ── CONTEXT — linked ContextHUB SourceDocuments/ContextItems (MEET-only MVP) ── */}
+          </div>
+          <div className="min-w-0 space-y-3">
+
+        {/* ── Recording assistant and Context ── */}
+        {onMeetingAssistantCommand && (
+          <MeetingAssistantSection
+            meet={draft}
+            projects={projects}
+            recordings={meetingRecordings}
+            analyses={meetingAnalyses}
+            unclassifiedRecordings={meetingRecordings.filter((recording) => !recording.meetingId)}
+            activeRecording={activeRecording}
+            activeRecordingOwnerTitle={activeRecordingOwnerTitle}
+            readOnly={readOnly}
+            commandError={meetingAssistantError}
+            onClearError={onClearMeetingAssistantError}
+            onCommand={onMeetingAssistantCommand}
+          />
+        )}
+
         {onContextCommand && onOpenContextHub && (
           <MeetContextBlock
             meet={draft}
@@ -380,7 +467,9 @@ export function MeetDetailsPanel({
             contextSources={contextSources}
             contextItems={contextItems}
             onCommand={onContextCommand}
-            onOpenContextHub={onOpenContextHub}
+            onOpenContextHub={() => {
+              if (requestClose("navigate")) onOpenContextHub()
+            }}
             locked={readOnly}
           />
         )}
@@ -390,10 +479,12 @@ export function MeetDetailsPanel({
           MEET is a calendar-like item — not a task. It has no TODO / FOCUS / WAIT / DONE status.
         </p>
 
+          </div>
+        </div>
       </fieldset>
 
       {/* Bottom actions */}
-      <div className="flex items-center justify-between border-t border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
         <button
           disabled={readOnly}
           onClick={() => {
@@ -409,7 +500,10 @@ export function MeetDetailsPanel({
         <div className="flex items-center gap-2">
           <button
             disabled={!dirty || readOnly}
-            onClick={() => setDraft(sessionBaseRef.current)}
+            onClick={() => {
+              draftRef.current = sessionBaseRef.current
+              setDraft(sessionBaseRef.current)
+            }}
             className={cn(
               "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
               dirty && !readOnly
@@ -421,6 +515,13 @@ export function MeetDetailsPanel({
             Revert
           </button>
           <button
+            type="button"
+            onClick={() => requestClose("explicit")}
+            className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            Close
+          </button>
+          <button
             disabled={!dirty || !draft.title.trim() || readOnly}
             onClick={() => onApply(draft)}
             className="flex items-center gap-1.5 rounded-lg bg-status-meet px-3 py-1.5 text-sm font-semibold text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
@@ -430,6 +531,7 @@ export function MeetDetailsPanel({
           </button>
         </div>
       </div>
-    </aside>
+      </div>
+    </div>
   )
 }

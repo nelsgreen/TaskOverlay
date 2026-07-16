@@ -57,6 +57,7 @@ public sealed class AppStateStore
             var sourceSchemaVersion = state.SchemaVersion;
             StateMigrator.Migrate(state);
             var stateRepaired = StateMigrator.RepairCurrentState(state);
+            stateRepaired |= new MeetingRecordingService(state).RecoverInterrupted();
             Validate(state);
             if (sourceSchemaVersion != state.SchemaVersion || stateRepaired)
             {
@@ -232,6 +233,8 @@ public sealed class AppStateStore
             state.TaskWorkSessions is null ||
             state.ContextSources is null ||
             state.ContextItems is null ||
+            state.MeetingRecordings is null ||
+            state.MeetingAnalyses is null ||
             state.OverlaySettings is null ||
             state.WindowPlacement is null ||
             state.TreeManagerSettings is null ||
@@ -260,11 +263,15 @@ public sealed class AppStateStore
         var taskWorkSessionIds = state.TaskWorkSessions
             .Select(session => session.Id)
             .ToHashSet();
+        var recordingIds = state.MeetingRecordings.Select(recording => recording.Id).ToHashSet();
+        var analysisIds = state.MeetingAnalyses.Select(analysis => analysis.Id).ToHashSet();
         if (projectIds.Count != state.Projects.Count ||
             groupIds.Count != state.Groups.Count ||
             taskIds.Count != state.Tasks.Count ||
             meetingIds.Count != state.Meetings.Count ||
-            taskWorkSessionIds.Count != state.TaskWorkSessions.Count)
+            taskWorkSessionIds.Count != state.TaskWorkSessions.Count ||
+            recordingIds.Count != state.MeetingRecordings.Count ||
+            analysisIds.Count != state.MeetingAnalyses.Count)
         {
             throw new InvalidDataException("State file contains duplicate node IDs.");
         }
@@ -300,6 +307,14 @@ public sealed class AppStateStore
             {
                 throw new InvalidDataException("State file contains an invalid task.");
             }
+
+            if (task.SourceReferences is not null && task.SourceReferences.Any(reference =>
+                    reference is null ||
+                    !recordingIds.Contains(reference.RecordingId) ||
+                    !analysisIds.Contains(reference.AnalysisId)))
+            {
+                throw new InvalidDataException("State file contains an invalid task source reference.");
+            }
         }
 
         foreach (var meeting in state.Meetings)
@@ -313,6 +328,48 @@ public sealed class AppStateStore
                 meeting.LinkedTaskId is Guid linkedTaskId && !taskIds.Contains(linkedTaskId))
             {
                 throw new InvalidDataException("State file contains an invalid meeting.");
+            }
+        }
+
+        foreach (var recording in state.MeetingRecordings)
+        {
+            if (recording.Id == Guid.Empty ||
+                recording.MeetId is Guid meetId && !meetingIds.Contains(meetId) ||
+                !RecordingPathPolicy.IsSafeRelativePath(recording.RecordingFolderRelativePath) ||
+                recording.TranscriptionChunkFiles is null ||
+                recording.Tracks is null ||
+                !Enum.IsDefined(recording.SourceKind) ||
+                !Enum.IsDefined(recording.State) ||
+                !Enum.IsDefined(recording.RecordingFormat) ||
+                !Enum.IsDefined(recording.SystemAudioHealth) ||
+                !Enum.IsDefined(recording.MicrophoneHealth) ||
+                recording.Tracks.Any(track =>
+                    track is null ||
+                    !Enum.IsDefined(track.Kind) ||
+                    !Enum.IsDefined(track.FinalizationState) ||
+                    !Enum.IsDefined(track.ValidationState) ||
+                    track.SegmentFiles is null))
+            {
+                throw new InvalidDataException("State file contains an invalid meeting recording.");
+            }
+        }
+
+        foreach (var analysis in state.MeetingAnalyses)
+        {
+            if (analysis.Id == Guid.Empty ||
+                !recordingIds.Contains(analysis.RecordingId) ||
+                analysis.MeetId is Guid meetId && !meetingIds.Contains(meetId) ||
+                analysis.ProposedActions is null ||
+                analysis.Decisions is null ||
+                analysis.MyActionItems is null ||
+                analysis.OtherPeopleActionItems is null ||
+                analysis.WaitingFor is null ||
+                analysis.Risks is null ||
+                analysis.QuestionsToClarify is null ||
+                analysis.Deadlines is null ||
+                analysis.KeyQuotesOrSourceReferences is null)
+            {
+                throw new InvalidDataException("State file contains an invalid meeting analysis.");
             }
         }
 

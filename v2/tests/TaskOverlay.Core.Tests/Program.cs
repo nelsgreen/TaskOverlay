@@ -219,7 +219,16 @@ internal static class Program
             ("workspace context command validation", WorkspaceContextCommandValidation),
             ("workspace context repair removes dangling links", WorkspaceContextRepairRemovesDanglingLinks),
             ("workspace snapshot includes context data", WorkspaceSnapshotIncludesContextData),
-            ("workspace context hub restart snapshot", WorkspaceContextHubRestartSnapshot)
+            ("workspace context hub restart snapshot", WorkspaceContextHubRestartSnapshot),
+            ("meeting recording state transitions and track health", MeetingRecordingStateTransitionsAndTrackHealth),
+            ("meeting recording single active and emergency link", MeetingRecordingSingleActiveAndEmergencyLink),
+            ("meeting auto record scheduler deduplicates attempts", MeetingAutoRecordSchedulerDeduplicatesAttempts),
+            ("meeting interrupted recording recovery", MeetingInterruptedRecordingRecovery),
+            ("meeting recording storage safety", MeetingRecordingStorageSafety),
+            ("meeting proposed actions require confirmation", MeetingProposedActionsRequireConfirmation),
+            ("meeting assistant migration and snapshot", MeetingAssistantMigrationAndSnapshot),
+            ("meeting assistant persistence roundtrip", MeetingAssistantPersistenceRoundtrip),
+            ("meeting assistant secrets excluded from shared state", MeetingAssistantSecretsExcludedFromSharedState)
         };
 
         foreach (var test in tests)
@@ -4312,7 +4321,7 @@ internal static class Program
         var waitingSnapshot = snapshot.Tasks.Single(task =>
             task.Id == waiting.Id.ToString("N"));
 
-        Assert(snapshot.SchemaVersion == 2, "Workspace contract version should be 2.");
+        Assert(snapshot.SchemaVersion == 3, "Workspace contract version should be 3.");
         Assert(snapshot.Mode == "readonly", "Workspace contract should be read-only.");
         Assert(
             WorkspaceSnapshotFactory.Create(
@@ -4346,7 +4355,7 @@ internal static class Program
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
         var document = JsonDocument.Parse(json);
-        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 2,
+        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 3,
             "Serialized workspace contract should use camelCase fields.");
         Assert(document.RootElement.GetProperty("mode").GetString() == "readonly",
             "Serialized workspace contract mode mismatch.");
@@ -7161,6 +7170,496 @@ internal static class Program
                    document.RootElement.GetProperty("contextItems").GetArrayLength() == 1,
                 "Serialized restart snapshot should include ContextHUB arrays.");
         });
+    }
+
+    private static void MeetingRecordingStateTransitionsAndTrackHealth()
+    {
+        var now = DateTimeOffset.Parse("2026-07-16T08:00:00Z");
+        var state = CreateMeetingAssistantState(now, out var meeting);
+        var service = new MeetingRecordingService(state);
+        var recording = service.CreatePending(
+            meeting.Id,
+            MeetingRecordingSourceKind.ManualMeet,
+            $"meetings/{meeting.Id:N}/recordings/{Guid.NewGuid():N}",
+            now);
+        Assert(recording is not null, "A valid pending recording should be created.");
+        Assert(recording!.State == MeetingRecordingState.Pending,
+            "New recording should start pending.");
+
+        var started = now.AddSeconds(1);
+        Assert(service.MarkRecording(
+                recording.Id,
+                new MeetingRecordingStartResult(
+                    started,
+                    started,
+                    null,
+                    "system.wav",
+                    string.Empty,
+                    AudioTrackHealth.Healthy,
+                    AudioTrackHealth.Unavailable,
+                    "Microphone unavailable."),
+                started),
+            "Pending recording should enter Recording.");
+        Assert(recording.State == MeetingRecordingState.Recording &&
+               recording.SystemAudioHealth == AudioTrackHealth.Healthy &&
+               recording.MicrophoneHealth == AudioTrackHealth.Unavailable,
+            "Independent track health must be retained without pretending both tracks succeeded.");
+        Assert(!service.MarkTranscribing(recording.Id),
+            "Recording must reject an invalid direct transition to Transcribing.");
+        Assert(service.MarkStopping(recording.Id, now.AddMinutes(1)),
+            "Active recording should enter Stopping.");
+        Assert(service.MarkRecorded(
+                recording.Id,
+                new MeetingRecordingStopResult(
+                    now.AddMinutes(2),
+                    AudioTrackHealth.Healthy,
+                    AudioTrackHealth.Unavailable,
+                    "Microphone track was unavailable."),
+                now.AddMinutes(2)),
+            "Stopping recording should finalize as Recorded.");
+        Assert(service.MarkProcessing(recording.Id) &&
+               service.MarkTranscribing(recording.Id) &&
+               service.MarkTranscriptReady(
+                   recording.Id,
+                   "mixed.wav",
+                   new[] { "mixed.part-000.wav", "mixed.part-001.wav" },
+                   "transcript.raw.json",
+                   "transcript.json",
+                   "transcript.md") &&
+               service.MarkAnalyzing(recording.Id) &&
+               service.MarkReady(recording.Id, "analysis.json"),
+            "Recorded media should follow the processing/transcription/analysis lifecycle.");
+        Assert(recording.State == MeetingRecordingState.Ready,
+            "Completed recording should be Ready.");
+    }
+
+    private static void MeetingRecordingSingleActiveAndEmergencyLink()
+    {
+        var now = DateTimeOffset.Parse("2026-07-16T09:00:00Z");
+        var state = CreateMeetingAssistantState(now, out var meeting);
+        var service = new MeetingRecordingService(state);
+        var emergencyId = Guid.NewGuid();
+        var emergency = service.CreatePending(
+            null,
+            MeetingRecordingSourceKind.Emergency,
+            $"meetings/emergency/recordings/{emergencyId:N}",
+            now,
+            emergencyId)!;
+        Assert(service.MarkRecording(
+                emergency.Id,
+                new MeetingRecordingStartResult(
+                    now,
+                    now,
+                    now,
+                    "system.wav",
+                    "microphone.wav",
+                    AudioTrackHealth.Healthy,
+                    AudioTrackHealth.Healthy,
+                    null)),
+            "Emergency recording should start without a MEET.");
+        Assert(service.CreatePending(
+                meeting.Id,
+                MeetingRecordingSourceKind.ManualMeet,
+                $"meetings/{meeting.Id:N}/recordings/{Guid.NewGuid():N}") is null,
+            "Only one active recording may exist.");
+        Assert(service.MarkRecorded(
+                emergency.Id,
+                new MeetingRecordingStopResult(
+                    now.AddMinutes(1),
+                    AudioTrackHealth.Healthy,
+                    AudioTrackHealth.Healthy,
+                    null)),
+            "Emergency recording should finalize safely.");
+        Assert(service.LinkToMeeting(emergency.Id, meeting.Id),
+            "A finalized emergency recording should link to an existing MEET.");
+        Assert(emergency.MeetId == meeting.Id &&
+               emergency.RecordingFolderRelativePath.Contains("emergency"),
+            "Linking should update metadata without moving or overwriting its files.");
+    }
+
+    private static void MeetingAutoRecordSchedulerDeduplicatesAttempts()
+    {
+        var now = DateTimeOffset.Parse("2026-07-16T10:00:00Z");
+        var state = CreateMeetingAssistantState(now, out var first);
+        first.StartsAtUtc = now;
+        first.RecordingPolicy = MeetingRecordingPolicy.AutoRecord;
+        var second = new MeetingItem
+        {
+            ProjectId = first.ProjectId,
+            Title = "Overlapping MEET",
+            StartsAtUtc = now,
+            DurationMinutes = 30,
+            RecordingPolicy = MeetingRecordingPolicy.AutoRecord,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.Meetings.Add(second);
+        var settings = new MeetingAssistantSettings
+        {
+            AutomaticRecordingEnabled = true,
+            DefaultRecordingPolicy = MeetingRecordingPolicy.Manual
+        };
+
+        var due = MeetingAutoRecordScheduler.FindDueMeetings(state, settings, now);
+        Assert(due.Count == 2,
+            "Both overlapping eligible MEETs should be surfaced for deterministic conflict handling.");
+        var service = new MeetingRecordingService(state);
+        var firstAttempt = service.CreatePending(
+            first.Id,
+            MeetingRecordingSourceKind.ScheduledMeet,
+            $"meetings/{first.Id:N}/recordings/{Guid.NewGuid():N}",
+            now)!;
+        firstAttempt.LastAutoStartAttemptAtUtc = now;
+        var conflictId = Guid.NewGuid();
+        var conflict = service.CreateAutoStartFailure(
+            second.Id,
+            conflictId,
+            $"meetings/{second.Id:N}/recordings/{conflictId:N}",
+            "Another recording is active.",
+            now);
+        Assert(conflict?.State == MeetingRecordingState.Failed,
+            "Overlapping auto-record attempt should persist a visible failure state.");
+        Assert(MeetingAutoRecordScheduler.FindDueMeetings(state, settings, now.AddSeconds(10)).Count == 0,
+            "Persisted attempts must prevent repeated auto-start on later ticks or restart.");
+        settings.AutomaticRecordingEnabled = false;
+        Assert(MeetingAutoRecordScheduler.FindDueMeetings(state, settings, now).Count == 0,
+            "Automatic recording must be opt-in.");
+    }
+
+    private static void MeetingInterruptedRecordingRecovery()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-16T11:00:00Z");
+            var state = CreateMeetingAssistantState(now, out var meeting);
+            state.MeetingRecordings.Add(new MeetingRecording
+            {
+                MeetId = meeting.Id,
+                SourceKind = MeetingRecordingSourceKind.ManualMeet,
+                State = MeetingRecordingState.Transcribing,
+                RecordingFolderRelativePath =
+                    $"meetings/{meeting.Id:N}/recordings/{Guid.NewGuid():N}",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+            var store = new AppStateStore(directory);
+            store.Save(state);
+
+            var loaded = store.Load();
+            var recovered = loaded.MeetingRecordings.Single();
+            Assert(recovered.State == MeetingRecordingState.Failed &&
+                   recovered.LastError.Contains("interrupted", StringComparison.OrdinalIgnoreCase),
+                "Restart should expose interrupted work as retryable failure, never completed.");
+            Assert(new AppStateStore(directory).Load().MeetingRecordings.Single().State ==
+                   MeetingRecordingState.Failed,
+                "Recovered state should be persisted and idempotent across subsequent loads.");
+        });
+    }
+
+    private static void MeetingRecordingStorageSafety()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var storage = new MeetingRecordingStorage(directory);
+            var meetingId = Guid.NewGuid();
+            var recordingId = Guid.NewGuid();
+            var layout = storage.CreateLayout(meetingId, recordingId);
+            Assert(Directory.Exists(layout.AbsoluteFolder) &&
+                   layout.AbsoluteFolder.StartsWith(directory, StringComparison.OrdinalIgnoreCase),
+                "Recording layout should remain under the local state directory.");
+            var recording = new MeetingRecording
+            {
+                Id = recordingId,
+                MeetId = meetingId,
+                RecordingFolderRelativePath = layout.RelativeFolder
+            };
+            storage.WriteMetadata(recording);
+            MeetingRecordingStorage.WriteTextAtomic(layout.TranscriptMarkdownPath, "# Transcript");
+            Assert(File.Exists(layout.MetadataPath) &&
+                   File.ReadAllText(layout.TranscriptMarkdownPath) == "# Transcript",
+                "Metadata and derived text should be written atomically.");
+            var rejectedTraversal = false;
+            try
+            {
+                storage.ResolveFolder("../outside");
+            }
+            catch (InvalidDataException)
+            {
+                rejectedTraversal = true;
+            }
+
+            Assert(rejectedTraversal, "Recording storage must reject traversal paths.");
+            recording.TranscriptFile = "missing-transcript.json";
+            var snapshotState = CreateMeetingAssistantState(
+                DateTimeOffset.Parse("2026-07-16T11:30:00Z"),
+                out _);
+            snapshotState.MeetingRecordings.Add(recording);
+            var snapshot = WorkspaceSnapshotFactory.Create(
+                snapshotState,
+                transcriptLoader: _ => null);
+            Assert(snapshot.MeetingRecordings.Single().TranscriptText == string.Empty,
+                "Missing local transcript files should produce a recoverable empty snapshot value.");
+        });
+    }
+
+    private static void MeetingProposedActionsRequireConfirmation()
+    {
+        var now = DateTimeOffset.Parse("2026-07-16T12:00:00Z");
+        var state = CreateMeetingAssistantState(now, out var meeting);
+        state.Tasks.Clear();
+        var recording = new MeetingRecording
+        {
+            MeetId = meeting.Id,
+            SourceKind = MeetingRecordingSourceKind.ManualMeet,
+            State = MeetingRecordingState.Ready,
+            RecordingFolderRelativePath =
+                $"meetings/{meeting.Id:N}/recordings/{Guid.NewGuid():N}",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        var createAction = new ProposedAction
+        {
+            Type = ProposedActionType.CreateWaitingTask,
+            Title = "Wait for signed contract",
+            ProposedProjectId = meeting.ProjectId,
+            ProposedStatus = TaskStatus.Waiting,
+            WaitingFor = "Client",
+            SourceExcerpt = "Send the signed contract tomorrow."
+        };
+        var rejectAction = new ProposedAction
+        {
+            Type = ProposedActionType.CreateTask,
+            Title = "Unconfirmed suggestion",
+            ProposedProjectId = meeting.ProjectId
+        };
+        var analysis = new MeetingAnalysis
+        {
+            RecordingId = recording.Id,
+            MeetId = meeting.Id,
+            State = MeetingAnalysisState.ReadyForReview,
+            ProposedActions = new List<ProposedAction> { createAction, rejectAction },
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.MeetingRecordings.Add(recording);
+        state.MeetingAnalyses.Add(analysis);
+
+        Assert(state.Tasks.Count == 0,
+            "AI analysis alone must not mutate tasks before confirmation.");
+        var result = new ProposedActionService(state).Apply(
+            analysis.Id,
+            new[] { createAction.Id },
+            new[]
+            {
+                new ProposedActionOverride(
+                    createAction.Id,
+                    Title: "Wait for final signed contract",
+                    ProjectId: meeting.ProjectId,
+                    Status: TaskStatus.Waiting,
+                    WaitingFor: "Client legal")
+            },
+            now.AddMinutes(1));
+        var created = state.Tasks.Single();
+        Assert(result.CreatedTaskIds.Single() == created.Id &&
+               created.Title == "Wait for final signed contract" &&
+               created.Status == TaskStatus.Waiting &&
+               created.WaitingFor == "Client legal",
+            "Confirmed action should use normal task services and reviewed overrides.");
+        Assert(created.SourceReferences?.Single().AnalysisId == analysis.Id,
+            "Created task should retain an explicit transcript/analysis source reference.");
+        Assert(new ProposedActionService(state).Reject(analysis.Id, rejectAction.Id),
+            "Pending suggestion should be rejectable.");
+        Assert(state.Tasks.Count == 1 &&
+               rejectAction.ReviewState == ProposedActionReviewState.Rejected,
+            "Rejected action must not create or mutate a task.");
+    }
+
+    private static void MeetingAssistantMigrationAndSnapshot()
+    {
+        var now = DateTimeOffset.Parse("2026-07-16T13:00:00Z");
+        var state = CreateMeetingAssistantState(now, out var meeting);
+        state.SchemaVersion = 3;
+        state.MeetingRecordings = null!;
+        state.MeetingAnalyses = null!;
+
+        var migrated = StateMigrator.Migrate(state);
+        Assert(migrated.SchemaVersion == AppState.CurrentSchemaVersion &&
+               migrated.MeetingRecordings.Count == 0 &&
+               migrated.MeetingAnalyses.Count == 0,
+            "Schema 3 should migrate safely through current recording metadata.");
+        Assert(StateMigrator.Migrate(migrated) == migrated,
+            "Meeting Assistant migration should be idempotent.");
+        Assert(migrated.Meetings.Single().Id == meeting.Id,
+            "Migration must preserve existing MEET data.");
+        var snapshot = WorkspaceSnapshotFactory.Create(migrated, now);
+        Assert(snapshot.SchemaVersion == 3 &&
+               snapshot.MeetingRecordings.Count == 0 &&
+               snapshot.MeetingAnalyses.Count == 0,
+            "Old states should produce a valid schema 3 Workspace snapshot.");
+    }
+
+    private static void MeetingAssistantPersistenceRoundtrip()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-16T14:00:00Z");
+            var state = CreateMeetingAssistantState(now, out var meeting);
+            meeting.RecordingPolicy = MeetingRecordingPolicy.AutoRecord;
+            var recording = new MeetingRecording
+            {
+                MeetId = meeting.Id,
+                SourceKind = MeetingRecordingSourceKind.ScheduledMeet,
+                State = MeetingRecordingState.Ready,
+                RecordingFormat = MeetingRecordingFormat.AacM4a,
+                RecordingFolderRelativePath =
+                    $"meetings/{meeting.Id:N}/recordings/{Guid.NewGuid():N}",
+                MixedAudioFile = "mixed.m4a",
+                Tracks = new List<MeetingRecordingTrackArtifact>
+                {
+                    new()
+                    {
+                        Kind = MeetingRecordingTrackKind.Mixed,
+                        FileName = "mixed.m4a",
+                        Container = "MPEG-4/M4A",
+                        Codec = "AAC-LC",
+                        SampleRate = 48_000,
+                        ChannelCount = 1,
+                        Bitrate = 96_000,
+                        DurationSeconds = 1_800,
+                        Bytes = 21_600_000,
+                        HasAudioFrames = true,
+                        FinalizationState = MeetingRecordingFinalizationState.Finalized,
+                        ValidationState = MeetingRecordingValidationState.Valid
+                    }
+                },
+                TranscriptFile = "transcript.json",
+                AnalysisFile = "analysis.json",
+                StartedAtUtc = now,
+                StoppedAtUtc = now.AddMinutes(30),
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            var action = new ProposedAction
+            {
+                Type = ProposedActionType.CreateFollowUpTask,
+                Title = "Send notes",
+                ProposedProjectId = meeting.ProjectId,
+                SourceSegmentStart = 12.5,
+                SourceSegmentEnd = 18.0,
+                SourceExcerpt = "Please send the notes."
+            };
+            var analysis = new MeetingAnalysis
+            {
+                RecordingId = recording.Id,
+                MeetId = meeting.Id,
+                State = MeetingAnalysisState.ReadyForReview,
+                Provider = "OpenAI",
+                Model = "test-model",
+                Summary = "A persisted summary.",
+                ProposedActions = new List<ProposedAction> { action },
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.MeetingRecordings.Add(recording);
+            state.MeetingAnalyses.Add(analysis);
+            var store = new AppStateStore(directory);
+            store.Save(state);
+
+            var loaded = store.Load();
+            Assert(loaded.Meetings.Single().RecordingPolicy == MeetingRecordingPolicy.AutoRecord &&
+                   loaded.MeetingRecordings.Single().State == MeetingRecordingState.Ready &&
+                   loaded.MeetingRecordings.Single().RecordingFormat ==
+                   MeetingRecordingFormat.AacM4a &&
+                   loaded.MeetingRecordings.Single().Tracks.Single().Bitrate == 96_000 &&
+                   loaded.MeetingAnalyses.Single().ProposedActions.Single().Title == "Send notes",
+                "Recording metadata, analysis, and per-MEET policy should roundtrip.");
+            var snapshot = WorkspaceSnapshotFactory.Create(
+                loaded,
+                now,
+                WorkspaceSnapshotFactory.ConnectedMode,
+                _ => "Normalized transcript text");
+            Assert(snapshot.MeetingRecordings.Single().TranscriptText ==
+                   "Normalized transcript text" &&
+                   snapshot.MeetingRecordings.Single().RecordingFormat == "AacM4a" &&
+                   snapshot.MeetingRecordings.Single().HasMixedAudio &&
+                   snapshot.MeetingRecordings.Single().TotalBytes == 21_600_000 &&
+                   snapshot.MeetingAnalyses.Single().Summary == "A persisted summary." &&
+                   snapshot.MeetingAnalyses.Single().ProposedActions.Single().Id ==
+                   action.Id.ToString("N"),
+                "Reloaded state should expose matching recording and assistant data in Workspace.");
+        });
+    }
+
+    private static void MeetingAssistantSecretsExcludedFromSharedState()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var stateDirectory = Path.Combine(directory, "state");
+            var backupDirectory = Path.Combine(directory, "backups");
+            Directory.CreateDirectory(stateDirectory);
+            Directory.CreateDirectory(backupDirectory);
+            var state = CreateMeetingAssistantState(
+                DateTimeOffset.Parse("2026-07-16T15:00:00Z"),
+                out var meeting);
+            var store = new AppStateStore(stateDirectory);
+            store.Save(state);
+            var localSettings = new LocalAppSettings
+            {
+                MeetingAssistant = new MeetingAssistantSettings
+                {
+                    TranscriptionProvider = "OpenAI",
+                    TranscriptionModel = "gpt-4o-transcribe",
+                    AnalysisProvider = "OpenAI",
+                    AnalysisModel = "gpt-5.6-terra"
+                }
+            };
+            new LocalSettingsStore(stateDirectory).Save(localSettings);
+            var recordingFolder = Path.Combine(
+                stateDirectory,
+                "meetings",
+                meeting.Id.ToString("N"),
+                "recordings",
+                Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(recordingFolder);
+            File.WriteAllText(Path.Combine(recordingFolder, "system.wav"), "audio bytes");
+
+            var stateJson = File.ReadAllText(store.StatePath);
+            Assert(!stateJson.Contains("apiKey", StringComparison.OrdinalIgnoreCase) &&
+                   !stateJson.Contains("sk-test-secret", StringComparison.Ordinal),
+                "Shared state must not contain API key fields or values.");
+            var backup = new BackupService(store.StatePath).CreateBackup(
+                new BackupConfiguration(true, backupDirectory, 30, 14, 100),
+                requireEnabled: true,
+                DateTimeOffset.Parse("2026-07-16T15:05:00Z"),
+                "TESTPC");
+            Assert(backup.Succeeded &&
+                   Directory.EnumerateFiles(backupDirectory, "*.wav", SearchOption.AllDirectories).Count() == 0,
+                "Automatic backup should copy state metadata only, never recording audio.");
+            var snapshotJson = JsonSerializer.Serialize(
+                WorkspaceSnapshotFactory.Create(state),
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            Assert(!snapshotJson.Contains("apiKey", StringComparison.OrdinalIgnoreCase),
+                "Workspace snapshot must not expose API key metadata.");
+        });
+    }
+
+    private static AppState CreateMeetingAssistantState(
+        DateTimeOffset now,
+        out MeetingItem meeting)
+    {
+        var state = AppState.CreateDefault(now);
+        var project = state.Projects.Single();
+        meeting = new MeetingItem
+        {
+            ProjectId = project.Id,
+            Title = "MEET",
+            StartsAtUtc = now,
+            DurationMinutes = 30,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.Meetings.Add(meeting);
+        return state;
     }
 
     private static string WorkspaceCommandJson(
