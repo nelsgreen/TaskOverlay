@@ -291,6 +291,7 @@ export interface WorkspaceSnapshotContract {
   meetings: WorkspaceMeetingSnapshot[]
   meetingRecordings: MeetingRecordingSnapshot[]
   meetingAnalyses: MeetingAnalysisSnapshot[]
+  activeMeetingRecordingId: string | null
   contextSources?: WorkspaceContextSourceSnapshot[]
   contextItems?: WorkspaceContextItemSnapshot[]
   activeNow: WorkspaceActiveNowSnapshot[]

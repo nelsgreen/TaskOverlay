@@ -29,6 +29,7 @@ import type {
   WorkspaceMeetingAssistantCommand,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { deriveMeetingRecordingControlState } from "@/lib/meeting-recording-controls"
 
 interface Props {
   meet: MeetItem
@@ -37,6 +38,7 @@ interface Props {
   analyses: MeetingAnalysisSnapshot[]
   unclassifiedRecordings: MeetingRecordingSnapshot[]
   activeRecording: MeetingRecordingSnapshot | null
+  activeRecordingOwnerTitle?: string
   readOnly: boolean
   commandError?: string | null
   onClearError?: () => void
@@ -57,6 +59,7 @@ export function MeetingAssistantSection({
   analyses,
   unclassifiedRecordings,
   activeRecording,
+  activeRecordingOwnerTitle,
   readOnly,
   commandError,
   onClearError,
@@ -69,6 +72,8 @@ export function MeetingAssistantSection({
     [recordings, meet.id],
   )
   const [selectedRecordingId, setSelectedRecordingId] = useState<string | null>(null)
+  const [pendingRecordingAction, setPendingRecordingAction] = useState<"start" | "stop" | null>(null)
+  const [runtimeClock, setRuntimeClock] = useState(() => Date.now())
   const selectedRecording = meetingRecordings.find((recording) => recording.id === selectedRecordingId)
     ?? meetingRecordings[0]
     ?? null
@@ -83,13 +88,36 @@ export function MeetingAssistantSection({
     }
   }, [selectedRecording?.id, selectedRecordingId])
 
+  useEffect(() => {
+    setPendingRecordingAction(null)
+  }, [meet.id])
+
+  useEffect(() => {
+    if (commandError ||
+        (pendingRecordingAction === "start" && activeRecording) ||
+        (pendingRecordingAction === "stop" && !activeRecording)) {
+      setPendingRecordingAction(null)
+    }
+  }, [activeRecording?.id, commandError, pendingRecordingAction])
+
+  useEffect(() => {
+    if (!activeRecording) return
+
+    setRuntimeClock(Date.now())
+    const timer = window.setInterval(() => setRuntimeClock(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [activeRecording?.id])
+
   const send = (command: WorkspaceMeetingAssistantCommand) => {
     onClearError?.()
     return onCommand(command)
   }
 
-  const startDisabled = readOnly || !!activeRecording
-  const isSelectedActive = selectedRecording?.id === activeRecording?.id
+  const recordingControls = deriveMeetingRecordingControlState(
+    meet.id,
+    activeRecording,
+    pendingRecordingAction,
+  )
   const isProcessing = selectedRecording?.state === "Processing"
     || selectedRecording?.state === "Transcribing"
     || selectedRecording?.state === "Analyzing"
@@ -153,28 +181,83 @@ export function MeetingAssistantSection({
             onClick={() => send({ type: "openMeetingLink", meetingId: meet.id })}
           />
         )}
-        {!isSelectedActive ? (
+        {recordingControls.mode === "start" && (
           <ActionButton
-            label={activeRecording ? "Another recording is active" : "Start recording"}
+            label="Start recording"
             icon={Play}
             primary
-            disabled={startDisabled}
-            onClick={() => send({ type: "startMeetingRecording", meetingId: meet.id })}
+            disabled={readOnly}
+            onClick={() => {
+              if (send({ type: "startMeetingRecording", meetingId: meet.id })) {
+                setPendingRecordingAction("start")
+              }
+            }}
           />
-        ) : (
+        )}
+        {recordingControls.mode === "starting" && (
+          <ActionButton
+            label="Starting recording..."
+            icon={Play}
+            primary
+            disabled
+            onClick={() => undefined}
+          />
+        )}
+        {recordingControls.mode === "stop" && recordingControls.ownedActiveRecording && (
           <ActionButton
             label="Stop recording"
             icon={CircleStop}
             danger
-            onClick={() => send({ type: "stopMeetingRecording", recordingId: selectedRecording.id })}
+            disabled={readOnly}
+            onClick={() => {
+              if (send({
+                type: "stopMeetingRecording",
+                recordingId: recordingControls.ownedActiveRecording!.id,
+              })) {
+                setPendingRecordingAction("stop")
+              }
+            }}
+          />
+        )}
+        {recordingControls.mode === "stopping" && (
+          <ActionButton
+            label="Stopping recording..."
+            icon={CircleStop}
+            danger
+            disabled
+            onClick={() => undefined}
+          />
+        )}
+        {recordingControls.mode === "conflict" && (
+          <ActionButton
+            label="Another recording is active"
+            icon={CircleStop}
+            disabled
+            onClick={() => undefined}
           />
         )}
       </div>
 
       {activeRecording && activeRecording.meetingId !== meet.id && (
         <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-300">
-          Recording is already active for another MEET or an emergency capture.
+          {activeRecording.meetingId
+            ? `Recording is active for ${activeRecordingOwnerTitle ?? "another MEET"}.`
+            : "An emergency recording is active."}
         </p>
+      )}
+
+      {activeRecording?.meetingId === meet.id && (
+        <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1 rounded-md border border-red-500/30 bg-red-500/10 p-2 text-[10px]">
+          <span className="flex items-center gap-1.5 font-bold text-red-300">
+            <span className="size-2 animate-pulse rounded-full bg-red-500" />
+            REC {formatElapsed(activeRecording.startedAtUtc, runtimeClock)}
+          </span>
+          <span className="text-right text-muted-foreground">
+            System {formatTrackHealth(activeRecording.systemAudioHealth)}
+            {" · "}
+            Mic {formatTrackHealth(activeRecording.microphoneHealth)}
+          </span>
+        </div>
       )}
 
       {meetingRecordings.length === 0 ? (
@@ -200,6 +283,7 @@ export function MeetingAssistantSection({
           {selectedRecording && (
             <RecordingCard
               recording={selectedRecording}
+              isRuntimeActive={selectedRecording.id === activeRecording?.id}
               isProcessing={isProcessing}
               readOnly={readOnly}
               send={send}
@@ -289,11 +373,13 @@ export function MeetingAssistantSection({
 
 function RecordingCard({
   recording,
+  isRuntimeActive,
   isProcessing,
   readOnly,
   send,
 }: {
   recording: MeetingRecordingSnapshot
+  isRuntimeActive: boolean
   isProcessing: boolean
   readOnly: boolean
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
@@ -329,7 +415,7 @@ function RecordingCard({
       )}
 
       <div className="flex flex-wrap gap-1.5">
-        {recording.state === "Recording" || recording.state === "Stopping" ? (
+        {isRuntimeActive ? (
           <ActionButton
             label="Stop"
             icon={CircleStop}
@@ -400,6 +486,12 @@ function RecordingCard({
           }}
         />
       </div>
+
+      {!isRuntimeActive && (recording.state === "Recording" || recording.state === "Stopping") && (
+        <p className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-300">
+          This persisted recording state has no live recorder session. Start remains available while recovery marks it retryable.
+        </p>
+      )}
 
       {recording.transcriptText && (
         <details className="rounded-md border border-border p-2">
@@ -695,6 +787,27 @@ function formatRecordingTimestamp(recording: MeetingRecordingSnapshot): string {
   return Number.isNaN(value.getTime())
     ? "Unknown time"
     : value.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+}
+
+function formatElapsed(startedAtUtc: string | null, now: number): string {
+  if (!startedAtUtc) return "00:00"
+
+  const elapsedSeconds = Math.max(0, Math.floor((now - new Date(startedAtUtc).getTime()) / 1_000))
+  const hours = Math.floor(elapsedSeconds / 3_600)
+  const minutes = Math.floor((elapsedSeconds % 3_600) / 60)
+  const seconds = elapsedSeconds % 60
+  return hours > 0
+    ? `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+    : `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+}
+
+function formatTrackHealth(health: MeetingRecordingSnapshot["systemAudioHealth"]): string {
+  switch (health) {
+    case "Healthy": return "OK"
+    case "Unavailable": return "unavailable"
+    case "Failed": return "failed"
+    default: return "starting"
+  }
 }
 
 function toLocalInput(value?: string | null): string {

@@ -60,6 +60,7 @@ export interface WorkspaceData {
   meetItems: MeetItem[]
   meetingRecordings: MeetingRecordingSnapshot[]
   meetingAnalyses: MeetingAnalysisSnapshot[]
+  activeMeetingRecordingId: string | null
   contextSources: WorkspaceContextSourceSnapshot[]
   contextItems: WorkspaceContextItemSnapshot[]
   context: WorkspaceContextSnapshot
@@ -270,6 +271,8 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
     Array.isArray(candidate.meetings) &&
     Array.isArray(candidate.meetingRecordings) &&
     Array.isArray(candidate.meetingAnalyses) &&
+    (candidate.activeMeetingRecordingId === null ||
+      typeof candidate.activeMeetingRecordingId === "string") &&
     Array.isArray(candidate.activeNow) &&
     Array.isArray(candidate.timelineItems) &&
     isWorkspaceContext(candidate.context)
@@ -329,6 +332,7 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     meetItems,
     meetingRecordings: snapshot.meetingRecordings,
     meetingAnalyses: snapshot.meetingAnalyses,
+    activeMeetingRecordingId: snapshot.activeMeetingRecordingId,
     // Snapshot rows are used as-is (ids already snapshot-format); ?? [] keeps
     // a host built before ContextHUB from breaking the whole snapshot.
     contextSources: snapshot.contextSources ?? [],

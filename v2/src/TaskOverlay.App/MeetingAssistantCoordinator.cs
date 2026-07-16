@@ -119,9 +119,13 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         bool automatic,
         CancellationToken cancellationToken = default)
     {
+        Report(
+            $"{(automatic ? "Automatic" : "Manual")} MEET recording start command received: " +
+            $"meetId={meetingId:N}.");
         var meeting = _state.Meetings.FirstOrDefault(item => item.Id == meetingId);
         if (meeting is null)
         {
+            Report($"MEET recording start rejected: meetId={meetingId:N}; reason=not-found.");
             return MeetingAssistantOperationResult.Fail("MEET was not found.");
         }
 
@@ -147,17 +151,54 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         bool allowAutoTranscription = true,
         CancellationToken cancellationToken = default)
     {
+        Report($"MEET recording stop command received: recordingId={recordingId:N}.");
         await _recordingGate.WaitAsync(cancellationToken);
         try
         {
             var service = new MeetingRecordingService(_state);
             var recording = service.Find(recordingId);
-            if (recording is null || !recording.IsActive)
+            var runtimeRecordingId = _recorder.Status.RecordingId;
+            Report(
+                $"MEET recording stop runtime check: requested={recordingId:N}; " +
+                $"runtimePresent={runtimeRecordingId.HasValue}; " +
+                $"runtimeRecordingId={FormatOptionalId(runtimeRecordingId)}.");
+
+            if (recording is null)
             {
-                return MeetingAssistantOperationResult.Fail("Recording is not active.");
+                return MeetingAssistantOperationResult.Fail("Recording was not found.");
             }
 
-            if (!service.MarkStopping(recordingId))
+            if (runtimeRecordingId is null)
+            {
+                if (recording.IsActive)
+                {
+                    service.MarkFailed(
+                        recordingId,
+                        "No live recorder session was found. The interrupted recording can be retried.");
+                    Persist(recording);
+                    Report(
+                        $"Stale MEET recording state reconciled during Stop: " +
+                        $"recordingId={recordingId:N}.");
+                }
+
+                return MeetingAssistantOperationResult.Fail(
+                    "No live meeting recording is active. Workspace state was refreshed.");
+            }
+
+            if (runtimeRecordingId.Value != recordingId)
+            {
+                return MeetingAssistantOperationResult.Fail(
+                    "A different meeting recording is active.");
+            }
+
+            if (!recording.IsActive)
+            {
+                return MeetingAssistantOperationResult.Fail(
+                    "Live recorder state does not match the saved recording state. Stop the active recording from its owning MEET.");
+            }
+
+            if (recording.State != MeetingRecordingState.Stopping &&
+                !service.MarkStopping(recordingId))
             {
                 return MeetingAssistantOperationResult.Fail("Recording could not enter stopping state.");
             }
@@ -166,15 +207,34 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             try
             {
                 var result = await _recorder.StopAsync(recordingId, cancellationToken);
-                service.MarkRecorded(recordingId, result);
+                if (!service.MarkRecorded(recordingId, result))
+                {
+                    service.MarkFailed(
+                        recordingId,
+                        "Audio capture stopped, but recording metadata could not be finalized.");
+                    Persist(recording);
+                    return MeetingAssistantOperationResult.Fail(recording.LastError);
+                }
+
+                Report(
+                    $"MEET recording finalized: recordingId={recordingId:N}; " +
+                    $"systemLoopback={result.SystemAudioHealth}; " +
+                    $"microphone={result.MicrophoneHealth}.");
                 Persist(recording);
             }
-            catch (Exception ex) when (
-                ex is InvalidOperationException or
-                IOException or
-                OperationCanceledException)
+            catch (Exception ex)
             {
-                service.MarkFailed(recordingId, SafeMessage(ex));
+                if (_recorder.Status.RecordingId == recordingId)
+                {
+                    recording.State = MeetingRecordingState.Stopping;
+                    recording.LastError = SafeMessage(ex);
+                    recording.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                }
+                else
+                {
+                    service.MarkFailed(recordingId, SafeMessage(ex));
+                }
+
                 Persist(recording);
                 Report("MEET recording stop failed.", ex);
                 return MeetingAssistantOperationResult.Fail(recording.LastError);
@@ -207,7 +267,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         foreach (var meeting in due)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (new MeetingRecordingService(_state).ActiveRecording is not null)
+            if (_recorder.Status.RecordingId is not null)
             {
                 var recordingId = Guid.NewGuid();
                 var layout = _storage.CreateLayout(meeting.Id, recordingId);
@@ -669,10 +729,12 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             TryCancel(operation);
         }
 
-        var active = new MeetingRecordingService(_state).ActiveRecording;
-        if (active is not null)
+        if (_recorder.Status.RecordingId is Guid activeRecordingId)
         {
-            await StopAsync(active.Id, allowAutoTranscription: false, cancellationToken);
+            await StopAsync(
+                activeRecordingId,
+                allowAutoTranscription: false,
+                cancellationToken);
         }
     }
 
@@ -697,10 +759,24 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         try
         {
             var service = new MeetingRecordingService(_state);
-            if (service.ActiveRecording is not null)
+            if (_recorder.Status.RecordingId is Guid runtimeRecordingId)
             {
+                Report(
+                    $"MEET recording start rejected: runtime recording " +
+                    $"{runtimeRecordingId:N} is already active.");
                 return MeetingAssistantOperationResult.Fail(
                     "Another meeting recording is already active.");
+            }
+
+            if (service.ActiveRecording is { } staleRecording)
+            {
+                service.MarkFailed(
+                    staleRecording.Id,
+                    "No live recorder session was found. The interrupted recording can be retried.");
+                Persist(staleRecording);
+                Report(
+                    $"Stale MEET recording state reconciled before Start: " +
+                    $"recordingId={staleRecording.Id:N}.");
             }
 
             var recordingId = Guid.NewGuid();
@@ -724,6 +800,9 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             try
             {
                 var settings = _localSettings.MeetingAssistant;
+                Report(
+                    $"MEET recorder initialization started: recordingId={recordingId:N}; " +
+                    $"meetId={FormatOptionalId(meetId)}.");
                 var result = await _recorder.StartAsync(
                     new MeetingRecordingStartRequest(
                         recordingId,
@@ -731,17 +810,32 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                         NullIfEmpty(settings.MicrophoneDeviceId),
                         NullIfEmpty(settings.SystemOutputDeviceId)),
                     cancellationToken);
-                service.MarkRecording(recordingId, result);
+                Report(
+                    $"MEET recorder device initialization completed: " +
+                    $"recordingId={recordingId:N}; " +
+                    $"systemLoopback={result.SystemAudioHealth}; " +
+                    $"microphone={result.MicrophoneHealth}.");
+                if (!service.MarkRecording(recordingId, result))
+                {
+                    await TryStopRuntimeAfterFailedStartAsync(recordingId);
+                    service.MarkFailed(
+                        recordingId,
+                        "Recorder started, but recording metadata could not enter the Recording state.");
+                    Persist(recording);
+                    return MeetingAssistantOperationResult.Fail(recording.LastError);
+                }
+
                 Persist(recording);
-                return new MeetingAssistantOperationResult(true, RecordingId: recordingId);
+                Report(
+                    $"MEET recording transitioned to Recording: " +
+                    $"recordingId={recordingId:N}; meetId={FormatOptionalId(meetId)}.");
+                return new MeetingAssistantOperationResult(
+                    true,
+                    RecordingId: recordingId);
             }
-            catch (Exception ex) when (
-                ex is InvalidOperationException or
-                ArgumentException or
-                UnauthorizedAccessException or
-                IOException or
-                OperationCanceledException)
+            catch (Exception ex)
             {
+                await TryStopRuntimeAfterFailedStartAsync(recordingId);
                 service.MarkFailed(recordingId, SafeMessage(ex));
                 Persist(recording);
                 Report("MEET recording start failed.", ex);
@@ -751,6 +845,28 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         finally
         {
             _recordingGate.Release();
+        }
+    }
+
+    private async Task TryStopRuntimeAfterFailedStartAsync(Guid recordingId)
+    {
+        if (_recorder.Status.RecordingId != recordingId)
+        {
+            return;
+        }
+
+        try
+        {
+            await _recorder.StopAsync(recordingId, CancellationToken.None);
+            Report(
+                $"MEET recorder runtime cleaned up after failed Start: " +
+                $"recordingId={recordingId:N}.");
+        }
+        catch (Exception cleanupException)
+        {
+            Report(
+                $"MEET recorder cleanup failed after Start: recordingId={recordingId:N}.",
+                cleanupException);
         }
     }
 
@@ -932,6 +1048,9 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
     private static string? NullIfEmpty(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string FormatOptionalId(Guid? value) =>
+        value is Guid id ? id.ToString("N") : "none";
 
     private void Report(string message, Exception? exception = null)
     {

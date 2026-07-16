@@ -964,14 +964,14 @@ public partial class App : System.Windows.Application
         }
 
         MeetingAssistantOperationResult result;
-        var active = new MeetingRecordingService(_state!).ActiveRecording;
-        if (active is null)
+        var activeRecordingId = _meetingAssistantCoordinator.RuntimeStatus.RecordingId;
+        if (activeRecordingId is null)
         {
             result = await _meetingAssistantCoordinator.StartEmergencyAsync();
         }
         else
         {
-            result = await _meetingAssistantCoordinator.StopAsync(active.Id);
+            result = await _meetingAssistantCoordinator.StopAsync(activeRecordingId.Value);
         }
 
         if (!result.Success)
@@ -992,12 +992,13 @@ public partial class App : System.Windows.Application
 
     private void UpdateMeetingRecordingIndicator()
     {
-        var active = _state is null
-            ? null
-            : new MeetingRecordingService(_state).ActiveRecording;
+        var activeRecordingId = _meetingAssistantCoordinator?.RuntimeStatus.RecordingId;
+        var active = activeRecordingId is Guid recordingId && _state is not null
+            ? new MeetingRecordingService(_state).Find(recordingId)
+            : null;
         if (_meetingRecordingMenuItem is not null)
         {
-            _meetingRecordingMenuItem.Text = active is null
+            _meetingRecordingMenuItem.Text = activeRecordingId is null
                 ? "Start emergency recording"
                 : "Stop current recording";
         }
@@ -1137,7 +1138,11 @@ public partial class App : System.Windows.Application
                 _meetingAssistantCoordinator is null
                     ? null
                     : recording =>
-                        _meetingAssistantCoordinator.LoadTranscriptText(recording));
+                        _meetingAssistantCoordinator.LoadTranscriptText(recording),
+                _meetingAssistantCoordinator is null
+                    ? null
+                    : () => _meetingAssistantCoordinator.RuntimeStatus.RecordingId,
+                (message, exception) => _diagnostics?.Log(message, exception));
             _workspaceWindow.Closed += WorkspaceWindow_OnClosed;
         }
 

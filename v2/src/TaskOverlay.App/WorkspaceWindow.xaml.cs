@@ -22,6 +22,8 @@ public partial class WorkspaceWindow : Window
     private readonly Func<string, CancellationToken, Task<WorkspaceCommandResult?>>?
         _runtimeCommandHandler;
     private readonly Func<MeetingRecording, string?>? _transcriptLoader;
+    private readonly Func<Guid?>? _activeRecordingIdLoader;
+    private readonly Action<string, Exception?>? _diagnostic;
     private bool _initialized;
 
     public WorkspaceWindow(
@@ -30,7 +32,9 @@ public partial class WorkspaceWindow : Window
         Action stateChanged,
         Func<string, CancellationToken, Task<WorkspaceCommandResult?>>?
             runtimeCommandHandler = null,
-        Func<MeetingRecording, string?>? transcriptLoader = null)
+        Func<MeetingRecording, string?>? transcriptLoader = null,
+        Func<Guid?>? activeRecordingIdLoader = null,
+        Action<string, Exception?>? diagnostic = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _commandDispatcher = new WorkspaceCommandDispatcher(
@@ -39,6 +43,8 @@ public partial class WorkspaceWindow : Window
             stateChanged);
         _runtimeCommandHandler = runtimeCommandHandler;
         _transcriptLoader = transcriptLoader;
+        _activeRecordingIdLoader = activeRecordingIdLoader;
+        _diagnostic = diagnostic;
         InitializeComponent();
     }
 
@@ -135,6 +141,7 @@ public partial class WorkspaceWindow : Window
             try
             {
                 SendSnapshot();
+                _diagnostic?.Invoke("Workspace initial snapshot published.", null);
             }
             catch (Exception ex)
             {
@@ -168,8 +175,9 @@ public partial class WorkspaceWindow : Window
                       CancellationToken.None) ??
                   _commandDispatcher.Dispatch(e.WebMessageAsJson);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _diagnostic?.Invoke("Workspace runtime command failed.", ex);
             result = WorkspaceCommandResult.Failed(
                 string.Empty,
                 "commandFailed",
@@ -178,7 +186,7 @@ public partial class WorkspaceWindow : Window
 
         if (result.Success)
         {
-            if (!TrySendSnapshot())
+            if (!TrySendSnapshot("command"))
             {
                 result = WorkspaceCommandResult.Failed(
                     result.CommandId,
@@ -202,7 +210,7 @@ public partial class WorkspaceWindow : Window
             return;
         }
 
-        TrySendSnapshot();
+        TrySendSnapshot("external change");
     }
 
     private void SendSnapshot()
@@ -210,7 +218,8 @@ public partial class WorkspaceWindow : Window
         var snapshot = WorkspaceSnapshotFactory.Create(
             _state,
             mode: WorkspaceSnapshotFactory.ConnectedMode,
-            transcriptLoader: _transcriptLoader);
+            transcriptLoader: _transcriptLoader,
+            activeMeetingRecordingId: _activeRecordingIdLoader?.Invoke());
         SendMessage(snapshot);
     }
 
@@ -220,15 +229,17 @@ public partial class WorkspaceWindow : Window
         WorkspaceWebView.CoreWebView2.PostWebMessageAsJson(json);
     }
 
-    private bool TrySendSnapshot()
+    private bool TrySendSnapshot(string reason)
     {
         try
         {
             SendSnapshot();
+            _diagnostic?.Invoke($"Workspace snapshot published after {reason}.", null);
             return true;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _diagnostic?.Invoke($"Workspace snapshot publication failed after {reason}.", ex);
             return false;
         }
     }

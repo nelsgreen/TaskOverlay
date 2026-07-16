@@ -15,6 +15,7 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceMeetingSnapshot> Meetings,
     IReadOnlyList<WorkspaceMeetingRecordingSnapshot> MeetingRecordings,
     IReadOnlyList<WorkspaceMeetingAnalysisSnapshot> MeetingAnalyses,
+    string? ActiveMeetingRecordingId,
     IReadOnlyList<WorkspaceContextSourceSnapshot> ContextSources,
     IReadOnlyList<WorkspaceContextItemSnapshot> ContextItems,
     IReadOnlyList<WorkspaceActiveNowSnapshot> ActiveNow,
@@ -216,7 +217,8 @@ public static class WorkspaceSnapshotFactory
         AppState state,
         DateTimeOffset? now = null,
         string mode = ReadOnlyMode,
-        Func<MeetingRecording, string?>? transcriptLoader = null)
+        Func<MeetingRecording, string?>? transcriptLoader = null,
+        Guid? activeMeetingRecordingId = null)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -354,12 +356,16 @@ public static class WorkspaceSnapshotFactory
 
         var meetingById = sourceMeetings.ToDictionary(meeting => meeting.Id);
         var sourceRecordings = state.MeetingRecordings ?? new List<MeetingRecording>();
+        var runtimeActiveRecordingId = activeMeetingRecordingId is Guid runtimeId &&
+                                       sourceRecordings.Any(recording => recording.Id == runtimeId)
+            ? runtimeId
+            : (Guid?)null;
         var recordings = sourceRecordings
             .OrderByDescending(recording => recording.StartedAtUtc ?? recording.CreatedAtUtc)
             .ThenBy(recording => recording.Id)
             .Select(recording =>
             {
-                var plannedEndPassed = recording.IsActive &&
+                var plannedEndPassed = recording.Id == runtimeActiveRecordingId &&
                                        recording.MeetId is Guid recordingMeetId &&
                                        meetingById.TryGetValue(recordingMeetId, out var ownerMeeting) &&
                                        timestamp >= ownerMeeting.StartsAtUtc.AddMinutes(
@@ -538,6 +544,9 @@ public static class WorkspaceSnapshotFactory
             meetings,
             recordings,
             analyses,
+            runtimeActiveRecordingId is Guid recordingId
+                ? FormatId(recordingId)
+                : null,
             contextSources,
             contextItems,
             activeNow,

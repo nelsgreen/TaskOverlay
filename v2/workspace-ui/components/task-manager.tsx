@@ -161,7 +161,10 @@ export function TaskManager() {
   const meetingRecordings = bridge.data?.meetingRecordings ?? []
   const meetingAnalyses = bridge.data?.meetingAnalyses ?? []
   const activeMeetingRecording = meetingRecordings.find((recording) =>
-    recording.state === "Recording" || recording.state === "Stopping") ?? null
+    recording.id === bridge.data?.activeMeetingRecordingId) ?? null
+  const activeMeetingRecordingOwnerTitle = activeMeetingRecording?.meetingId
+    ? meetItems.find((meeting) => meeting.id === activeMeetingRecording.meetingId)?.title
+    : undefined
   const calendarMeetItems = useMemo(
     () => meetingDraft ? [...meetItems.filter((meeting) => meeting.id !== meetingDraft.id), meetingDraft] : meetItems,
     [meetItems, meetingDraft],
@@ -1762,6 +1765,7 @@ export function TaskManager() {
               meetingRecordings={meetingRecordings}
               meetingAnalyses={meetingAnalyses}
               activeRecording={activeMeetingRecording}
+              activeRecordingOwnerTitle={activeMeetingRecordingOwnerTitle}
               meetingAssistantError={bridge.error}
               onClearMeetingAssistantError={bridge.clearError}
               onMeetingAssistantCommand={connected

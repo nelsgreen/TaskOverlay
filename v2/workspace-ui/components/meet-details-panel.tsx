@@ -43,6 +43,7 @@ interface Props {
   meetingRecordings?: MeetingRecordingSnapshot[]
   meetingAnalyses?: MeetingAnalysisSnapshot[]
   activeRecording?: MeetingRecordingSnapshot | null
+  activeRecordingOwnerTitle?: string
   meetingAssistantError?: string | null
   onClearMeetingAssistantError?: () => void
   onMeetingAssistantCommand?: (command: WorkspaceMeetingAssistantCommand) => boolean
@@ -119,6 +120,7 @@ export function MeetDetailsPanel({
   meetingRecordings = [],
   meetingAnalyses = [],
   activeRecording = null,
+  activeRecordingOwnerTitle,
   meetingAssistantError = null,
   onClearMeetingAssistantError,
   onMeetingAssistantCommand,
@@ -394,6 +396,7 @@ export function MeetDetailsPanel({
             analyses={meetingAnalyses}
             unclassifiedRecordings={meetingRecordings.filter((recording) => !recording.meetingId)}
             activeRecording={activeRecording}
+            activeRecordingOwnerTitle={activeRecordingOwnerTitle}
             readOnly={readOnly}
             commandError={meetingAssistantError}
             onClearError={onClearMeetingAssistantError}
