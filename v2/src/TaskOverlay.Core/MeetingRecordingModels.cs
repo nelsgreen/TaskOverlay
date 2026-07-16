@@ -39,6 +39,57 @@ public enum AudioTrackHealth
     Failed
 }
 
+public enum MeetingRecordingFormat
+{
+    // Zero remains WAV so recordings written before schema v5 deserialize safely.
+    Wav,
+    AacM4a
+}
+
+public enum MeetingRecordingTrackKind
+{
+    System,
+    Microphone,
+    Mixed
+}
+
+public enum MeetingRecordingFinalizationState
+{
+    Pending,
+    InProgress,
+    Finalized,
+    Interrupted,
+    Failed
+}
+
+public enum MeetingRecordingValidationState
+{
+    Unknown,
+    Valid,
+    Invalid
+}
+
+public sealed class MeetingRecordingTrackArtifact
+{
+    public MeetingRecordingTrackKind Kind { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string InProgressFileName { get; set; } = string.Empty;
+    public List<string> SegmentFiles { get; set; } = new();
+    public string Container { get; set; } = string.Empty;
+    public string Codec { get; set; } = string.Empty;
+    public int SampleRate { get; set; }
+    public int ChannelCount { get; set; }
+    public int Bitrate { get; set; }
+    public double DurationSeconds { get; set; }
+    public long Bytes { get; set; }
+    public bool HasAudioFrames { get; set; }
+    public MeetingRecordingFinalizationState FinalizationState { get; set; } =
+        MeetingRecordingFinalizationState.Pending;
+    public MeetingRecordingValidationState ValidationState { get; set; } =
+        MeetingRecordingValidationState.Unknown;
+    public string Error { get; set; } = string.Empty;
+}
+
 public sealed class MeetingRecording
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -49,6 +100,9 @@ public sealed class MeetingRecording
     public DateTimeOffset? StoppedAtUtc { get; set; }
     public DateTimeOffset? SystemTrackStartedAtUtc { get; set; }
     public DateTimeOffset? MicrophoneTrackStartedAtUtc { get; set; }
+    public MeetingRecordingFormat RecordingFormat { get; set; } =
+        MeetingRecordingFormat.Wav;
+    public List<MeetingRecordingTrackArtifact> Tracks { get; set; } = new();
     public string RecordingFolderRelativePath { get; set; } = string.Empty;
     public string SystemAudioFile { get; set; } = string.Empty;
     public string MicrophoneFile { get; set; } = string.Empty;

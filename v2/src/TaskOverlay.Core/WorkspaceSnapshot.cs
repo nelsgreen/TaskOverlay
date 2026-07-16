@@ -105,6 +105,9 @@ public sealed record WorkspaceMeetingRecordingSnapshot(
     string State,
     DateTimeOffset? StartedAtUtc,
     DateTimeOffset? StoppedAtUtc,
+    string RecordingFormat,
+    double DurationSeconds,
+    long TotalBytes,
     string SystemAudioHealth,
     string MicrophoneHealth,
     bool KeepLocalOnly,
@@ -116,8 +119,24 @@ public sealed record WorkspaceMeetingRecordingSnapshot(
     bool HasAnalysis,
     string TranscriptText,
     string LastError,
+    IReadOnlyList<WorkspaceMeetingRecordingTrackSnapshot> Tracks,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
+
+public sealed record WorkspaceMeetingRecordingTrackSnapshot(
+    string Kind,
+    string FileName,
+    string Container,
+    string Codec,
+    int SampleRate,
+    int ChannelCount,
+    int Bitrate,
+    double DurationSeconds,
+    long Bytes,
+    bool HasAudioFrames,
+    string FinalizationState,
+    string ValidationState,
+    string Error);
 
 public sealed record WorkspaceMeetingAnalysisSnapshot(
     string Id,
@@ -365,6 +384,14 @@ public static class WorkspaceSnapshotFactory
             .ThenBy(recording => recording.Id)
             .Select(recording =>
             {
+                var sourceTracks = recording.Tracks ??
+                                   new List<MeetingRecordingTrackArtifact>();
+                var validTracks = sourceTracks
+                    .Where(track =>
+                        track.FinalizationState == MeetingRecordingFinalizationState.Finalized &&
+                        track.ValidationState == MeetingRecordingValidationState.Valid &&
+                        track.FileName.Length > 0)
+                    .ToList();
                 var plannedEndPassed = recording.Id == runtimeActiveRecordingId &&
                                        recording.MeetId is Guid recordingMeetId &&
                                        meetingById.TryGetValue(recordingMeetId, out var ownerMeeting) &&
@@ -377,19 +404,56 @@ public static class WorkspaceSnapshotFactory
                     recording.State.ToString(),
                     recording.StartedAtUtc,
                     recording.StoppedAtUtc,
+                    recording.RecordingFormat.ToString(),
+                    validTracks.Select(track => track.DurationSeconds).DefaultIfEmpty(0).Max(),
+                    validTracks.Sum(track => track.Bytes),
                     recording.SystemAudioHealth.ToString(),
                     recording.MicrophoneHealth.ToString(),
                     recording.KeepLocalOnly,
                     plannedEndPassed,
-                    recording.SystemAudioFile.Length > 0,
-                    recording.MicrophoneFile.Length > 0,
-                    recording.MixedAudioFile.Length > 0,
+                    HasFinalOrLegacyTrack(
+                        MeetingRecordingTrackKind.System,
+                        recording.SystemAudioFile),
+                    HasFinalOrLegacyTrack(
+                        MeetingRecordingTrackKind.Microphone,
+                        recording.MicrophoneFile),
+                    HasFinalOrLegacyTrack(
+                        MeetingRecordingTrackKind.Mixed,
+                        recording.MixedAudioFile),
                     recording.TranscriptFile.Length > 0,
                     recording.AnalysisFile.Length > 0,
                     transcriptLoader?.Invoke(recording) ?? string.Empty,
                     recording.LastError,
+                    sourceTracks.Select(track =>
+                        new WorkspaceMeetingRecordingTrackSnapshot(
+                            track.Kind.ToString(),
+                            track.FileName,
+                            track.Container,
+                            track.Codec,
+                            track.SampleRate,
+                            track.ChannelCount,
+                            track.Bitrate,
+                            track.DurationSeconds,
+                            track.Bytes,
+                            track.HasAudioFrames,
+                            track.FinalizationState.ToString(),
+                            track.ValidationState.ToString(),
+                            track.Error)).ToList(),
                     recording.CreatedAtUtc,
                     recording.UpdatedAtUtc);
+
+                bool HasFinalOrLegacyTrack(
+                    MeetingRecordingTrackKind kind,
+                    string compatibilityFile)
+                {
+                    return validTracks.Any(track => track.Kind == kind) ||
+                           sourceTracks.Any(track =>
+                               track.Kind == kind &&
+                               track.ValidationState == MeetingRecordingValidationState.Unknown &&
+                               track.FileName.Length > 0) ||
+                           sourceTracks.All(track => track.Kind != kind) &&
+                           compatibilityFile.Length > 0;
+                }
             })
             .ToList();
         var recordingIdSet = sourceRecordings.Select(recording => recording.Id).ToHashSet();

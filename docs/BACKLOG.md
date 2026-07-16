@@ -388,7 +388,11 @@ Active product scope:
 - Default meeting duration is 30 minutes.
 - Connected MEET recording and Meeting Assistant foundation is implemented:
   - explicit per-MEET recording policy: Off / Ask / Auto;
-  - visible local recording with separate system-audio and microphone tracks;
+  - Compact direct AAC/M4A is the default, with microphone, system, and mixed
+    tracks encoded through Windows Media Foundation and no full-meeting WAV
+    intermediate;
+  - Lossless WAV is a separate optional large-file mode and existing WAV
+    recordings remain compatible;
   - one active recording at a time, restart recovery, and emergency recording;
   - optional OpenAI transcription and structured meeting analysis through
     provider interfaces;
@@ -402,6 +406,7 @@ Active product scope:
 - Recording follow-ups:
   - artifact/manual QA across real microphone and output-device combinations;
   - recording-device hot-plug and degraded-track recovery polish;
+  - periodic finalized M4A segments to bound unexpected-process crash loss;
   - richer emergency-recording inbox and classification flow;
   - transcript editing/search and ContextHUB source promotion;
   - additional transcription/analysis providers, including local Whisper;

@@ -14,6 +14,9 @@ internal sealed record TelegramProjectOption(Guid Id, string Name);
 internal sealed record MeetingRecordingPolicyOption(
     MeetingRecordingPolicy Value,
     string Label);
+internal sealed record MeetingRecordingFormatOption(
+    MeetingRecordingFormat Value,
+    string Label);
 internal sealed record MeetingLanguageOption(
     MeetingTranscriptLanguage Value,
     string Label);
@@ -69,6 +72,16 @@ public partial class SettingsView : UserControl
                 new MeetingRecordingPolicyOption(
                     MeetingRecordingPolicy.AutoRecord,
                     "Auto-record")
+            };
+        MeetingRecordingFormatComboBox.ItemsSource =
+            new[]
+            {
+                new MeetingRecordingFormatOption(
+                    MeetingRecordingFormat.AacM4a,
+                    "Compact - AAC/M4A (recommended)"),
+                new MeetingRecordingFormatOption(
+                    MeetingRecordingFormat.Wav,
+                    "Lossless - WAV (large files)")
             };
         MeetingLanguageComboBox.ItemsSource =
             new[]
@@ -766,6 +779,9 @@ public partial class SettingsView : UserControl
                 settings.AutoTranscribeAfterStop;
             MeetingRecordingPolicyComboBox.SelectedValue =
                 settings.DefaultRecordingPolicy;
+            MeetingRecordingFormatComboBox.SelectedValue = settings.RecordingFormat;
+            MeetingRecordingFormatComboBox.IsEnabled =
+                !_actions.IsMeetingRecordingActive();
             MeetingMicrophoneComboBox.ItemsSource = microphones;
             MeetingMicrophoneComboBox.SelectedValue =
                 microphones.Any(item => item.Id == settings.MicrophoneDeviceId)
@@ -791,6 +807,7 @@ public partial class SettingsView : UserControl
     private void CommitMeetingAssistantSettings()
     {
         var settings = _actions.GetMeetingAssistantSettings();
+        var recordingFormatChangeBlocked = false;
         settings.AutomaticRecordingEnabled =
             AutomaticMeetingRecordingCheckBox.IsChecked == true;
         settings.AutoTranscribeAfterStop =
@@ -799,6 +816,24 @@ public partial class SettingsView : UserControl
             MeetingRecordingPolicy policy)
         {
             settings.DefaultRecordingPolicy = policy;
+        }
+
+        if (MeetingRecordingFormatComboBox.SelectedValue is
+            MeetingRecordingFormat recordingFormat)
+        {
+            if (_actions.IsMeetingRecordingActive() &&
+                recordingFormat != settings.RecordingFormat)
+            {
+                var wasUpdating = _updatingControls;
+                _updatingControls = true;
+                MeetingRecordingFormatComboBox.SelectedValue = settings.RecordingFormat;
+                _updatingControls = wasUpdating;
+                recordingFormatChangeBlocked = true;
+            }
+            else
+            {
+                settings.RecordingFormat = recordingFormat;
+            }
         }
 
         settings.MicrophoneDeviceId =
@@ -815,7 +850,9 @@ public partial class SettingsView : UserControl
 
         settings.Normalize();
         _actions.SaveMeetingAssistantSettings();
-        MeetingAssistantStatusText.Text = "Meeting Assistant settings saved.";
+        MeetingAssistantStatusText.Text = recordingFormatChangeBlocked
+            ? "Recording format cannot change while a recording is active. Other settings were saved."
+            : "Meeting Assistant settings saved.";
     }
 
     private void UpdateMeetingAssistantKeyStatus()

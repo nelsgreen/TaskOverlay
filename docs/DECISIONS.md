@@ -106,10 +106,27 @@ item.
 - Direct meeting service integrations are not MVP.
 - Basic MEET CRUD and the local recording/Meeting Assistant foundation are
   connected through the WebView2 bridge. Recording uses local Windows audio
-  capture with separate system-audio and microphone tracks and permits only
-  one active recording. Auto-record is an explicit per-MEET opt-in and remains
-  visibly indicated while active; emergency recording may start before a MEET
-  is classified.
+  capture and permits only one active recording. Auto-record is an explicit
+  per-MEET opt-in and remains visibly indicated while active; emergency
+  recording may start before a MEET is classified.
+- Compact AAC/M4A is the machine-local default for new recordings. Microphone,
+  system, and in-memory mixed PCM are streamed through bounded queues directly
+  to separate AAC-LC/M4A tracks using Windows Media Foundation Sink Writer;
+  Compact mode never persists full-meeting WAV intermediates and requires no
+  external converter executable. The actual selected sample rate, channel
+  count, bitrate, duration, bytes, finalization, and validation state are kept
+  as recording artifact metadata.
+- Lossless WAV is an explicit independent format for diagnostics,
+  compatibility, or intentional lossless capture. It is never a silent
+  fallback when Compact encoder initialization fails, and it is not
+  automatically converted to AAC. Existing WAV recordings remain compatible.
+- Direct M4A currently uses one `*.current.m4a` container per track while a
+  recording is active. Normal Stop drains queues, finalizes and reopens each
+  container, then atomically renames only valid outputs. Unexpected process
+  termination may make the current containers unusable; startup preserves
+  their names and marks them interrupted/invalid rather than pretending they
+  are Ready. Periodic finalized M4A segmentation is deferred until it can be
+  implemented without destabilizing capture.
 - Audio/transcript payloads remain in the local recording folder. `state.json`
   stores metadata, relative paths, analysis, and review state; automatic
   backups do not copy audio or transcript files. The optional OpenAI API key

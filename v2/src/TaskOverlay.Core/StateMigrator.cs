@@ -39,6 +39,11 @@ public static class StateMigrator
                     state.MeetingAnalyses ??= new List<MeetingAnalysis>();
                     state.SchemaVersion = 4;
                     break;
+                case 4:
+                    // Recording artifacts are repaired below. Missing format metadata
+                    // intentionally maps to legacy WAV through the enum's zero value.
+                    state.SchemaVersion = 5;
+                    break;
                 default:
                     throw new InvalidDataException(
                         $"Unsupported schema version: {state.SchemaVersion}.");
@@ -580,6 +585,12 @@ public static class StateMigrator
                 changed = true;
             }
 
+            if (!Enum.IsDefined(recording.RecordingFormat))
+            {
+                recording.RecordingFormat = InferRecordingFormat(recording);
+                changed = true;
+            }
+
             var folder = RecordingPathPolicy.NormalizeRelativePath(
                 recording.RecordingFolderRelativePath);
             if (!RecordingPathPolicy.IsSafeRelativePath(folder))
@@ -597,8 +608,20 @@ public static class StateMigrator
                 changed = true;
             }
 
-            recording.TranscriptionChunkFiles ??= new List<string>();
+            if (recording.TranscriptionChunkFiles is null)
+            {
+                recording.TranscriptionChunkFiles = new List<string>();
+                changed = true;
+            }
+
+            if (recording.Tracks is null)
+            {
+                recording.Tracks = new List<MeetingRecordingTrackArtifact>();
+                changed = true;
+            }
+
             changed |= NormalizeRecordingFileNames(recording);
+            changed |= RepairRecordingTracks(recording);
             recording.LastError = NormalizeBounded(recording.LastError, 2_000);
             if (recording.CreatedAtUtc == default)
             {
@@ -785,6 +808,179 @@ public static class StateMigrator
             }
 
             return fileChanged;
+        }
+
+        bool RepairRecordingTracks(MeetingRecording recording)
+        {
+            var trackChanged = false;
+            if (recording.Tracks.Count == 0)
+            {
+                AddLegacyTrack(
+                    MeetingRecordingTrackKind.System,
+                    recording.SystemAudioFile,
+                    recording.SystemAudioHealth);
+                AddLegacyTrack(
+                    MeetingRecordingTrackKind.Microphone,
+                    recording.MicrophoneFile,
+                    recording.MicrophoneHealth);
+                AddLegacyTrack(
+                    MeetingRecordingTrackKind.Mixed,
+                    recording.MixedAudioFile,
+                    recording.MixedAudioFile.Length > 0
+                        ? AudioTrackHealth.Healthy
+                        : AudioTrackHealth.Unknown);
+            }
+
+            var seenKinds = new HashSet<MeetingRecordingTrackKind>();
+            for (var index = recording.Tracks.Count - 1; index >= 0; index--)
+            {
+                var track = recording.Tracks[index];
+                if (track is null ||
+                    !Enum.IsDefined(track.Kind) ||
+                    !seenKinds.Add(track.Kind))
+                {
+                    recording.Tracks.RemoveAt(index);
+                    trackChanged = true;
+                    continue;
+                }
+
+                track.SegmentFiles ??= new List<string>();
+                track.FileName = NormalizeFile(track.FileName, ref trackChanged);
+                track.InProgressFileName = NormalizeFile(
+                    track.InProgressFileName,
+                    ref trackChanged);
+                for (var segmentIndex = track.SegmentFiles.Count - 1;
+                     segmentIndex >= 0;
+                     segmentIndex--)
+                {
+                    var normalized = NormalizeFile(
+                        track.SegmentFiles[segmentIndex],
+                        ref trackChanged);
+                    if (normalized.Length == 0)
+                    {
+                        track.SegmentFiles.RemoveAt(segmentIndex);
+                    }
+                    else
+                    {
+                        track.SegmentFiles[segmentIndex] = normalized;
+                    }
+                }
+
+                track.Container = NormalizeBounded(track.Container, 40);
+                track.Codec = NormalizeBounded(track.Codec, 80);
+                track.Error = NormalizeBounded(track.Error, 2_000);
+                if (!Enum.IsDefined(track.FinalizationState))
+                {
+                    track.FinalizationState = MeetingRecordingFinalizationState.Failed;
+                    trackChanged = true;
+                }
+
+                if (!Enum.IsDefined(track.ValidationState))
+                {
+                    track.ValidationState = MeetingRecordingValidationState.Invalid;
+                    trackChanged = true;
+                }
+
+                var sampleRate = Math.Max(0, track.SampleRate);
+                var channelCount = Math.Max(0, track.ChannelCount);
+                var bitrate = Math.Max(0, track.Bitrate);
+                var duration = double.IsFinite(track.DurationSeconds)
+                    ? Math.Max(0, track.DurationSeconds)
+                    : 0;
+                var bytes = Math.Max(0, track.Bytes);
+                if (sampleRate != track.SampleRate ||
+                    channelCount != track.ChannelCount ||
+                    bitrate != track.Bitrate ||
+                    duration != track.DurationSeconds ||
+                    bytes != track.Bytes)
+                {
+                    track.SampleRate = sampleRate;
+                    track.ChannelCount = channelCount;
+                    track.Bitrate = bitrate;
+                    track.DurationSeconds = duration;
+                    track.Bytes = bytes;
+                    trackChanged = true;
+                }
+            }
+
+            var system = recording.Tracks.FirstOrDefault(track =>
+                track.Kind == MeetingRecordingTrackKind.System);
+            var microphone = recording.Tracks.FirstOrDefault(track =>
+                track.Kind == MeetingRecordingTrackKind.Microphone);
+            var mixed = recording.Tracks.FirstOrDefault(track =>
+                track.Kind == MeetingRecordingTrackKind.Mixed);
+            trackChanged |= SetCompatibilityFile(
+                recording.SystemAudioFile,
+                system?.FileName,
+                value => recording.SystemAudioFile = value);
+            trackChanged |= SetCompatibilityFile(
+                recording.MicrophoneFile,
+                microphone?.FileName,
+                value => recording.MicrophoneFile = value);
+            trackChanged |= SetCompatibilityFile(
+                recording.MixedAudioFile,
+                mixed?.FileName,
+                value => recording.MixedAudioFile = value);
+            return trackChanged;
+
+            void AddLegacyTrack(
+                MeetingRecordingTrackKind kind,
+                string fileName,
+                AudioTrackHealth health)
+            {
+                if (string.IsNullOrWhiteSpace(fileName))
+                {
+                    return;
+                }
+
+                var format = Path.GetExtension(fileName)
+                    .Equals(".m4a", StringComparison.OrdinalIgnoreCase)
+                    ? MeetingRecordingFormat.AacM4a
+                    : MeetingRecordingFormat.Wav;
+                recording.RecordingFormat = format;
+                recording.Tracks.Add(new MeetingRecordingTrackArtifact
+                {
+                    Kind = kind,
+                    FileName = fileName,
+                    Container = format == MeetingRecordingFormat.AacM4a ? "MPEG-4" : "WAV",
+                    Codec = format == MeetingRecordingFormat.AacM4a ? "AAC-LC" : "PCM",
+                    HasAudioFrames = health == AudioTrackHealth.Healthy,
+                    FinalizationState = MeetingRecordingFinalizationState.Finalized,
+                    ValidationState = MeetingRecordingValidationState.Unknown
+                });
+                trackChanged = true;
+            }
+
+            static bool SetCompatibilityFile(
+                string current,
+                string? artifactFile,
+                Action<string> set)
+            {
+                if (!string.IsNullOrWhiteSpace(current) ||
+                    string.IsNullOrWhiteSpace(artifactFile))
+                {
+                    return false;
+                }
+
+                set(artifactFile);
+                return true;
+            }
+        }
+
+        static MeetingRecordingFormat InferRecordingFormat(MeetingRecording recording)
+        {
+            return new[]
+                {
+                    recording.SystemAudioFile,
+                    recording.MicrophoneFile,
+                    recording.MixedAudioFile
+                }
+                .Any(path => string.Equals(
+                    Path.GetExtension(path),
+                    ".m4a",
+                    StringComparison.OrdinalIgnoreCase))
+                ? MeetingRecordingFormat.AacM4a
+                : MeetingRecordingFormat.Wav;
         }
 
         static string NormalizeFile(string? value, ref bool fileChanged)

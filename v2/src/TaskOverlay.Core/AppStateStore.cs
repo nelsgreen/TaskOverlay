@@ -337,10 +337,18 @@ public sealed class AppStateStore
                 recording.MeetId is Guid meetId && !meetingIds.Contains(meetId) ||
                 !RecordingPathPolicy.IsSafeRelativePath(recording.RecordingFolderRelativePath) ||
                 recording.TranscriptionChunkFiles is null ||
+                recording.Tracks is null ||
                 !Enum.IsDefined(recording.SourceKind) ||
                 !Enum.IsDefined(recording.State) ||
+                !Enum.IsDefined(recording.RecordingFormat) ||
                 !Enum.IsDefined(recording.SystemAudioHealth) ||
-                !Enum.IsDefined(recording.MicrophoneHealth))
+                !Enum.IsDefined(recording.MicrophoneHealth) ||
+                recording.Tracks.Any(track =>
+                    track is null ||
+                    !Enum.IsDefined(track.Kind) ||
+                    !Enum.IsDefined(track.FinalizationState) ||
+                    !Enum.IsDefined(track.ValidationState) ||
+                    track.SegmentFiles is null))
             {
                 throw new InvalidDataException("State file contains an invalid meeting recording.");
             }

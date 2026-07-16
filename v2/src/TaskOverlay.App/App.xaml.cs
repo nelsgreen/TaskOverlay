@@ -97,7 +97,8 @@ public partial class App : System.Windows.Application
                 PersistMeetingAssistantState,
                 SaveLocalSettings,
                 OnMeetingAssistantStateChanged,
-                new WindowsMeetingRecorder(),
+                new WindowsMeetingRecorder(
+                    (message, exception) => _diagnostics.Log(message, exception)),
                 new MeetingAudioProcessor(),
                 new OpenAiTranscriptionProvider(() => _openAiApiKeyStore.LoadKey()),
                 new OpenAiMeetingAnalysisProvider(() => _openAiApiKeyStore.LoadKey()),
@@ -1270,6 +1271,7 @@ public partial class App : System.Windows.Application
                 SaveLocalSettings,
                 GetMeetingMicrophoneDevices,
                 GetMeetingSystemOutputDevices,
+                () => _meetingAssistantCoordinator?.RuntimeStatus.RecordingId is not null,
                 OpenMeetingRecordingsFolder,
                 HasOpenAiApiKey,
                 SaveOpenAiApiKey,

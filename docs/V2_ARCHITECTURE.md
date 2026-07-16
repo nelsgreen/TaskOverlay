@@ -334,6 +334,27 @@ workflow is manual-only.
 7. Confirm passive mode shows titles only; in active mode, expand a description
    and mark a described task in work to confirm wrapped description display.
 
+## MEET recording pipeline
+
+New recordings read the machine-local format setting when Start begins. The
+default Compact path asks WASAPI shared-mode capture for normalized PCM16 and
+queues microphone and system frames without blocking capture callbacks. A
+bounded in-memory timeline aligns both sources and produces the mixed PCM
+track. Three independent `IMFSinkWriter` instances encode the source and mixed
+tracks directly as AAC-LC in M4A containers; no full-meeting WAV is written in
+Compact mode. Lossless mode uses the same queues and mixer with independent WAV
+writers instead.
+
+During capture, output uses `*.current.m4a` or `*.current.wav`. Stop first stops
+capture, drains the bounded queues, finalizes the containers, reopens them to
+validate readable metadata and duration, then renames valid files to their
+final names. State stores relative artifact metadata while audio remains under
+the local recording folder. Startup turns stale active artifacts into explicit
+Interrupted/Invalid records and preserves their in-progress names. Because the
+current M4A implementation is single-file rather than segmented, an unexpected
+process termination can lose the current container; periodic finalized M4A
+segments remain a follow-up.
+
 ## Known limitations
 
 - There is no completed-task browser or restore action.

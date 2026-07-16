@@ -221,7 +221,7 @@ export function MeetingAssistantSection({
         )}
         {recordingControls.mode === "stopping" && (
           <ActionButton
-            label="Stopping recording..."
+            label="Finalizing recording..."
             icon={CircleStop}
             danger
             disabled
@@ -253,7 +253,8 @@ export function MeetingAssistantSection({
             REC {formatElapsed(activeRecording.startedAtUtc, runtimeClock)}
           </span>
           <span className="text-right text-muted-foreground">
-            System {formatTrackHealth(activeRecording.systemAudioHealth)}
+            {formatRecordingFormat(activeRecording.recordingFormat)}
+            {" - "}System {formatTrackHealth(activeRecording.systemAudioHealth)}
             {" · "}
             Mic {formatTrackHealth(activeRecording.microphoneHealth)}
           </span>
@@ -385,6 +386,7 @@ function RecordingCard({
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
 }) {
   const canTranscribe = !recording.keepLocalOnly
+    && recording.hasMixedAudio
     && ["Recorded", "TranscriptReady", "Ready", "Failed"].includes(recording.state)
   const canAnalyze = recording.hasTranscript && !isProcessing
 
@@ -397,7 +399,7 @@ function RecordingCard({
             recording.state === "Failed" ? "bg-destructive" : "bg-status-meet",
         )} />
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground">
-          {recording.state}
+          {recording.state === "Stopping" ? "Finalizing recording..." : recording.state}
           {recording.plannedEndPassed ? " - planned end passed" : ""}
         </span>
         <span className="text-[10px] text-muted-foreground">{formatRecordingTimestamp(recording)}</span>
@@ -406,6 +408,21 @@ function RecordingCard({
       <div className="grid grid-cols-2 gap-1.5 text-[10px]">
         <TrackHealth icon={Volume2} label="System" value={recording.systemAudioHealth} />
         <TrackHealth icon={Mic} label="Microphone" value={recording.microphoneHealth} />
+      </div>
+
+      <div className="space-y-1 rounded border border-border/70 bg-card/40 p-2 text-[10px] text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span>Format: <strong className="text-foreground">{formatRecordingFormat(recording.recordingFormat)}</strong></span>
+          <span>{formatDuration(recording.durationSeconds)} - {formatBytes(recording.totalBytes)}</span>
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          <span>Microphone: {recording.hasMicrophoneAudio ? "available" : "missing"}</span>
+          <span>System: {recording.hasSystemAudio ? "available" : "missing"}</span>
+          <span>Mixed: {recording.hasMixedAudio ? "available" : "missing"}</span>
+        </div>
+        {recording.recordingFormat === "Wav" && (
+          <p className="text-amber-300">Lossless WAV recordings use substantially more disk space.</p>
+        )}
       </div>
 
       {recording.lastError && (
@@ -808,6 +825,33 @@ function formatTrackHealth(health: MeetingRecordingSnapshot["systemAudioHealth"]
     case "Failed": return "failed"
     default: return "starting"
   }
+}
+
+function formatRecordingFormat(format: MeetingRecordingSnapshot["recordingFormat"]): string {
+  return format === "Wav" ? "WAV" : "AAC/M4A"
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00"
+  const rounded = Math.round(seconds)
+  const hours = Math.floor(rounded / 3_600)
+  const minutes = Math.floor((rounded % 3_600) / 60)
+  const remainder = rounded % 60
+  return hours > 0
+    ? `${hours}:${minutes.toString().padStart(2, "0")}:${remainder.toString().padStart(2, "0")}`
+    : `${minutes}:${remainder.toString().padStart(2, "0")}`
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
+  const units = ["B", "KB", "MB", "GB"]
+  let value = bytes
+  let unit = 0
+  while (value >= 1_024 && unit < units.length - 1) {
+    value /= 1_024
+    unit++
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
 }
 
 function toLocalInput(value?: string | null): string {

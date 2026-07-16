@@ -207,6 +207,20 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             try
             {
                 var result = await _recorder.StopAsync(recordingId, cancellationToken);
+                if (!result.HasUsableAudio)
+                {
+                    service.MarkFailed(
+                        recordingId,
+                        result.Warning ?? "No microphone or system audio frames were captured.");
+                    recording.RecordingFormat = result.RecordingFormat;
+                    recording.Tracks = result.Tracks?.Select(CloneTrack).ToList() ?? new();
+                    recording.StoppedAtUtc = result.StoppedAtUtc;
+                    recording.SystemAudioHealth = result.SystemAudioHealth;
+                    recording.MicrophoneHealth = result.MicrophoneHealth;
+                    Persist(recording);
+                    return MeetingAssistantOperationResult.Fail(recording.LastError);
+                }
+
                 if (!service.MarkRecorded(recordingId, result))
                 {
                     service.MarkFailed(
@@ -337,6 +351,9 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             var folder = _storage.ResolveFolder(recording.RecordingFolderRelativePath);
             var systemPath = ResolveOptional(recording, recording.SystemAudioFile);
             var microphonePath = ResolveOptional(recording, recording.MicrophoneFile);
+            var mixedPath = ResolveOptional(recording, recording.MixedAudioFile);
+            var mixedBitrate = recording.Tracks.FirstOrDefault(track =>
+                track.Kind == MeetingRecordingTrackKind.Mixed)?.Bitrate ?? 96_000;
             var processing = await _audioProcessor.ProcessAsync(
                 new MeetingAudioProcessingRequest(
                     recording.Id,
@@ -344,7 +361,10 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                     systemPath,
                     recording.SystemTrackStartedAtUtc,
                     microphonePath,
-                    recording.MicrophoneTrackStartedAtUtc),
+                    recording.MicrophoneTrackStartedAtUtc,
+                    ExistingMixedAudioPath: mixedPath,
+                    RecordingFormat: recording.RecordingFormat,
+                    MixedAudioBitrate: mixedBitrate),
                 token);
             if (!service.MarkTranscribing(recordingId))
             {
@@ -373,8 +393,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                         offset),
                     token);
                 responses.Add(response);
-                using var wave = new WaveFileReader(chunkPath);
-                offset += wave.TotalTime;
+                offset += ReadAudioDuration(chunkPath);
             }
 
             var normalized = ComposeTranscript(
@@ -796,19 +815,23 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 recording.LastAutoStartAttemptAtUtc = DateTimeOffset.UtcNow;
             }
 
+            recording.RecordingFormat = _localSettings.MeetingAssistant.RecordingFormat;
+
             Persist(recording);
             try
             {
                 var settings = _localSettings.MeetingAssistant;
                 Report(
                     $"MEET recorder initialization started: recordingId={recordingId:N}; " +
-                    $"meetId={FormatOptionalId(meetId)}.");
+                    $"meetId={FormatOptionalId(meetId)}; " +
+                    $"format={settings.RecordingFormat}.");
                 var result = await _recorder.StartAsync(
                     new MeetingRecordingStartRequest(
                         recordingId,
                         layout.AbsoluteFolder,
                         NullIfEmpty(settings.MicrophoneDeviceId),
-                        NullIfEmpty(settings.SystemOutputDeviceId)),
+                        NullIfEmpty(settings.SystemOutputDeviceId),
+                        settings.RecordingFormat),
                     cancellationToken);
                 Report(
                     $"MEET recorder device initialization completed: " +
@@ -920,6 +943,32 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
     private string? ResolveOptional(MeetingRecording recording, string fileName) =>
         string.IsNullOrWhiteSpace(fileName) ? null : _storage.ResolveFile(recording, fileName);
+
+    private static TimeSpan ReadAudioDuration(string path)
+    {
+        using var reader = new AudioFileReader(path);
+        return reader.TotalTime;
+    }
+
+    private static MeetingRecordingTrackArtifact CloneTrack(
+        MeetingRecordingTrackArtifact track) => new()
+    {
+        Kind = track.Kind,
+        FileName = track.FileName,
+        InProgressFileName = track.InProgressFileName,
+        SegmentFiles = track.SegmentFiles?.ToList() ?? new List<string>(),
+        Container = track.Container,
+        Codec = track.Codec,
+        SampleRate = track.SampleRate,
+        ChannelCount = track.ChannelCount,
+        Bitrate = track.Bitrate,
+        DurationSeconds = track.DurationSeconds,
+        Bytes = track.Bytes,
+        HasAudioFrames = track.HasAudioFrames,
+        FinalizationState = track.FinalizationState,
+        ValidationState = track.ValidationState,
+        Error = track.Error
+    };
 
     private void RewriteAnalysisFile(MeetingAnalysis analysis)
     {

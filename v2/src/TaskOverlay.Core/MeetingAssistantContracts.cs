@@ -11,7 +11,8 @@ public sealed record MeetingRecordingStartRequest(
     Guid RecordingId,
     string RecordingFolder,
     string? MicrophoneDeviceId,
-    string? SystemOutputDeviceId);
+    string? SystemOutputDeviceId,
+    MeetingRecordingFormat RecordingFormat = MeetingRecordingFormat.AacM4a);
 
 public sealed record MeetingRecordingStartResult(
     DateTimeOffset StartedAtUtc,
@@ -21,20 +22,26 @@ public sealed record MeetingRecordingStartResult(
     string MicrophoneFile,
     AudioTrackHealth SystemAudioHealth,
     AudioTrackHealth MicrophoneHealth,
-    string? Warning);
+    string? Warning,
+    MeetingRecordingFormat RecordingFormat = MeetingRecordingFormat.AacM4a,
+    IReadOnlyList<MeetingRecordingTrackArtifact>? Tracks = null);
 
 public sealed record MeetingRecordingStopResult(
     DateTimeOffset StoppedAtUtc,
     AudioTrackHealth SystemAudioHealth,
     AudioTrackHealth MicrophoneHealth,
-    string? Warning);
+    string? Warning,
+    MeetingRecordingFormat RecordingFormat = MeetingRecordingFormat.AacM4a,
+    IReadOnlyList<MeetingRecordingTrackArtifact>? Tracks = null,
+    bool HasUsableAudio = true);
 
 public sealed record MeetingRecorderRuntimeStatus(
     Guid? RecordingId,
     DateTimeOffset? StartedAtUtc,
     AudioTrackHealth SystemAudioHealth,
     AudioTrackHealth MicrophoneHealth,
-    string? Error);
+    string? Error,
+    MeetingRecordingFormat? RecordingFormat = null);
 
 public interface IMeetingRecorder : IAsyncDisposable
 {
@@ -56,7 +63,10 @@ public sealed record MeetingAudioProcessingRequest(
     DateTimeOffset? SystemTrackStartedAtUtc,
     string? MicrophonePath,
     DateTimeOffset? MicrophoneTrackStartedAtUtc,
-    long MaximumChunkBytes = 20L * 1024L * 1024L);
+    long MaximumChunkBytes = 20L * 1024L * 1024L,
+    string? ExistingMixedAudioPath = null,
+    MeetingRecordingFormat RecordingFormat = MeetingRecordingFormat.Wav,
+    int MixedAudioBitrate = 96_000);
 
 public sealed record MeetingAudioProcessingResult(
     string MixedAudioPath,

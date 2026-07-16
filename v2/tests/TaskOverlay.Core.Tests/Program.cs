@@ -7483,10 +7483,10 @@ internal static class Program
         state.MeetingAnalyses = null!;
 
         var migrated = StateMigrator.Migrate(state);
-        Assert(migrated.SchemaVersion == 4 &&
+        Assert(migrated.SchemaVersion == AppState.CurrentSchemaVersion &&
                migrated.MeetingRecordings.Count == 0 &&
                migrated.MeetingAnalyses.Count == 0,
-            "Schema 3 should migrate safely with empty recording collections.");
+            "Schema 3 should migrate safely through current recording metadata.");
         Assert(StateMigrator.Migrate(migrated) == migrated,
             "Meeting Assistant migration should be idempotent.");
         Assert(migrated.Meetings.Single().Id == meeting.Id,
@@ -7510,9 +7510,28 @@ internal static class Program
                 MeetId = meeting.Id,
                 SourceKind = MeetingRecordingSourceKind.ScheduledMeet,
                 State = MeetingRecordingState.Ready,
+                RecordingFormat = MeetingRecordingFormat.AacM4a,
                 RecordingFolderRelativePath =
                     $"meetings/{meeting.Id:N}/recordings/{Guid.NewGuid():N}",
-                SystemAudioFile = "system.wav",
+                MixedAudioFile = "mixed.m4a",
+                Tracks = new List<MeetingRecordingTrackArtifact>
+                {
+                    new()
+                    {
+                        Kind = MeetingRecordingTrackKind.Mixed,
+                        FileName = "mixed.m4a",
+                        Container = "MPEG-4/M4A",
+                        Codec = "AAC-LC",
+                        SampleRate = 48_000,
+                        ChannelCount = 1,
+                        Bitrate = 96_000,
+                        DurationSeconds = 1_800,
+                        Bytes = 21_600_000,
+                        HasAudioFrames = true,
+                        FinalizationState = MeetingRecordingFinalizationState.Finalized,
+                        ValidationState = MeetingRecordingValidationState.Valid
+                    }
+                },
                 TranscriptFile = "transcript.json",
                 AnalysisFile = "analysis.json",
                 StartedAtUtc = now,
@@ -7549,6 +7568,9 @@ internal static class Program
             var loaded = store.Load();
             Assert(loaded.Meetings.Single().RecordingPolicy == MeetingRecordingPolicy.AutoRecord &&
                    loaded.MeetingRecordings.Single().State == MeetingRecordingState.Ready &&
+                   loaded.MeetingRecordings.Single().RecordingFormat ==
+                   MeetingRecordingFormat.AacM4a &&
+                   loaded.MeetingRecordings.Single().Tracks.Single().Bitrate == 96_000 &&
                    loaded.MeetingAnalyses.Single().ProposedActions.Single().Title == "Send notes",
                 "Recording metadata, analysis, and per-MEET policy should roundtrip.");
             var snapshot = WorkspaceSnapshotFactory.Create(
@@ -7558,6 +7580,9 @@ internal static class Program
                 _ => "Normalized transcript text");
             Assert(snapshot.MeetingRecordings.Single().TranscriptText ==
                    "Normalized transcript text" &&
+                   snapshot.MeetingRecordings.Single().RecordingFormat == "AacM4a" &&
+                   snapshot.MeetingRecordings.Single().HasMixedAudio &&
+                   snapshot.MeetingRecordings.Single().TotalBytes == 21_600_000 &&
                    snapshot.MeetingAnalyses.Single().Summary == "A persisted summary." &&
                    snapshot.MeetingAnalyses.Single().ProposedActions.Single().Id ==
                    action.Id.ToString("N"),

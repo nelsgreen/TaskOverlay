@@ -32,6 +32,7 @@ public sealed class SettingsWindowActions
         Action saveMeetingAssistantSettings,
         Func<IReadOnlyList<AudioDeviceDescriptor>> getMicrophoneDevices,
         Func<IReadOnlyList<AudioDeviceDescriptor>> getSystemOutputDevices,
+        Func<bool> isMeetingRecordingActive,
         Func<bool> openMeetingRecordingsFolder,
         Func<bool> hasOpenAiApiKey,
         Func<string, bool> saveOpenAiApiKey,
@@ -61,6 +62,7 @@ public sealed class SettingsWindowActions
         SaveMeetingAssistantSettings = saveMeetingAssistantSettings;
         GetMicrophoneDevices = getMicrophoneDevices;
         GetSystemOutputDevices = getSystemOutputDevices;
+        IsMeetingRecordingActive = isMeetingRecordingActive;
         OpenMeetingRecordingsFolder = openMeetingRecordingsFolder;
         HasOpenAiApiKey = hasOpenAiApiKey;
         SaveOpenAiApiKey = saveOpenAiApiKey;
@@ -91,6 +93,7 @@ public sealed class SettingsWindowActions
     public Action SaveMeetingAssistantSettings { get; }
     public Func<IReadOnlyList<AudioDeviceDescriptor>> GetMicrophoneDevices { get; }
     public Func<IReadOnlyList<AudioDeviceDescriptor>> GetSystemOutputDevices { get; }
+    public Func<bool> IsMeetingRecordingActive { get; }
     public Func<bool> OpenMeetingRecordingsFolder { get; }
     public Func<bool> HasOpenAiApiKey { get; }
     public Func<string, bool> SaveOpenAiApiKey { get; }

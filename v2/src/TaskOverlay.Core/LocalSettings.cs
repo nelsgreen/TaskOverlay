@@ -23,6 +23,8 @@ public sealed class MeetingAssistantSettings
     public bool AutomaticRecordingEnabled { get; set; }
     public MeetingRecordingPolicy DefaultRecordingPolicy { get; set; } =
         MeetingRecordingPolicy.Manual;
+    public MeetingRecordingFormat RecordingFormat { get; set; } =
+        MeetingRecordingFormat.AacM4a;
     public string MicrophoneDeviceId { get; set; } = string.Empty;
     public string SystemOutputDeviceId { get; set; } = string.Empty;
     public bool AutoTranscribeAfterStop { get; set; }
@@ -47,6 +49,9 @@ public sealed class MeetingAssistantSettings
         var defaultPolicy = DefaultRecordingPolicy == MeetingRecordingPolicy.AutoRecord
             ? MeetingRecordingPolicy.AutoRecord
             : MeetingRecordingPolicy.Manual;
+        var recordingFormat = Enum.IsDefined(RecordingFormat)
+            ? RecordingFormat
+            : MeetingRecordingFormat.AacM4a;
         var language = Enum.IsDefined(Language)
             ? Language
             : MeetingTranscriptLanguage.Auto;
@@ -57,6 +62,7 @@ public sealed class MeetingAssistantSettings
                       AnalysisProvider != analysisProvider ||
                       AnalysisModel != analysisModel ||
                       DefaultRecordingPolicy != defaultPolicy ||
+                      RecordingFormat != recordingFormat ||
                       Language != language;
 
         MicrophoneDeviceId = microphoneDeviceId;
@@ -66,6 +72,7 @@ public sealed class MeetingAssistantSettings
         AnalysisProvider = analysisProvider;
         AnalysisModel = analysisModel;
         DefaultRecordingPolicy = defaultPolicy;
+        RecordingFormat = recordingFormat;
         Language = language;
         return changed;
     }

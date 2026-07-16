@@ -162,6 +162,9 @@ export interface MeetingRecordingSnapshot {
   state: MeetingRecordingState
   startedAtUtc: string | null
   stoppedAtUtc: string | null
+  recordingFormat: "AacM4a" | "Wav"
+  durationSeconds: number
+  totalBytes: number
   systemAudioHealth: "Unknown" | "Healthy" | "Unavailable" | "Failed"
   microphoneHealth: "Unknown" | "Healthy" | "Unavailable" | "Failed"
   keepLocalOnly: boolean
@@ -173,8 +176,25 @@ export interface MeetingRecordingSnapshot {
   hasAnalysis: boolean
   transcriptText: string
   lastError: string
+  tracks: MeetingRecordingTrackSnapshot[]
   createdAtUtc: string
   updatedAtUtc: string
+}
+
+export interface MeetingRecordingTrackSnapshot {
+  kind: "System" | "Microphone" | "Mixed"
+  fileName: string
+  container: string
+  codec: string
+  sampleRate: number
+  channelCount: number
+  bitrate: number
+  durationSeconds: number
+  bytes: number
+  hasAudioFrames: boolean
+  finalizationState: "Pending" | "InProgress" | "Finalized" | "Interrupted" | "Failed"
+  validationState: "Unknown" | "Valid" | "Invalid"
+  error: string
 }
 
 export interface MeetingSourceReferenceSnapshot {

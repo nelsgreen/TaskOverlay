@@ -49,6 +49,14 @@ public sealed class OpenAiTranscriptionProvider : ITranscriptionProvider
             throw new OpenAiProviderException("OpenAI API key is not configured.");
         }
 
+        var fileName = Path.GetFileName(request.AudioPath);
+        if (fileName.EndsWith(".part", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains(".current.", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new OpenAiProviderException(
+                "An in-progress recording artifact cannot be uploaded for transcription.");
+        }
+
         using var message = new HttpRequestMessage(HttpMethod.Post, Endpoint);
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         using var form = new MultipartFormDataContent();
@@ -60,8 +68,13 @@ public sealed class OpenAiTranscriptionProvider : ITranscriptionProvider
             64 * 1024,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
         using var fileContent = new StreamContent(fileStream);
-        fileContent.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
-        form.Add(fileContent, "file", Path.GetFileName(request.AudioPath));
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue(
+            Path.GetExtension(request.AudioPath).Equals(
+                ".m4a",
+                StringComparison.OrdinalIgnoreCase)
+                ? "audio/mp4"
+                : "audio/wav");
+        form.Add(fileContent, "file", fileName);
         form.Add(new StringContent(request.Model), "model");
         var wantsDiarization = request.Model.Contains("diarize", StringComparison.OrdinalIgnoreCase);
         var wantsWhisperSegments = string.Equals(

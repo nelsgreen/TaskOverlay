@@ -7,7 +7,7 @@ namespace TaskOverlay.Core;
 
 public sealed class AppState
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public List<TaskItem> Tasks { get; set; } = new();

@@ -96,6 +96,11 @@ public sealed class MeetingRecordingService
         recording.StartedAtUtc = result.StartedAtUtc;
         recording.SystemTrackStartedAtUtc = result.SystemTrackStartedAtUtc;
         recording.MicrophoneTrackStartedAtUtc = result.MicrophoneTrackStartedAtUtc;
+        recording.RecordingFormat = result.RecordingFormat;
+        if (result.Tracks is not null)
+        {
+            recording.Tracks = CloneTracks(result.Tracks);
+        }
         recording.SystemAudioFile = result.SystemAudioFile;
         recording.MicrophoneFile = result.MicrophoneFile;
         recording.SystemAudioHealth = result.SystemAudioHealth;
@@ -128,8 +133,25 @@ public sealed class MeetingRecordingService
 
         var timestamp = now ?? DateTimeOffset.UtcNow;
         recording.StoppedAtUtc = result.StoppedAtUtc;
+        recording.RecordingFormat = result.RecordingFormat;
+        if (result.Tracks is not null)
+        {
+            recording.Tracks = CloneTracks(result.Tracks);
+        }
         recording.SystemAudioHealth = result.SystemAudioHealth;
         recording.MicrophoneHealth = result.MicrophoneHealth;
+        if (result.Tracks is not null)
+        {
+            recording.SystemAudioFile = FindTrackFile(
+                recording.Tracks,
+                MeetingRecordingTrackKind.System);
+            recording.MicrophoneFile = FindTrackFile(
+                recording.Tracks,
+                MeetingRecordingTrackKind.Microphone);
+            recording.MixedAudioFile = FindTrackFile(
+                recording.Tracks,
+                MeetingRecordingTrackKind.Mixed);
+        }
         recording.LastError = result.Warning ?? string.Empty;
         recording.State = MeetingRecordingState.Recorded;
         recording.UpdatedAtUtc = timestamp;
@@ -275,6 +297,14 @@ public sealed class MeetingRecordingService
             recording.State = MeetingRecordingState.Failed;
             recording.LastError =
                 "The previous operation was interrupted. Original files were kept; retry the operation.";
+            foreach (var track in recording.Tracks.Where(track =>
+                         track.FinalizationState is MeetingRecordingFinalizationState.Pending or
+                             MeetingRecordingFinalizationState.InProgress))
+            {
+                track.FinalizationState = MeetingRecordingFinalizationState.Interrupted;
+                track.ValidationState = MeetingRecordingValidationState.Invalid;
+                track.Error = "Recording was interrupted before the container finalized.";
+            }
             recording.UpdatedAtUtc = timestamp;
             changed = true;
         }
@@ -318,6 +348,36 @@ public sealed class MeetingRecordingService
         var normalized = error?.Trim() ?? string.Empty;
         return normalized.Length <= 2_000 ? normalized : normalized[..2_000];
     }
+
+    private static List<MeetingRecordingTrackArtifact> CloneTracks(
+        IReadOnlyList<MeetingRecordingTrackArtifact>? tracks) =>
+        tracks?.Select(track => new MeetingRecordingTrackArtifact
+        {
+            Kind = track.Kind,
+            FileName = track.FileName,
+            InProgressFileName = track.InProgressFileName,
+            SegmentFiles = track.SegmentFiles?.ToList() ?? new List<string>(),
+            Container = track.Container,
+            Codec = track.Codec,
+            SampleRate = track.SampleRate,
+            ChannelCount = track.ChannelCount,
+            Bitrate = track.Bitrate,
+            DurationSeconds = track.DurationSeconds,
+            Bytes = track.Bytes,
+            HasAudioFrames = track.HasAudioFrames,
+            FinalizationState = track.FinalizationState,
+            ValidationState = track.ValidationState,
+            Error = track.Error
+        }).ToList() ?? new List<MeetingRecordingTrackArtifact>();
+
+    private static string FindTrackFile(
+        IEnumerable<MeetingRecordingTrackArtifact> tracks,
+        MeetingRecordingTrackKind kind) =>
+        tracks.FirstOrDefault(track =>
+            track.Kind == kind &&
+            track.FinalizationState == MeetingRecordingFinalizationState.Finalized &&
+            track.ValidationState == MeetingRecordingValidationState.Valid)?.FileName ??
+        string.Empty;
 }
 
 public static class MeetingAutoRecordScheduler
