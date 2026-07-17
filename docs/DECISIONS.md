@@ -173,6 +173,24 @@ item.
   manual screenshots; Review combines the explicitly active transcript with
   analysis and visual references. Transcript, Analysis, and Context are not
   separate top-level tabs.
+- The MEET visual migration ships as three bounded phases: (1) shell + Details,
+  (2) Sources, (3) Review. Phase 1 (done) migrates the modal shell and Details
+  tab to the approved V0 direction without changing any connected behavior:
+  fixed viewport-clamped geometry (~1180x720) that is identical on every tab,
+  a Header / Tabs / fixed content region / Footer structure, full-width
+  accessible `role="tablist"` tabs, one stable footer holding the single
+  autosave status plus Close (Delete meeting stays Details-only), and a compact
+  two-column Details (Title+Project row, one Schedule card, Location+Link side
+  by side, Notes filling remaining height, Context in the equal right column).
+  Sources and Review keep their current content in this phase and are migrated
+  in phases 2 and 3.
+- The MEET contrast/typography foundation is scoped to a `.meet-shell` class so
+  it never restyles Task, Calendar, ContextHUB, Settings, or Overlay. Inside
+  that scope the existing semantic tokens are overridden toward softer charcoal
+  surfaces, clearly visible neutral borders, near-white foreground, and
+  readable metadata (>=11px on the MEET surface); violet stays restrained
+  (MEET semantics and a subtle selected tint), the active tab uses a near-white
+  underline, and red is reserved for destructive actions and genuine failures.
 - Imported audio and transcripts are copied into deterministic MEET-relative
   managed storage. `state.json` stores provenance and safe relative metadata,
   never the original external absolute path. Audio processing ranges are

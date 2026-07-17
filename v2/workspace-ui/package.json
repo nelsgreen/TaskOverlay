@@ -14,7 +14,8 @@
     "test:meet-create": "node --test lib/meeting-create-guard.test.mjs",
     "test:meeting-edit": "node --test lib/meeting-edit.test.mjs",
     "test:meet-workspace": "node --test lib/meet-workspace-policy.test.mjs",
-    "test:meet-operations": "node --test lib/meeting-operation-state.test.mjs"
+    "test:meet-operations": "node --test lib/meeting-operation-state.test.mjs",
+    "test:meet-shell": "node --test lib/meet-shell.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

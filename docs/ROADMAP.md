@@ -106,7 +106,17 @@ never a direct mutation without explicit user confirmation (see DECISIONS
     User cancellation is neutral, restores Ready, and retains prior durable
     sources/analysis; transcript cards provide large-target accessible
     selection, and range saving only configures the next transcription.
-13. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
+13. MEET visual migration - three bounded phases. Phase 1 (shell + Details) is
+    implemented: fixed viewport-clamped modal geometry identical across
+    Details / Sources / Review, Header/Tabs/content/Footer structure,
+    full-width accessible tabs, one stable footer with a single autosave status,
+    a compact two-column Details, and a `.meet-shell`-scoped contrast/typography
+    foundation (softer charcoal, visible borders, near-white text, >=11px
+    metadata) that does not touch other Workspace screens. All PR #67 connected
+    behavior is preserved. Phase 2 (Sources content) and phase 3 (Review
+    content) remain pending; they keep their current content inside the new
+    shell for now.
+14. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
     loss, device recovery, retention, transcript search/editor actions,
     ContextHUB promotion, Meeting Brief, user speaker identification,
     OCR/multimodal review, and additional/local providers.

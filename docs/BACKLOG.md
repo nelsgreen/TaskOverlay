@@ -554,6 +554,28 @@ Product direction:
     nested Analyze/Open/Delete actions do not change the active transcript;
   - Save range stores seconds-based metadata for the next transcription and
     does not process or modify the original audio.
+- MEET visual migration (three bounded phases):
+  - Phase 1 (shell + Details) - done: the modal has fixed viewport-clamped
+    geometry (~1180x720) that stays identical across Details / Sources /
+    Review; a Header / Tabs / fixed content region / Footer structure; a
+    full-width, keyboard-accessible `role="tablist"` tab row with a near-white
+    active underline and subtle violet selected tint; one stable footer with a
+    single autosave status (Saving / Saved / Save failed . Retry) and Close,
+    with Delete meeting scoped to Details; the header shows the real MEET title
+    and a `Project . date . start` line (no generic "MEET details" label when a
+    title exists); and a compact two-column Details (Title+Project row, one
+    Schedule card replacing the two large date/time cards, Location+Link side
+    by side, Notes filling remaining height, Context in an equal-height right
+    column). The contrast/typography foundation is scoped to `.meet-shell`
+    (softer charcoal surfaces, visible neutral borders, near-white text, >=11px
+    metadata) and does not restyle other Workspace screens. Every PR #67
+    connected behavior is preserved (persisted draft, generated title, autosave,
+    flush-before-close/recording, untouched-draft cleanup, recording policy,
+    operation feedback, ContextHUB link/navigation).
+  - Phase 2 (Sources content redesign) - pending; Sources keeps its current
+    production content inside the new shell for now.
+  - Phase 3 (Review content redesign) - pending; Review keeps its current
+    production content inside the new shell for now.
 - Recurrence, calendar sync, direct meeting-platform APIs, and live
   transcription remain later work.
 - Handle next MEET countdown.
