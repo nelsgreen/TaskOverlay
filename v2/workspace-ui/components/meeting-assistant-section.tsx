@@ -33,6 +33,8 @@ import type {
 import { cn } from "@/lib/utils"
 import { deriveMeetingRecordingControlState } from "@/lib/meeting-recording-controls"
 import { resolveMeetingRecordingSelection } from "@/lib/meeting-recording-selection"
+import { isValidMeetingLinkUrl } from "@/lib/meeting-link"
+import { proposedActionLabel } from "@/lib/meeting-proposed-action"
 
 interface Props {
   meet: MeetItem
@@ -199,9 +201,16 @@ export function MeetingAssistantSection({
       )}
 
       <div>
-        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Recording policy
-        </span>
+        <div className="mb-1.5 flex flex-wrap items-baseline gap-x-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Recording policy
+          </span>
+          {(meet.recordingPolicy ?? "Inherit") === "Inherit" && (
+            <span className="text-[10px] text-muted-foreground">
+              · Effective: {defaultRecordingPolicy === "AutoRecord" ? "Auto-record" : "Manual"}
+            </span>
+          )}
+        </div>
         <div className="flex flex-wrap gap-1.5">
           {policyOptions.map((option) => (
             <button
@@ -216,21 +225,16 @@ export function MeetingAssistantSection({
                   : "border-border text-muted-foreground hover:bg-accent",
               )}
             >
-              {option.value === "Inherit"
-                ? `${option.label} (${defaultRecordingPolicy === "AutoRecord" ? "Auto-record" : "Manual"})`
-                : option.label}
+              {option.label}
             </button>
           ))}
         </div>
-        <p className="mt-1.5 text-[10px] text-muted-foreground">
-          Use app default inherits the current global Settings preference.
-        </p>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
-        {meet.link && (
+        {isValidMeetingLinkUrl(meet.link) && (
           <ActionButton
-            label="Open meeting link"
+            label="Join call"
             icon={ExternalLink}
             onClick={() => send({ type: "openMeetingLink", meetingId: meet.id })}
           />
@@ -349,6 +353,7 @@ export function MeetingAssistantSection({
           {showAnalysis && selectedAnalysis && (
             <AnalysisReview
               analysis={selectedAnalysis}
+              meet={meet}
               projects={projects}
               readOnly={readOnly}
               send={send}
@@ -688,7 +693,7 @@ function RecordingCard({
           />
         )}
         <ActionButton
-          label={recording.keepLocalOnly ? "Local only" : "Keep local only"}
+          label={recording.keepLocalOnly ? "Audio stays local" : "Keep audio local"}
           icon={Check}
           disabled={readOnly || recording.state === "Recording"}
           onClick={() => send({
@@ -712,6 +717,12 @@ function RecordingCard({
         />
       </div>
 
+      {recording.keepLocalOnly && (
+        <p className="text-[10px] text-muted-foreground">
+          Cloud transcription is disabled for this recording. Existing transcripts and analyses are kept.
+        </p>
+      )}
+
       {!isRuntimeActive && (recording.state === "Recording" || recording.state === "Stopping") && (
         <p className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-300">
           This persisted recording state has no live recorder session. Start remains available while recovery marks it retryable.
@@ -734,15 +745,18 @@ function RecordingCard({
 
 export function AnalysisReview({
   analysis,
+  meet,
   projects,
   readOnly,
   send,
 }: {
   analysis: MeetingAnalysisSnapshot
+  meet: MeetItem
   projects: Project[]
   readOnly: boolean
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
 }) {
+  const meetProjectName = projects.find((project) => project.id === meet.projectId)?.name ?? "MEET project"
   const pending = analysis.proposedActions.filter((action) => action.reviewState === "Pending" || action.reviewState === "Failed")
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [overrides, setOverrides] = useState<Record<string, MeetingProposedActionOverride>>({})
@@ -812,8 +826,7 @@ export function AnalysisReview({
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5 text-[9px] uppercase tracking-wide text-muted-foreground">
-                      <span>{action.type}</span>
-                      <span>{Math.round(action.confidence * 100)}%</span>
+                      <span>{proposedActionLabel(action.type)}</span>
                       <span>{action.reviewState}</span>
                     </div>
                     <input
@@ -831,7 +844,7 @@ export function AnalysisReview({
                     onChange={(event) => updateOverride(action.id, { projectId: event.target.value || null })}
                     className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
                   >
-                    <option value="">MEET project</option>
+                    <option value="">{meetProjectName}</option>
                     {projects.map((project) => (
                       <option key={project.id} value={project.id}>{project.name}</option>
                     ))}
@@ -881,7 +894,12 @@ export function AnalysisReview({
                     {formatSegment(action)} {action.sourceExcerpt}
                   </blockquote>
                 )}
-                {action.rationale && <p className="text-[10px] text-muted-foreground">{action.rationale}</p>}
+                {action.rationale && (
+                  <p className="text-[10px] text-muted-foreground">
+                    {action.rationale}
+                    {action.confidence > 0 && ` (model confidence: ${Math.round(action.confidence * 100)}%)`}
+                  </p>
+                )}
                 {editable && (
                   <button
                     type="button"

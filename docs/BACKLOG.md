@@ -582,26 +582,31 @@ Product direction:
   - Save range stores seconds-based metadata for the next transcription and
     does not process or modify the original audio.
 - MEET visual migration (three bounded phases):
-  - Phase 1 (shell + Details) - implemented in draft PR #68, but not accepted
-    or complete: manual Windows artifact QA failed. The rejected default was
-    the near-fullscreen `1600x1000 / viewport minus 16px` direction; it created
-    excessive empty space, undersized content, and a shell that felt like an
-    application inside another application. Exact replacement geometry and
-    layout remain pending a bounded visual-rescue iteration. Preserve the
-    useful foundation already implemented: shared Header / Tabs / Content /
-    Footer shell, stable geometry across tabs, accessible three-tab structure,
-    one autosave indicator, existing PR #67 connected behavior, and
-    MEET-specific Context behavior. Do not start Phase 2 Sources or Phase 3
-    Review until the Phase 1 shell is visually accepted.
-  - Phase 2 (Sources content redesign) - pending; Sources keeps its current
-    production content inside the new shell for now.
-    Sources follow-ups: rename `Open meeting link` to clearer language such as
-    `Join call`; show it only for valid HTTP/HTTPS links and surface invalid
-    links near the Link field; clarify `Keep local only` as preventing cloud
-    transcription/upload while retaining existing transcripts and analyses;
-    move Context Pack toward an overflow/advanced action.
-  - Phase 3 (Review content redesign) - pending; Review keeps its current
-    production content inside the new shell for now.
+  - Phase 1 (shell + Details) - implemented and merged in PR #68
+    (`78654d8e8e5391d36334039902b099dab43c61c1`); manual Windows artifact QA
+    passed against the accepted bounded shell geometry
+    `min(1280px, 90vw)` by `min(820px, 88dvh)`, which replaced the originally
+    rejected near-fullscreen `1600x1000 / viewport minus 16px` direction.
+    Foundation preserved: shared Header / Tabs / Content / Footer shell,
+    stable geometry across tabs, accessible three-tab structure, one autosave
+    indicator, existing PR #67 connected behavior, and MEET-specific Context
+    behavior.
+  - Phase 2 (Sources content redesign) and Phase 3 (Review content redesign) -
+    implemented in draft PR `claude/v2-meet-sources-review-visual-migration`
+    on top of the accepted Phase 1 shell; both remain pending manual Windows
+    artifact QA and are not yet accepted or complete. Sources now uses a
+    two-column layout (recording/audio left, transcripts/screenshots right)
+    and Review keeps its transcript-left/assistant-right layout with a
+    corrected single-scroll-per-column model. Implemented alongside the
+    layout: `Open meeting link` renamed to `Join call` and only shown for a
+    valid HTTP/HTTPS link, with inline invalid-link feedback near the Link
+    field in Details instead of a global Sources error; `Keep local only`
+    relabeled to `Keep audio local` / `Audio stays local` with compact
+    contextual copy, preserving the existing boolean and command;
+    human-readable ProposedAction labels in place of raw enum names; the
+    MEET's real project name shown instead of generic "MEET project" text;
+    and AI confidence demoted to secondary metadata instead of a primary
+    badge. Context Pack relocation remains out of scope for this iteration.
 - MEET keyboard editing flow: primary Tab order should be Title -> Location ->
   Link -> Notes, with Shift+Tab reversing it. Project, schedule, duration,
   linked task, and actions remain keyboard-accessible without interrupting the

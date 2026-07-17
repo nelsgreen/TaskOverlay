@@ -40,6 +40,7 @@ import {
   meetTabPanelId,
   nextMeetTab,
 } from "@/lib/meet-shell"
+import { isValidMeetingLinkUrl } from "@/lib/meeting-link"
 import { MeetContextBlock } from "./task-context-block"
 import { MeetingReviewWorkspace, MeetingSourcesWorkspace } from "./meet-sources-review"
 
@@ -603,6 +604,11 @@ export function MeetDetailsModal({
                       )}
                       className={inputClass}
                     />
+                    {draft.link?.trim() && !isValidMeetingLinkUrl(draft.link) && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Not a link the OS can open (needs http:// or https://).
+                      </p>
+                    )}
                   </div>
                   {/* Compact linked task: select + inline Open action, no duplicated card */}
                   <div>

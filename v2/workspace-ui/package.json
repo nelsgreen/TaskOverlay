@@ -15,7 +15,11 @@
     "test:meeting-edit": "node --test lib/meeting-edit.test.mjs",
     "test:meet-workspace": "node --test lib/meet-workspace-policy.test.mjs",
     "test:meet-operations": "node --test lib/meeting-operation-state.test.mjs",
-    "test:meet-shell": "node --test lib/meet-shell.test.mjs"
+    "test:meet-shell": "node --test lib/meet-shell.test.mjs",
+    "test:meeting-link": "node --test lib/meeting-link.test.mjs",
+    "test:meeting-proposed-action": "node --test lib/meeting-proposed-action.test.mjs",
+    "test:meeting-assistant-section": "node --test lib/meeting-assistant-section.test.mjs",
+    "test:meet-sources-review-layout": "node --test lib/meet-sources-review-layout.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

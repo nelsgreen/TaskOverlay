@@ -107,16 +107,17 @@ never a direct mutation without explicit user confirmation (see DECISIONS
     sources/analysis; transcript cards provide large-target accessible
     selection, and range saving only configures the next transcription.
 13. MEET visual migration - three bounded phases. Phase 1 (shell + Details) is
-    implemented in draft PR #68, but is not accepted or complete: manual
-    Windows artifact QA failed. The near-fullscreen `1600x1000 / viewport minus
-    16px` default direction is rejected because it created excessive empty
-    space and undersized content. Exact replacement geometry and layout remain
-    pending a bounded visual-rescue iteration. Preserve the useful foundation:
-    shared Header/Tabs/Content/Footer shell, stable geometry across tabs,
-    accessible three-tab structure, one autosave indicator, existing PR #67
-    connected behavior, and MEET-specific Context behavior. Phase 2 Sources and
-    Phase 3 Review must not start until Phase 1 is visually accepted; their
-    current production content remains in the shell for now.
+    implemented and merged in PR #68 (`78654d8e8e5391d36334039902b099dab43c61c1`);
+    manual Windows artifact QA passed against the accepted bounded shell
+    `min(1280px, 90vw)` by `min(820px, 88dvh)`, which replaced the originally
+    rejected near-fullscreen `1600x1000 / viewport minus 16px` direction.
+    Foundation preserved: shared Header/Tabs/Content/Footer shell, the
+    accepted geometry held stable across tabs, accessible three-tab structure,
+    one autosave indicator, existing PR #67 connected behavior, and
+    MEET-specific Context behavior. Phase 2 Sources and Phase 3 Review are
+    implemented in draft PR `claude/v2-meet-sources-review-visual-migration`
+    on top of the accepted shell, but remain pending manual Windows artifact
+    QA and are not yet accepted or complete.
 14. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
     loss, device recovery, retention, transcript search/editor actions,
     ContextHUB promotion, Meeting Brief, user speaker identification,
