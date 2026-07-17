@@ -38,6 +38,7 @@ import {
   type MeetEditableField,
 } from "@/lib/meeting-edit"
 import { generatedMeetingTitle } from "@/lib/meeting-title"
+import { useMeetingOperationController } from "@/lib/meeting-operation-state"
 import {
   MeetingCreateGuard,
   type MeetingCreatePhase,
@@ -162,6 +163,14 @@ export function TaskManager() {
   const meetingTranscripts = bridge.data?.meetingTranscripts ?? []
   const meetingScreenshots = bridge.data?.meetingScreenshots ?? []
   const meetingAnalyses = bridge.data?.meetingAnalyses ?? []
+  const authoritativeMeetingOperations = bridge.data?.meetingOperations ?? []
+  const meetingOperationController = useMeetingOperationController(
+    authoritativeMeetingOperations,
+    meetingRecordings,
+    meetingTranscripts,
+    bridge.sendMeetingAssistantCommandTracked,
+    bridge.requestSnapshot,
+  )
 
   useEffect(() => {
     if (meetingCreateGuardRef.current?.reconcile(meetItems.map((meeting) => meeting.id))) {
@@ -1870,13 +1879,17 @@ export function TaskManager() {
           meetingTranscripts={meetingTranscripts}
           meetingScreenshots={meetingScreenshots}
           meetingAnalyses={meetingAnalyses}
+          meetingOperations={meetingOperationController.operations}
           activeRecording={activeMeetingRecording}
           activeRecordingOwnerTitle={activeMeetingRecordingOwnerTitle}
-          meetingAssistantError={bridge.error}
-          onClearMeetingAssistantError={bridge.clearError}
+          meetingAssistantError={meetingOperationController.error ?? bridge.error}
+          onClearMeetingAssistantError={() => {
+            meetingOperationController.clearError()
+            bridge.clearError()
+          }}
           defaultRecordingPolicy={bridge.data?.defaultMeetingRecordingPolicy ?? "Manual"}
           onMeetingAssistantCommand={connected
-            ? bridge.sendMeetingAssistantCommand
+            ? meetingOperationController.send
             : undefined}
         />
       )}

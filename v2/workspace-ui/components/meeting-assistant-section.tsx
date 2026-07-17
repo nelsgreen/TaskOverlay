@@ -20,6 +20,7 @@ import {
 import type {
   MeetItem,
   MeetingAnalysisSnapshot,
+  MeetingOperationSnapshot,
   MeetingProposedActionOverride,
   MeetingProposedActionSnapshot,
   MeetingRecordingPolicy,
@@ -37,6 +38,7 @@ interface Props {
   projects: Project[]
   recordings: MeetingRecordingSnapshot[]
   analyses: MeetingAnalysisSnapshot[]
+  operations: MeetingOperationSnapshot[]
   unclassifiedRecordings: MeetingRecordingSnapshot[]
   activeRecording: MeetingRecordingSnapshot | null
   activeRecordingOwnerTitle?: string
@@ -63,6 +65,7 @@ export function MeetingAssistantSection({
   projects,
   recordings,
   analyses,
+  operations,
   unclassifiedRecordings,
   activeRecording,
   activeRecordingOwnerTitle,
@@ -93,6 +96,8 @@ export function MeetingAssistantSection({
     .filter((analysis) => analysis.recordingId === selectedRecording?.id)
     .sort((left, right) => right.updatedAtUtc.localeCompare(left.updatedAtUtc))[0]
     ?? null
+  const selectedOperation = operations.find((operation) =>
+    operation.recordingId === selectedRecording?.id)
 
   const latestRecordingId = meetingRecordings[0]?.id ?? null
   const availableRecordingIds = useMemo(
@@ -149,7 +154,7 @@ export function MeetingAssistantSection({
     activeRecording,
     pendingRecordingAction,
   )
-  const isProcessing = selectedRecording?.state === "Processing"
+  const isProcessing = Boolean(selectedOperation) || selectedRecording?.state === "Processing"
     || selectedRecording?.state === "Transcribing"
     || selectedRecording?.state === "Analyzing"
 
@@ -314,6 +319,7 @@ export function MeetingAssistantSection({
               recording={selectedRecording}
               isRuntimeActive={selectedRecording.id === activeRecording?.id}
               isProcessing={isProcessing}
+              operation={selectedOperation}
               readOnly={readOnly}
               send={send}
               showTranscript={showTranscript}
@@ -408,6 +414,7 @@ function RecordingCard({
   recording,
   isRuntimeActive,
   isProcessing,
+  operation,
   readOnly,
   send,
   onStartAnother,
@@ -416,6 +423,7 @@ function RecordingCard({
   recording: MeetingRecordingSnapshot
   isRuntimeActive: boolean
   isProcessing: boolean
+  operation?: MeetingOperationSnapshot
   readOnly: boolean
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
   onStartAnother?: () => void
@@ -452,7 +460,7 @@ function RecordingCard({
             recording.state === "Failed" ? "bg-destructive" : "bg-status-meet",
         )} />
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground">
-          {recording.state === "Stopping" ? "Finalizing recording..." : recording.state}
+          {formatRecordingStateLabel(recording)}
           {recording.plannedEndPassed ? " - planned end passed" : ""}
         </span>
         <span className="text-[10px] text-muted-foreground">{formatRecordingTimestamp(recording)}</span>
@@ -573,6 +581,8 @@ function RecordingCard({
         </p>
       )}
 
+      {operation && <RecordingOperationStatus operation={operation} />}
+
       {technicalErrors.length > 0 && (
         <details className="min-w-0 rounded border border-border/70 bg-card/30 p-2">
           <summary className="cursor-pointer text-[10px] font-semibold text-muted-foreground">
@@ -610,10 +620,13 @@ function RecordingCard({
         ) : (
           <>
             <ActionButton
-              label={recording.hasTranscript ? "Retry transcription" : "Transcribe now"}
+              label={operation?.kind === "Transcription"
+                ? operation.stage === "PreparingAudio" ? "Preparing audio..." : "Transcribing..."
+                : recording.hasTranscript ? "Retry transcription" : "Transcribe now"}
               icon={FileAudio}
               primary
               disabled={readOnly || !canTranscribe}
+              busy={operation?.kind === "Transcription"}
               onClick={() => {
                 if (window.confirm(
                   "The mixed recording will be uploaded to the configured transcription provider. Continue?",
@@ -627,9 +640,12 @@ function RecordingCard({
               }}
             />
             <ActionButton
-              label={recording.hasAnalysis ? "Retry analysis" : "Analyze"}
+              label={operation?.kind === "Analysis"
+                ? operation.stage === "StartingAnalysis" ? "Starting analysis..." : "Analyzing..."
+                : recording.hasAnalysis ? "Retry analysis" : "Analyze"}
               icon={Sparkles}
               disabled={readOnly || !canAnalyze}
+              busy={operation?.kind === "Analysis"}
               onClick={() => send({ type: "analyzeMeetingRecording", recordingId: recording.id })}
             />
           </>
@@ -940,6 +956,38 @@ function TrackHealth({
   )
 }
 
+function RecordingOperationStatus({ operation }: { operation: MeetingOperationSnapshot }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [operation.id])
+  const elapsed = formatElapsed(operation.startedAtUtc, now)
+  const label = operation.stage === "StartingTranscription" ? "Starting transcription..."
+    : operation.stage === "PreparingAudio" ? "Preparing audio..."
+    : operation.stage === "Transcribing" ? "Transcribing..."
+    : operation.stage === "StartingAnalysis" ? "Starting analysis..."
+    : operation.stage === "Cancelling" ? "Cancelling..."
+    : "Analyzing transcript..."
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      className="space-y-1.5 rounded border border-status-meet/30 bg-status-meet/10 p-2 text-[10px]"
+    >
+      <div className="flex items-center gap-2 font-medium text-status-meet">
+        <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
+        <span>{label}</span>
+        <span className="ml-auto font-mono" aria-hidden="true">{elapsed}</span>
+      </div>
+      <div className="h-1 overflow-hidden rounded bg-status-meet/15" aria-hidden="true">
+        <div className="h-full w-1/3 animate-pulse rounded bg-status-meet motion-reduce:animate-none" />
+      </div>
+    </div>
+  )
+}
+
 function ActionButton({
   label,
   icon: Icon,
@@ -947,6 +995,7 @@ function ActionButton({
   disabled = false,
   primary = false,
   danger = false,
+  busy = false,
 }: {
   label: string
   icon: LucideIcon
@@ -954,11 +1003,13 @@ function ActionButton({
   disabled?: boolean
   primary?: boolean
   danger?: boolean
+  busy?: boolean
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
+      aria-busy={busy}
       onClick={onClick}
       className={cn(
         "flex h-7 items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
@@ -967,7 +1018,9 @@ function ActionButton({
         !primary && !danger && "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
       )}
     >
-      <Icon className="size-3" />
+      {busy
+        ? <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
+        : <Icon className="size-3" />}
       {label}
     </button>
   )
@@ -1006,6 +1059,18 @@ function formatRecordingFormat(format: MeetingRecordingSnapshot["recordingFormat
   if (format === "Wav") return "WAV"
   if (format === "Mp3") return "MP3"
   return "AAC/M4A"
+}
+
+function formatRecordingStateLabel(recording: MeetingRecordingSnapshot): string {
+  if (recording.state === "Stopping") return "Finalizing recording..."
+  if (recording.state === "TranscriptReady") return "Transcription completed"
+  if (recording.state === "Failed") {
+    if (recording.lastError.toLowerCase().includes("cancel")) {
+      return recording.hasTranscript ? "Analysis cancelled" : "Transcription cancelled"
+    }
+    return recording.hasTranscript ? "Analysis failed - Retry" : "Transcription failed - Retry"
+  }
+  return recording.state
 }
 
 function formatDuration(seconds: number): string {

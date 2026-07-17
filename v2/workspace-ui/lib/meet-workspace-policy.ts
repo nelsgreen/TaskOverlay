@@ -28,13 +28,16 @@ export function selectActiveMeetingTranscript<
 }
 
 export function selectLatestTranscriptAnalysis<
-  T extends { transcriptId: string; updatedAtUtc: string },
+  T extends { transcriptId: string; updatedAtUtc: string; state?: string },
 >(transcriptId: string | undefined, analyses: readonly T[]): T | null {
   if (!transcriptId) return null
   return (
     analyses
       .filter((analysis) => analysis.transcriptId === transcriptId)
-      .sort((left, right) => right.updatedAtUtc.localeCompare(left.updatedAtUtc))[0] ?? null
+      .sort((left, right) => {
+        const failureOrder = Number(left.state === "Failed") - Number(right.state === "Failed")
+        return failureOrder || right.updatedAtUtc.localeCompare(left.updatedAtUtc)
+      })[0] ?? null
   )
 }
 

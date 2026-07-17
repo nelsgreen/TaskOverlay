@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -28,6 +29,8 @@ public partial class WorkspaceWindow : Window
         _meetingTranscriptLoader;
     private readonly Func<MeetingScreenshot, string?>? _screenshotThumbnailLoader;
     private readonly Func<MeetingRecordingPolicy>? _defaultRecordingPolicyLoader;
+    private readonly Func<IReadOnlyList<WorkspaceMeetingOperationSnapshot>>?
+        _meetingOperationLoader;
     private bool _initialized;
 
     public WorkspaceWindow(
@@ -42,7 +45,8 @@ public partial class WorkspaceWindow : Window
         Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>?
             meetingTranscriptLoader = null,
         Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null,
-        Func<MeetingRecordingPolicy>? defaultRecordingPolicyLoader = null)
+        Func<MeetingRecordingPolicy>? defaultRecordingPolicyLoader = null,
+        Func<IReadOnlyList<WorkspaceMeetingOperationSnapshot>>? meetingOperationLoader = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _diagnostic = diagnostic;
@@ -57,6 +61,7 @@ public partial class WorkspaceWindow : Window
         _meetingTranscriptLoader = meetingTranscriptLoader;
         _screenshotThumbnailLoader = screenshotThumbnailLoader;
         _defaultRecordingPolicyLoader = defaultRecordingPolicyLoader;
+        _meetingOperationLoader = meetingOperationLoader;
         InitializeComponent();
     }
 
@@ -259,7 +264,8 @@ public partial class WorkspaceWindow : Window
             meetingTranscriptLoader: _meetingTranscriptLoader,
             screenshotThumbnailLoader: _screenshotThumbnailLoader,
             defaultMeetingRecordingPolicy: _defaultRecordingPolicyLoader?.Invoke() ??
-                                           MeetingRecordingPolicy.Manual);
+                                           MeetingRecordingPolicy.Manual,
+            meetingOperations: _meetingOperationLoader?.Invoke());
         SendMessage(snapshot);
     }
 

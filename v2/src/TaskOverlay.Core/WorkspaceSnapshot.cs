@@ -17,6 +17,7 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceMeetingTranscriptSnapshot> MeetingTranscripts,
     IReadOnlyList<WorkspaceMeetingScreenshotSnapshot> MeetingScreenshots,
     IReadOnlyList<WorkspaceMeetingAnalysisSnapshot> MeetingAnalyses,
+    IReadOnlyList<WorkspaceMeetingOperationSnapshot> MeetingOperations,
     string? ActiveMeetingRecordingId,
     string DefaultMeetingRecordingPolicy,
     IReadOnlyList<WorkspaceContextSourceSnapshot> ContextSources,
@@ -232,6 +233,16 @@ public sealed record WorkspaceMeetingAnalysisSnapshot(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
 
+public sealed record WorkspaceMeetingOperationSnapshot(
+    string Id,
+    string Kind,
+    string Stage,
+    string? MeetingId,
+    string? RecordingId,
+    string? TranscriptId,
+    DateTimeOffset StartedAtUtc,
+    bool CancellationRequested);
+
 public sealed record WorkspaceMeetingSourceReferenceSnapshot(
     double? StartSeconds,
     double? EndSeconds,
@@ -301,7 +312,7 @@ public sealed record WorkspaceTimelineItemSnapshot(
 
 public static class WorkspaceSnapshotFactory
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
     public const string ReadOnlyMode = "readonly";
     public const string ConnectedMode = "connected";
 
@@ -313,7 +324,8 @@ public static class WorkspaceSnapshotFactory
         Guid? activeMeetingRecordingId = null,
         Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>? meetingTranscriptLoader = null,
         Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null,
-        MeetingRecordingPolicy defaultMeetingRecordingPolicy = MeetingRecordingPolicy.Manual)
+        MeetingRecordingPolicy defaultMeetingRecordingPolicy = MeetingRecordingPolicy.Manual,
+        IReadOnlyList<WorkspaceMeetingOperationSnapshot>? meetingOperations = null)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -781,6 +793,7 @@ public static class WorkspaceSnapshotFactory
             transcripts,
             screenshots,
             analyses,
+            meetingOperations ?? Array.Empty<WorkspaceMeetingOperationSnapshot>(),
             runtimeActiveRecordingId is Guid recordingId
                 ? FormatId(recordingId)
                 : null,

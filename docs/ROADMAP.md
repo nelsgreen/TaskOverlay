@@ -99,7 +99,11 @@ never a direct mutation without explicit user confirmation (see DECISIONS
 11. Managed M4A/WAV/MP3 import, non-destructive processing ranges, TXT/MD/SRT/
     VTT transcript versions, explicit active transcript, revision-bound stale
     analysis, and manual timestamped screenshots - implemented.
-12. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
+12. Shared authoritative long-running operation feedback is implemented for
+    transcription and analysis: immediate duplicate-click protection,
+    indeterminate stage/elapsed feedback across Sources and Review, and
+    cancellation/failure reconciliation without persisted fake runtime state.
+13. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
     loss, device recovery, retention, transcript search/editor actions,
     ContextHUB promotion, Meeting Brief, user speaker identification,
     OCR/multimodal review, and additional/local providers.

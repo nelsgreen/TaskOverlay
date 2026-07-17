@@ -119,11 +119,7 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
                         commandId,
                         payload,
                         cancellationToken),
-                    "cancelMeetingProcessing" => WithRecording(
-                        commandId,
-                        payload,
-                        _coordinator.CancelProcessing,
-                        "Processing operation is not active."),
+                    "cancelMeetingProcessing" => CancelProcessing(commandId, payload),
                     "setMeetingRecordingPolicy" => SetPolicy(commandId, payload),
                     "setMeetingRecordingFormat" => SetRecordingFormat(commandId, payload),
                     "setMeetingRecordingLocalOnly" => WithRecording(
@@ -410,6 +406,23 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
         return operation(transcriptId)
             ? WorkspaceCommandResult.Succeeded(commandId)
             : WorkspaceCommandResult.Failed(commandId, "mutationRejected", error);
+    }
+
+    private WorkspaceCommandResult CancelProcessing(string commandId, JsonElement payload)
+    {
+        Guid targetId;
+        if (!TryReadGuid(payload, "recordingId", out targetId) &&
+            !TryReadGuid(payload, "transcriptId", out targetId))
+        {
+            return Invalid(commandId, "A valid recordingId or transcriptId is required.");
+        }
+
+        return _coordinator.CancelProcessing(targetId)
+            ? WorkspaceCommandResult.Succeeded(commandId)
+            : WorkspaceCommandResult.Failed(
+                commandId,
+                "mutationRejected",
+                "Processing operation is not active.");
     }
 
     private static WorkspaceCommandResult WithScreenshot(

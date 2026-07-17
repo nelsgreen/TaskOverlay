@@ -49,11 +49,13 @@ internal static class Program
             ("transcription multipart uploads exact mixed bytes", TranscriptionMultipartUploadsExactMixedBytes),
             ("transcription multipart configures diarization models", TranscriptionMultipartConfiguresDiarizationModels),
             ("transcription targets selected recording and snapshot", TranscriptionTargetsSelectedRecordingAndSnapshot),
+            ("transcription publishes indeterminate runtime stage", TranscriptionPublishesIndeterminateRuntimeStage),
             ("transcription retry clears stale artifacts", TranscriptionRetryClearsStaleArtifacts),
             ("compact transcription rejects missing mixed track", CompactTranscriptionRejectsMissingMixedTrack),
             ("oversized compact chunks derive from mixed track", OversizedCompactChunksDeriveFromMixedTrack),
             ("imported audio is managed and range bounded", ImportedAudioIsManagedAndRangeBounded),
             ("meeting source commands persist and refresh", MeetingSourceCommandsPersistAndRefresh),
+            ("meeting analysis runtime state is shared and cancellable", MeetingAnalysisRuntimeStateIsSharedAndCancellable),
             ("recording format setting is local and defaults compact", RecordingFormatSettingIsLocalAndDefaultsCompact),
             ("legacy WAV migration and interrupted recovery are idempotent", LegacyWavMigrationAndInterruptedRecoveryAreIdempotent)
         };
@@ -1300,6 +1302,37 @@ internal static class Program
         }
     }
 
+    private static async Task TranscriptionPublishesIndeterminateRuntimeStage()
+    {
+        await using var fixture = new TranscriptionFixture();
+        var recording = fixture.AddRecordedWav("long-transcription", 550);
+        var providerStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var releaseProvider = new ManualResetEventSlim(false);
+        fixture.Provider.BeforeTranscribe = () =>
+        {
+            providerStarted.TrySetResult();
+            releaseProvider.Wait();
+        };
+
+        var running = Task.Run(() => fixture.SendAsync(recording.Id));
+        await providerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var operation = fixture.Coordinator.ProcessingOperations.Single();
+        Assert(operation.Kind == "Transcription" &&
+               operation.Stage == "Transcribing" &&
+               operation.RecordingId == recording.Id.ToString("N") &&
+               operation.StartedAtUtc <= DateTimeOffset.UtcNow,
+            "Long transcription must publish its real indeterminate stage and start time.");
+
+        var duplicate = await fixture.SendAsync(recording.Id);
+        Assert(!duplicate.Success && fixture.Provider.Requests.Count == 0,
+            "A duplicate transcription must be rejected before another provider request starts.");
+        releaseProvider.Set();
+        var completed = await running;
+        Assert(completed.Success && fixture.Coordinator.ProcessingOperations.Count == 0,
+            "Successful transcription must clear its transient runtime operation.");
+    }
+
     private static async Task ImportedAudioIsManagedAndRangeBounded()
     {
         var importDirectory = CreateTemporaryDirectory();
@@ -1499,6 +1532,69 @@ internal static class Program
                    transcript.RevisionId.ToString("N") &&
                    snapshot.MeetingScreenshots.All(item => item.IsAvailable),
                 "A fresh connected snapshot should expose all newly saved MEET sources immediately.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(importDirectory);
+        }
+    }
+
+    private static async Task MeetingAnalysisRuntimeStateIsSharedAndCancellable()
+    {
+        var importDirectory = CreateTemporaryDirectory();
+        try
+        {
+            var transcriptPath = Path.Combine(importDirectory, "runtime-state.srt");
+            File.WriteAllText(
+                transcriptPath,
+                "1\n00:00:01,000 --> 00:00:02,000\nA: Shared operation state\n");
+            var interaction = new FakeMeetingSourceInteraction { TranscriptPath = transcriptPath };
+            var provider = new BlockingAnalysisProvider();
+            await using var fixture = new TranscriptionFixture(interaction, provider);
+            var import = await fixture.SendCommandAsync(
+                "importMeetingTranscript",
+                new
+                {
+                    meetingId = fixture.Meeting.Id.ToString("N"),
+                    sourceLabel = "Imported phone recording"
+                });
+            Assert(import.Success, import.ErrorMessage ?? "Transcript import failed.");
+            var transcript = fixture.State.MeetingTranscripts.Single();
+
+            var running = fixture.SendCommandAsync(
+                "analyzeMeetingTranscript",
+                new { transcriptId = transcript.Id.ToString("N") });
+            await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var operation = fixture.Coordinator.ProcessingOperations.Single();
+            Assert(operation.Kind == "Analysis" &&
+                   operation.Stage == "Analyzing" &&
+                   operation.TranscriptId == transcript.Id.ToString("N") &&
+                   operation.RecordingId is null,
+                "Imported transcript analysis must expose authoritative runtime state without a recording.");
+            var snapshot = WorkspaceSnapshotFactory.Create(
+                fixture.State,
+                mode: WorkspaceSnapshotFactory.ConnectedMode,
+                meetingOperations: fixture.Coordinator.ProcessingOperations);
+            Assert(snapshot.MeetingOperations.Single().TranscriptId == transcript.Id.ToString("N"),
+                "Workspace snapshot must publish the same running transcript operation.");
+
+            var duplicate = await fixture.SendCommandAsync(
+                "analyzeMeetingTranscript",
+                new { transcriptId = transcript.Id.ToString("N") });
+            Assert(!duplicate.Success && provider.RequestCount == 1 &&
+                   duplicate.ErrorMessage?.Contains("already has", StringComparison.OrdinalIgnoreCase) == true,
+                "Coordinator must reject a duplicate provider request for the same transcript.");
+
+            var cancel = await fixture.SendCommandAsync(
+                "cancelMeetingProcessing",
+                new { transcriptId = transcript.Id.ToString("N") });
+            Assert(cancel.Success, cancel.ErrorMessage ?? "Transcript cancellation failed.");
+            var cancelled = await running;
+            Assert(!cancelled.Success &&
+                   fixture.Coordinator.ProcessingOperations.Count == 0 &&
+                   fixture.State.MeetingTranscripts.Single().Id == transcript.Id,
+                "Cancellation must clear runtime state while preserving the imported transcript.");
         }
         finally
         {
@@ -1976,6 +2072,24 @@ internal static class Program
             return Task.FromResult(new MeetingAnalysisProviderResponse(
                 "{\"summary\":\"Synthetic source analysis\"}",
                 analysis));
+        }
+    }
+
+    private sealed class BlockingAnalysisProvider : IMeetingAnalysisProvider
+    {
+        public string Name => "blocking-analysis";
+        public TaskCompletionSource Started { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        public int RequestCount { get; private set; }
+
+        public async Task<MeetingAnalysisProviderResponse> AnalyzeAsync(
+            MeetingAnalysisProviderRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            RequestCount++;
+            Started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Unreachable blocking provider completion.");
         }
     }
 

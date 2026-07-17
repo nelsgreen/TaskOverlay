@@ -193,6 +193,15 @@ item.
 - Transcription and structured meeting analysis use provider interfaces.
   ProposedActions never mutate state directly: the user reviews and selects
   actions, and apply routes through existing TaskOverlay domain services.
+- Long-running transcription and analysis expose one transient coordinator
+  operation through the Workspace snapshot. React may add an immediate
+  optimistic lock for first-click feedback, but reconciles it with that
+  authoritative runtime operation; transient work is never persisted as
+  running across process restart. Duplicate protection remains at both UI and
+  coordinator boundaries.
+- Provider progress is indeterminate unless the provider supplies real
+  progress. TaskOverlay may show reliable stages and elapsed time, but never a
+  fabricated percentage.
 - Recurrence, calendar sync, live transcription, direct meeting-platform APIs,
   and automatic action application remain later features.
 - No embedded ChatGPT window inside the app.

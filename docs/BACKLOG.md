@@ -543,6 +543,10 @@ Product direction:
     imported/provider artifacts remain unchanged;
   - changing a transcript revision marks prior analysis stale and requires an
     explicit re-run.
+  - long-running transcription/analysis has shared authoritative runtime state
+    across Sources and Review, immediate duplicate-click protection,
+    indeterminate stage and elapsed-time feedback, and explicit
+    cancellation/failure cleanup. Provider percentages are not fabricated.
 - Recurrence, calendar sync, direct meeting-platform APIs, and live
   transcription remain later work.
 - Handle next MEET countdown.
@@ -555,6 +559,16 @@ Product direction:
   - transcript editor actions: rename speaker globally, mark speaker as You,
     merge speakers, edit individual segments, and explicitly re-run stale
     analysis after transcript edits;
+  - editable transcript as a working document, timestamp-to-source-audio
+    playback, and user-created transcript revisions;
+  - Russian-first transcription with project glossary/technical anglicisms;
+    AI cleanup must create a reviewable revision, never silently replace text;
+  - analysis prompt enrichment from the MEET project and approved ContextHUB
+    context;
+  - human-readable Proposed Action labels, calibrated-or-hidden confidence,
+    inherited project name instead of `MEET project`, simpler Review scrolling,
+    readable 11-12px metadata, and human-readable mm:ss processing ranges;
+  - visual MEET migration remains a separate UI project;
   - user speaker identification and known-speaker samples;
   - AI-proposed ContextItem candidates with explicit review, Meeting Brief,
     overlay meeting mode, and live transcription/copilot;

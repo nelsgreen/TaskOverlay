@@ -4422,7 +4422,9 @@ internal static class Program
         var waitingSnapshot = snapshot.Tasks.Single(task =>
             task.Id == waiting.Id.ToString("N"));
 
-        Assert(snapshot.SchemaVersion == 4, "Workspace contract version should be 4.");
+        Assert(snapshot.SchemaVersion == 5, "Workspace contract version should be 5.");
+        Assert(snapshot.MeetingOperations.Count == 0,
+            "A fresh snapshot must not claim transient MEET operations survive startup.");
         Assert(snapshot.Mode == "readonly", "Workspace contract should be read-only.");
         Assert(
             WorkspaceSnapshotFactory.Create(
@@ -4456,7 +4458,7 @@ internal static class Program
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
         var document = JsonDocument.Parse(json);
-        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 4,
+        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 5,
             "Serialized workspace contract should use camelCase fields.");
         Assert(document.RootElement.GetProperty("mode").GetString() == "readonly",
             "Serialized workspace contract mode mismatch.");
@@ -7774,10 +7776,10 @@ internal static class Program
         Assert(migrated.Meetings.Single().Id == meeting.Id,
             "Migration must preserve existing MEET data.");
         var snapshot = WorkspaceSnapshotFactory.Create(migrated, now);
-        Assert(snapshot.SchemaVersion == 4 &&
+        Assert(snapshot.SchemaVersion == 5 &&
                snapshot.MeetingRecordings.Count == 0 &&
                snapshot.MeetingAnalyses.Count == 0,
-            "Old states should produce a valid schema 4 Workspace snapshot.");
+            "Old states should produce a valid schema 5 Workspace snapshot.");
     }
 
     private static void MeetingAssistantPersistenceRoundtrip()

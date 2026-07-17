@@ -38,6 +38,14 @@ test("review analysis remains scoped to the selected transcript revision history
   assert.equal(selectLatestTranscriptAnalysis(undefined, analyses), null)
 })
 
+test("failed re-analysis does not hide the previous successful result", () => {
+  const analyses = [
+    { id: "ready", transcriptId: "transcript-a", state: "ReadyForReview", updatedAtUtc: "2026-07-16T10:00:00Z" },
+    { id: "failed", transcriptId: "transcript-a", state: "Failed", updatedAtUtc: "2026-07-16T11:00:00Z" },
+  ]
+  assert.equal(selectLatestTranscriptAnalysis("transcript-a", analyses)?.id, "ready")
+})
+
 test("MEET screenshot references are filtered and chronological", () => {
   const screenshots = [
     { id: "late", meetingId: "meet-a", capturedAtUtc: "2026-07-16T12:03:00Z" },

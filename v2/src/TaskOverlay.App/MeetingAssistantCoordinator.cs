@@ -45,7 +45,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     private readonly ITranscriptionProvider _transcriptionProvider;
     private readonly IMeetingAnalysisProvider _analysisProvider;
     private readonly SemaphoreSlim _recordingGate = new(1, 1);
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _processing = new();
+    private readonly ConcurrentDictionary<Guid, ProcessingOperation> _processing = new();
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -89,6 +89,11 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
     public string RecordingsRoot => _storage.RootDirectory;
     public MeetingRecorderRuntimeStatus RuntimeStatus => _recorder.Status;
+    public IReadOnlyList<WorkspaceMeetingOperationSnapshot> ProcessingOperations =>
+        _processing.Values
+            .OrderBy(operation => operation.StartedAtUtc)
+            .Select(operation => operation.ToSnapshot())
+            .ToList();
     public IReadOnlyList<AudioDeviceDescriptor> MicrophoneDevices =>
         _recorder.GetMicrophoneDevices();
     public IReadOnlyList<AudioDeviceDescriptor> SystemOutputDevices =>
@@ -427,24 +432,22 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             _persistLocalSettings();
         }
 
-        if (!_processing.TryAdd(
-                recordingId,
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)))
+        var service = new MeetingRecordingService(_state);
+        var recording = service.Find(recordingId);
+        if (recording is null)
+        {
+            return MeetingAssistantOperationResult.Fail("Recording was not found.");
+        }
+
+        var processingOperation = ProcessingOperation.ForTranscription(recording, cancellationToken);
+        if (!_processing.TryAdd(recordingId, processingOperation))
         {
             return MeetingAssistantOperationResult.Fail(
                 "This recording already has a processing operation in progress.");
         }
 
-        var operation = _processing[recordingId];
-        var token = operation.Token;
-        var service = new MeetingRecordingService(_state);
-        var recording = service.Find(recordingId);
-        if (recording is null)
-        {
-            CompleteProcessing(recordingId);
-            return MeetingAssistantOperationResult.Fail("Recording was not found.");
-        }
-
+        _stateChanged();
+        var token = processingOperation.Cancellation.Token;
         try
         {
             Report(
@@ -517,6 +520,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 .Where(path => path is not null)
                 .Cast<string>()
                 .ToList();
+            UpdateProcessingStage(recordingId, "Transcribing");
             Persist(recording);
 
             var chunkFingerprints = new List<TranscriptionAudioFingerprint>();
@@ -554,6 +558,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 responses.Add(response);
                 offset += chunk.Duration;
             }
+            token.ThrowIfCancellationRequested();
 
             var transcriptId = Guid.NewGuid();
             var transcriptRevisionId = Guid.NewGuid();
@@ -684,15 +689,16 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             return MeetingAssistantOperationResult.Fail("Transcript was not found.");
         }
 
-        if (!_processing.TryAdd(
-                transcriptId,
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)))
+        var processingOperation = ProcessingOperation.ForAnalysis(
+            transcriptMetadata,
+            cancellationToken);
+        if (!_processing.TryAdd(transcriptId, processingOperation))
         {
             return MeetingAssistantOperationResult.Fail(
                 "This transcript already has an analysis operation in progress.");
         }
 
-        var operation = _processing[transcriptId];
+        _stateChanged();
         var recording = transcriptMetadata.RecordingId is Guid recordingId
             ? new MeetingRecordingService(_state).Find(recordingId)
             : null;
@@ -740,7 +746,8 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                     meeting?.Title ?? "Emergency recording",
                     transcript,
                     _localSettings.MeetingAssistant.AnalysisModel),
-                operation.Token);
+                processingOperation.Cancellation.Token);
+            processingOperation.Cancellation.Token.ThrowIfCancellationRequested();
             _state.MeetingAnalyses.RemoveAll(analysis =>
                 analysis.TranscriptId == transcriptId &&
                 analysis.State == MeetingAnalysisState.Failed);
@@ -1249,7 +1256,8 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     {
         var service = new MeetingRecordingService(_state);
         var recording = service.Find(recordingId);
-        if (recording is null || recording.IsActive || _processing.ContainsKey(recordingId))
+        if (recording is null || recording.IsActive || _processing.Values.Any(operation =>
+                operation.RecordingId == recordingId))
         {
             return false;
         }
@@ -1264,10 +1272,21 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         return true;
     }
 
-    public bool CancelProcessing(Guid recordingId)
+    public bool CancelProcessing(Guid targetId)
     {
-        return _processing.TryGetValue(recordingId, out var cancellation) &&
-               TryCancel(cancellation);
+        var match = _processing.FirstOrDefault(pair =>
+            pair.Key == targetId ||
+            pair.Value.RecordingId == targetId ||
+            pair.Value.TranscriptId == targetId);
+        if (match.Value is null || !TryCancel(match.Value.Cancellation))
+        {
+            return false;
+        }
+
+        match.Value.Stage = "Cancelling";
+        match.Value.CancellationRequested = true;
+        _stateChanged();
+        return true;
     }
 
     public bool OpenRecordingFolder(Guid recordingId)
@@ -1304,7 +1323,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     {
         foreach (var operation in _processing.Values)
         {
-            TryCancel(operation);
+            TryCancel(operation.Cancellation);
         }
 
         if (_recorder.Status.RecordingId is Guid activeRecordingId)
@@ -1320,7 +1339,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     {
         foreach (var operation in _processing.Values)
         {
-            TryCancel(operation);
+            TryCancel(operation.Cancellation);
         }
 
         await _recorder.DisposeAsync();
@@ -1855,12 +1874,86 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         _storage.WriteJsonAtomic(LayoutFor(recording).AnalysisPath, new { analysis });
     }
 
+    private void UpdateProcessingStage(Guid operationId, string stage)
+    {
+        if (_processing.TryGetValue(operationId, out var operation))
+        {
+            operation.Stage = stage;
+            _stateChanged();
+        }
+    }
+
     private void CompleteProcessing(Guid recordingId)
     {
-        if (_processing.TryRemove(recordingId, out var cancellation))
+        if (_processing.TryRemove(recordingId, out var operation))
         {
-            cancellation.Dispose();
+            operation.Cancellation.Dispose();
+            _stateChanged();
         }
+    }
+
+    private sealed class ProcessingOperation
+    {
+        private ProcessingOperation(
+            Guid id,
+            string kind,
+            string stage,
+            Guid? meetingId,
+            Guid? recordingId,
+            Guid? transcriptId,
+            CancellationToken cancellationToken)
+        {
+            Id = id;
+            Kind = kind;
+            Stage = stage;
+            MeetingId = meetingId;
+            RecordingId = recordingId;
+            TranscriptId = transcriptId;
+            StartedAtUtc = DateTimeOffset.UtcNow;
+            Cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        }
+
+        public Guid Id { get; }
+        public string Kind { get; }
+        public string Stage { get; set; }
+        public Guid? MeetingId { get; }
+        public Guid? RecordingId { get; }
+        public Guid? TranscriptId { get; }
+        public DateTimeOffset StartedAtUtc { get; }
+        public bool CancellationRequested { get; set; }
+        public CancellationTokenSource Cancellation { get; }
+
+        public static ProcessingOperation ForTranscription(
+            MeetingRecording recording,
+            CancellationToken cancellationToken) => new(
+                recording.Id,
+                "Transcription",
+                "PreparingAudio",
+                recording.MeetId,
+                recording.Id,
+                null,
+                cancellationToken);
+
+        public static ProcessingOperation ForAnalysis(
+            MeetingTranscript transcript,
+            CancellationToken cancellationToken) => new(
+                transcript.Id,
+                "Analysis",
+                "Analyzing",
+                transcript.MeetId,
+                transcript.RecordingId,
+                transcript.Id,
+                cancellationToken);
+
+        public WorkspaceMeetingOperationSnapshot ToSnapshot() => new(
+            Id.ToString("N"),
+            Kind,
+            Stage,
+            MeetingId?.ToString("N"),
+            RecordingId?.ToString("N"),
+            TranscriptId?.ToString("N"),
+            StartedAtUtc,
+            CancellationRequested);
     }
 
     private static NormalizedTranscript ComposeTranscript(

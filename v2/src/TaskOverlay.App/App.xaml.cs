@@ -1172,7 +1172,10 @@ public partial class App : System.Windows.Application
                     : screenshot =>
                         _meetingAssistantCoordinator.LoadScreenshotThumbnailDataUrl(screenshot),
                 () => _localSettings?.MeetingAssistant.DefaultRecordingPolicy ??
-                      MeetingRecordingPolicy.Manual);
+                      MeetingRecordingPolicy.Manual,
+                _meetingAssistantCoordinator is null
+                    ? null
+                    : () => _meetingAssistantCoordinator.ProcessingOperations);
             _workspaceWindow.Closed += WorkspaceWindow_OnClosed;
         }
 

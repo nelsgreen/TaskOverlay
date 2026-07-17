@@ -6,6 +6,7 @@ import type {
   MeetDuration,
   MeetItem,
   MeetingAnalysisSnapshot,
+  MeetingOperationSnapshot,
   MeetingRecordingPolicy,
   MeetingRecordingSnapshot,
   MeetingScreenshotSnapshot,
@@ -66,6 +67,7 @@ interface Props {
   meetingTranscripts?: MeetingTranscriptSnapshot[]
   meetingScreenshots?: MeetingScreenshotSnapshot[]
   meetingAnalyses?: MeetingAnalysisSnapshot[]
+  meetingOperations?: MeetingOperationSnapshot[]
   activeRecording?: MeetingRecordingSnapshot | null
   activeRecordingOwnerTitle?: string
   meetingAssistantError?: string | null
@@ -148,6 +150,7 @@ export function MeetDetailsModal({
   meetingTranscripts = [],
   meetingScreenshots = [],
   meetingAnalyses = [],
+  meetingOperations = [],
   activeRecording = null,
   activeRecordingOwnerTitle,
   meetingAssistantError = null,
@@ -645,6 +648,7 @@ export function MeetDetailsModal({
           transcripts={meetingTranscripts}
           screenshots={meetingScreenshots}
           analyses={meetingAnalyses}
+          operations={meetingOperations}
           activeRecording={activeRecording}
           activeRecordingOwnerTitle={activeRecordingOwnerTitle}
           readOnly={readOnly}
@@ -669,9 +673,12 @@ export function MeetDetailsModal({
           transcripts={meetingTranscripts}
           screenshots={meetingScreenshots}
           analyses={meetingAnalyses}
+          operations={meetingOperations}
           activeRecording={activeRecording}
           activeRecordingOwnerTitle={activeRecordingOwnerTitle}
           readOnly={readOnly}
+          commandError={meetingAssistantError}
+          onClearError={onClearMeetingAssistantError}
           onCommand={onMeetingAssistantCommand ? sendMeetingAssistantCommand : undefined}
         />
       )}

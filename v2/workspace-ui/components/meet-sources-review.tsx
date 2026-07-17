@@ -1,5 +1,7 @@
 "use client"
 
+import { useEffect, useState } from "react"
+
 import {
   Bot,
   Camera,
@@ -9,13 +11,16 @@ import {
   FileAudio,
   FileText,
   Image as ImageIcon,
+  LoaderCircle,
   Sparkles,
   Trash2,
   Upload,
+  X,
 } from "lucide-react"
 import type {
   MeetItem,
   MeetingAnalysisSnapshot,
+  MeetingOperationSnapshot,
   MeetingRecordingPolicy,
   MeetingRecordingSnapshot,
   MeetingScreenshotSnapshot,
@@ -38,6 +43,7 @@ interface SharedProps {
   transcripts: MeetingTranscriptSnapshot[]
   screenshots: MeetingScreenshotSnapshot[]
   analyses: MeetingAnalysisSnapshot[]
+  operations: MeetingOperationSnapshot[]
   activeRecording: MeetingRecordingSnapshot | null
   activeRecordingOwnerTitle?: string
   readOnly: boolean
@@ -56,6 +62,7 @@ export function MeetingSourcesWorkspace({
   transcripts,
   screenshots,
   analyses,
+  operations,
   activeRecording,
   activeRecordingOwnerTitle,
   readOnly,
@@ -111,6 +118,7 @@ export function MeetingSourcesWorkspace({
             projects={projects}
             recordings={recordings}
             analyses={analyses}
+            operations={operations}
             unclassifiedRecordings={recordings.filter((recording) => !recording.meetingId)}
             activeRecording={activeRecording}
             activeRecordingOwnerTitle={activeRecordingOwnerTitle}
@@ -141,6 +149,7 @@ export function MeetingSourcesWorkspace({
               transcript={transcript}
               readOnly={readOnly}
               send={send}
+              operations={operations}
             />
           ))}
         </section>
@@ -177,7 +186,10 @@ export function MeetingReviewWorkspace({
   transcripts,
   screenshots,
   analyses,
+  operations,
   readOnly,
+  commandError,
+  onClearError,
   onCommand,
 }: SharedProps) {
   const activeTranscript = selectActiveMeetingTranscript(
@@ -187,6 +199,18 @@ export function MeetingReviewWorkspace({
   )
   const selectedAnalysis = selectLatestTranscriptAnalysis(activeTranscript?.id, analyses)
   const meetScreenshots = sortMeetingScreenshots(meet.id, screenshots)
+  const latestFailure = activeTranscript
+    ? analyses
+        .filter((analysis) => analysis.transcriptId === activeTranscript.id && analysis.state === "Failed")
+        .sort((left, right) => right.updatedAtUtc.localeCompare(left.updatedAtUtc))[0]
+    : undefined
+  const hasCurrentFailure = Boolean(latestFailure &&
+    (!selectedAnalysis || latestFailure.updatedAtUtc > selectedAnalysis.updatedAtUtc))
+  const analysisOperation = activeTranscript
+    ? operations.find((operation) => operation.kind === "Analysis" &&
+        (operation.transcriptId === activeTranscript.id ||
+         (activeTranscript.recordingId && operation.recordingId === activeTranscript.recordingId)))
+    : undefined
   const send = (command: WorkspaceMeetingAssistantCommand) => onCommand?.(command) ?? false
 
   return (
@@ -241,6 +265,18 @@ export function MeetingReviewWorkspace({
 
         <div className="min-w-0 space-y-3">
           <section className="space-y-2 rounded-lg border border-border bg-card/40 p-3">
+            {(commandError || hasCurrentFailure) && !analysisOperation && (
+              <div className="flex items-start gap-2 rounded border border-destructive/30 bg-destructive/10 p-2 text-[10px] text-destructive">
+                <span className="min-w-0 flex-1">
+                  {commandError ?? latestFailure?.lastError ?? "Analysis failed. Retry when ready."}
+                </span>
+                {commandError && onClearError && (
+                  <button type="button" onClick={onClearError} aria-label="Dismiss analysis error">
+                    <X className="size-3" />
+                  </button>
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <Bot className="size-4 text-status-meet" />
               <h3 className="text-[11px] font-bold uppercase tracking-widest text-foreground">
@@ -252,24 +288,47 @@ export function MeetingReviewWorkspace({
                 </span>
               )}
               {activeTranscript && onCommand && (
-                <button
-                  type="button"
-                  disabled={readOnly}
-                  onClick={() => send({ type: "analyzeMeetingTranscript", transcriptId: activeTranscript.id })}
-                  className="ml-auto flex h-7 items-center gap-1 rounded border border-status-meet/40 bg-status-meet/10 px-2 text-[10px] font-medium text-status-meet disabled:opacity-40"
-                >
-                  <Sparkles className="size-3" />
-                  {selectedAnalysis ? "Re-run analysis" : "Analyze transcript"}
-                </button>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={readOnly || Boolean(analysisOperation)}
+                    aria-busy={Boolean(analysisOperation)}
+                    onClick={() => send({ type: "analyzeMeetingTranscript", transcriptId: activeTranscript.id })}
+                    className="flex h-7 items-center gap-1 rounded border border-status-meet/40 bg-status-meet/10 px-2 text-[10px] font-medium text-status-meet disabled:opacity-40"
+                  >
+                    {analysisOperation
+                      ? <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                      : <Sparkles className="size-3" />}
+                    {analysisOperation ? "Analyzing..." : hasCurrentFailure ? "Retry analysis" : selectedAnalysis ? "Re-run analysis" : "Analyze transcript"}
+                  </button>
+                  {analysisOperation && (
+                    <button
+                      type="button"
+                      disabled={analysisOperation.stage === "Cancelling"}
+                      onClick={() => send({ type: "cancelMeetingProcessing", transcriptId: activeTranscript.id })}
+                      className="flex h-7 items-center gap-1 rounded border border-border px-2 text-[10px] text-muted-foreground disabled:opacity-40"
+                    >
+                      <X className="size-3" />
+                      {analysisOperation.stage === "Cancelling" ? "Cancelling..." : "Cancel"}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
             {selectedAnalysis ? (
-              <AnalysisReview
-                analysis={selectedAnalysis}
-                projects={projects}
-                readOnly={readOnly}
-                send={send}
-              />
+              <>
+                {analysisOperation && (
+                  <OperationStatus operation={analysisOperation} message="A new analysis is running. The current result remains available until it completes." />
+                )}
+                <AnalysisReview
+                  analysis={selectedAnalysis}
+                  projects={projects}
+                  readOnly={readOnly}
+                  send={send}
+                />
+              </>
+            ) : analysisOperation ? (
+              <OperationStatus operation={analysisOperation} message="Analyzing transcript..." />
             ) : (
               <EmptySource text={activeTranscript
                 ? "No analysis exists for this transcript version."
@@ -319,12 +378,17 @@ function TranscriptSourceCard({
   transcript,
   readOnly,
   send,
+  operations,
 }: {
   meet: MeetItem
   transcript: MeetingTranscriptSnapshot
   readOnly: boolean
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
+  operations: MeetingOperationSnapshot[]
 }) {
+  const analysisOperation = operations.find((operation) => operation.kind === "Analysis" &&
+    (operation.transcriptId === transcript.id ||
+     (transcript.recordingId && operation.recordingId === transcript.recordingId)))
   return (
     <div className={cn(
       "space-y-2 rounded-md border bg-background/50 p-2.5",
@@ -378,11 +442,20 @@ function TranscriptSourceCard({
           />
         )}
         <SourceAction
-          label="Analyze"
+          label={analysisOperation ? "Analyzing..." : "Analyze"}
           icon={Sparkles}
-          disabled={readOnly}
+          disabled={readOnly || Boolean(analysisOperation)}
+          busy={Boolean(analysisOperation)}
           onClick={() => send({ type: "analyzeMeetingTranscript", transcriptId: transcript.id })}
         />
+        {analysisOperation && (
+          <SourceAction
+            label={analysisOperation.stage === "Cancelling" ? "Cancelling..." : "Cancel"}
+            icon={X}
+            disabled={analysisOperation.stage === "Cancelling"}
+            onClick={() => send({ type: "cancelMeetingProcessing", transcriptId: transcript.id })}
+          />
+        )}
         {transcript.originalAvailable && (
           <SourceAction
             label="Open original"
@@ -562,23 +635,67 @@ function EmptySource({ text }: { text: string }) {
   )
 }
 
+function OperationStatus({
+  operation,
+  message,
+}: {
+  operation: MeetingOperationSnapshot
+  message: string
+}) {
+  const [elapsed, setElapsed] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setElapsed(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [operation.id])
+  const seconds = Math.max(0, Math.floor((elapsed - Date.parse(operation.startedAtUtc)) / 1_000))
+  const status = operation.stage === "StartingAnalysis" ? "Starting analysis..."
+    : operation.stage === "StartingTranscription" ? "Starting transcription..."
+    : operation.stage === "PreparingAudio" ? "Preparing audio..."
+    : operation.stage === "Transcribing" ? "Transcribing..."
+    : operation.stage === "Cancelling" ? "Cancelling..."
+    : "Analyzing transcript..."
+  return (
+    <div
+      className="space-y-1.5 rounded-md border border-status-meet/30 bg-status-meet/10 p-3 text-[11px]"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div className="flex items-center gap-2 font-medium text-status-meet">
+        <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        <span>{status}</span>
+        <span className="ml-auto font-mono text-[10px]" aria-hidden="true">
+          {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
+        </span>
+      </div>
+      <p className="text-muted-foreground">{message}</p>
+      <div className="h-1 overflow-hidden rounded bg-status-meet/15" aria-hidden="true">
+        <div className="h-full w-1/3 animate-pulse rounded bg-status-meet motion-reduce:animate-none" />
+      </div>
+    </div>
+  )
+}
+
 function SourceAction({
   label,
   icon: Icon,
   onClick,
   disabled = false,
   danger = false,
+  busy = false,
 }: {
   label: string
   icon: typeof Upload
   onClick: () => void
   disabled?: boolean
   danger?: boolean
+  busy?: boolean
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
+      aria-busy={busy}
       onClick={onClick}
       className={cn(
         "flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
@@ -587,7 +704,9 @@ function SourceAction({
           : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
       )}
     >
-      <Icon className="size-3.5" />
+      {busy
+        ? <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        : <Icon className="size-3.5" />}
       {label}
     </button>
   )

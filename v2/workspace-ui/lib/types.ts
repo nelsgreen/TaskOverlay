@@ -256,6 +256,17 @@ export interface MeetingAnalysisSnapshot {
   updatedAtUtc: string
 }
 
+export interface MeetingOperationSnapshot {
+  id: string
+  kind: "Transcription" | "Analysis"
+  stage: "StartingTranscription" | "PreparingAudio" | "Transcribing" | "StartingAnalysis" | "Analyzing" | "Cancelling"
+  meetingId: string | null
+  recordingId: string | null
+  transcriptId: string | null
+  startedAtUtc: string
+  cancellationRequested: boolean
+}
+
 export interface MeetingTranscriptSegmentSnapshot {
   index: number
   startSeconds: number | null
@@ -369,7 +380,7 @@ export interface ProjectScope {
 }
 
 export interface WorkspaceSnapshotContract {
-  schemaVersion: 4
+  schemaVersion: 5
   generatedAtUtc: string
   mode: "readonly" | "connected"
   projects: WorkspaceProjectSnapshot[]
@@ -381,6 +392,7 @@ export interface WorkspaceSnapshotContract {
   meetingTranscripts: MeetingTranscriptSnapshot[]
   meetingScreenshots: MeetingScreenshotSnapshot[]
   meetingAnalyses: MeetingAnalysisSnapshot[]
+  meetingOperations: MeetingOperationSnapshot[]
   activeMeetingRecordingId: string | null
   defaultMeetingRecordingPolicy?: "Manual" | "AutoRecord"
   contextSources?: WorkspaceContextSourceSnapshot[]
@@ -710,7 +722,7 @@ export type WorkspaceMeetingAssistantCommand =
   | { type: "transcribeMeetingRecording"; recordingId: string; acceptUploadDisclosure: boolean }
   | { type: "analyzeMeetingRecording"; recordingId: string }
   | { type: "analyzeMeetingTranscript"; transcriptId: string }
-  | { type: "cancelMeetingProcessing"; recordingId: string }
+  | { type: "cancelMeetingProcessing"; recordingId?: string; transcriptId?: string }
   | { type: "setMeetingRecordingPolicy"; meetingId: string; policy: MeetingRecordingPolicy }
   | { type: "setMeetingRecordingFormat"; format: "AacM4a" | "Wav" }
   | { type: "setMeetingRecordingLocalOnly"; recordingId: string; keepLocalOnly: boolean }
