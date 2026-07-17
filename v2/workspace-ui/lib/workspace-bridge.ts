@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
   MeetItem,
   MeetingAnalysisSnapshot,
@@ -65,6 +65,7 @@ export interface WorkspaceData {
   meetingScreenshots: MeetingScreenshotSnapshot[]
   meetingAnalyses: MeetingAnalysisSnapshot[]
   activeMeetingRecordingId: string | null
+  defaultMeetingRecordingPolicy: "Manual" | "AutoRecord"
   contextSources: WorkspaceContextSourceSnapshot[]
   contextItems: WorkspaceContextItemSnapshot[]
   context: WorkspaceContextSnapshot
@@ -89,6 +90,7 @@ export interface WorkspaceBridgeState {
   sendCreateSection(input: Omit<WorkspaceCreateSectionCommand, "type">): boolean
   sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
   sendMeetingCommand(command: WorkspaceMeetingCommand): boolean
+  sendMeetingCommandTracked(command: WorkspaceMeetingCommand): Promise<WorkspaceCommandResult>
   sendTaskWorkSessionCommand(command: WorkspaceTaskWorkSessionCommand): boolean
   sendContextHubCommand(command: WorkspaceContextHubCommand): boolean
   sendMeetingAssistantCommand(command: WorkspaceMeetingAssistantCommand): boolean
@@ -109,6 +111,10 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const [lastCreatedMeetingId, setLastCreatedMeetingId] = useState<string | null>(null)
   const [lastCreatedContextSourceId, setLastCreatedContextSourceId] = useState<string | null>(null)
   const [lastCreatedContextItemId, setLastCreatedContextItemId] = useState<string | null>(null)
+  const commandResultWaiters = useRef(new Map<
+    string,
+    (result: WorkspaceCommandResult) => void
+  >())
 
   useEffect(() => {
     const webview = window.chrome?.webview
@@ -126,11 +132,17 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
 
       if (isWorkspaceCommandResult(data)) {
         const result = data
+        const waiter = commandResultWaiters.current.get(result.commandId)
+        if (waiter) {
+          commandResultWaiters.current.delete(result.commandId)
+          waiter(result)
+        }
         setPendingCommands((pending) =>
           pending.filter((command) => command.commandId !== result.commandId))
         if (!result.success) {
-          setError(result.errorMessage ?? "Workspace command failed.")
+          if (!waiter) setError(result.errorMessage ?? "Workspace command failed.")
         } else {
+          if (result.warningMessage) setError(result.warningMessage)
           if (result.createdTaskId) setLastCreatedTaskId(result.createdTaskId)
           if (result.createdSectionId) setLastCreatedSectionId(result.createdSectionId)
           if (result.createdMeetingId) setLastCreatedMeetingId(result.createdMeetingId)
@@ -143,7 +155,20 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     webview.addEventListener("message", onMessage)
     window.__taskOverlayWorkspaceMessages?.forEach(handleMessage)
     window.__taskOverlayWorkspaceMessages = undefined
-    return () => webview.removeEventListener("message", onMessage)
+    return () => {
+      webview.removeEventListener("message", onMessage)
+      for (const [commandId, resolve] of commandResultWaiters.current) {
+        resolve({
+          schemaVersion: 1,
+          messageType: "commandResult",
+          commandId,
+          success: false,
+          errorCode: "bridgeClosed",
+          errorMessage: "Workspace closed before the command completed.",
+        })
+      }
+      commandResultWaiters.current.clear()
+    }
   }, [])
 
   const data = useMemo(
@@ -206,6 +231,26 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const sendMeetingCommand = useCallback((command: WorkspaceMeetingCommand): boolean =>
     postCommand(command), [postCommand])
 
+  const sendMeetingCommandTracked = useCallback((
+    command: WorkspaceMeetingCommand,
+  ): Promise<WorkspaceCommandResult> => {
+    const commandId = createCommandId()
+    return new Promise((resolve) => {
+      commandResultWaiters.current.set(commandId, resolve)
+      if (postCommand(command, commandId)) return
+
+      commandResultWaiters.current.delete(commandId)
+      resolve({
+        schemaVersion: 1,
+        messageType: "commandResult",
+        commandId,
+        success: false,
+        errorCode: "bridgeUnavailable",
+        errorMessage: "Workspace command could not be sent.",
+      })
+    })
+  }, [postCommand])
+
   const sendTaskWorkSessionCommand = useCallback((command: WorkspaceTaskWorkSessionCommand): boolean =>
     postCommand(command), [postCommand])
 
@@ -238,6 +283,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     sendCreateSection,
     sendWorkspaceContext,
     sendMeetingCommand,
+    sendMeetingCommandTracked,
     sendTaskWorkSessionCommand,
     sendContextHubCommand,
     sendMeetingAssistantCommand,
@@ -341,6 +387,9 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     meetingScreenshots: snapshot.meetingScreenshots,
     meetingAnalyses: snapshot.meetingAnalyses,
     activeMeetingRecordingId: snapshot.activeMeetingRecordingId,
+    defaultMeetingRecordingPolicy: snapshot.defaultMeetingRecordingPolicy === "AutoRecord"
+      ? "AutoRecord"
+      : "Manual",
     // Snapshot rows are used as-is (ids already snapshot-format); ?? [] keeps
     // a host built before ContextHUB from breaking the whole snapshot.
     contextSources: snapshot.contextSources ?? [],
@@ -363,6 +412,7 @@ function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): Me
     id: source.id,
     projectId: source.projectId,
     title: source.title,
+    titleIsGenerated: source.titleIsGenerated ?? false,
     notes: source.notes || undefined,
     date: local.date,
     startTime: local.time,

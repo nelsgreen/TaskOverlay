@@ -68,6 +68,17 @@ item.
 - MEET is persisted in `AppState` with project, title, notes, start time,
   duration, location, link, and an optional linked task. Its default duration
   is 30 minutes.
+- New MEET flows create a real persisted draft immediately. Generated titles
+  are stored and explicitly distinguished from user-authored titles so the
+  first user input replaces the fallback naturally and recording can start
+  before any title edit.
+- MEET Details uses one ordered patch-autosave queue: text changes are
+  debounced, discrete controls persist immediately, and pending edits flush
+  before Close and recording. Save/Revert buttons are not part of this flow.
+- Workspace commands are transactional at the `AppState`/save boundary. If
+  persistence throws, authoritative memory is restored to the pre-command
+  durable state. A failure after disk persistence in a dependent refresh or
+  snapshot send is a separate warning and does not roll back the saved change.
 - Handle is a functional surface, not branding.
 - Handle anchor is the source of truth and must not be derived from panel
   position.

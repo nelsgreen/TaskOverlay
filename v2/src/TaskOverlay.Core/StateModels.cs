@@ -103,6 +103,7 @@ public sealed class MeetingItem
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
     public string Title { get; set; } = string.Empty;
+    public bool TitleIsGenerated { get; set; }
     public string Notes { get; set; } = string.Empty;
     public DateTimeOffset StartsAtUtc { get; set; }
     public int DurationMinutes { get; set; } = DefaultDurationMinutes;

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace TaskOverlay.Core;
 
@@ -18,7 +19,9 @@ public sealed record WorkspaceCommandResult(
     string? CreatedMeetingId = null,
     string? CreatedTaskWorkSessionId = null,
     string? CreatedContextSourceId = null,
-    string? CreatedContextItemId = null)
+    string? CreatedContextItemId = null,
+    string? WarningCode = null,
+    string? WarningMessage = null)
 {
     public const int CurrentSchemaVersion = 1;
     public const string CurrentMessageType = "commandResult";
@@ -56,6 +59,9 @@ public sealed record WorkspaceCommandResult(
             Success: false,
             errorCode,
             errorMessage);
+
+    public WorkspaceCommandResult WithWarning(string warningCode, string warningMessage) =>
+        this with { WarningCode = warningCode, WarningMessage = warningMessage };
 }
 
 public static class WorkspaceCommandProcessor
@@ -1558,6 +1564,17 @@ public static class WorkspaceCommandProcessor
             title = titleElement.GetString();
         }
 
+        var titleIsGenerated = existing?.TitleIsGenerated ?? false;
+        if (payload.TryGetProperty("titleIsGenerated", out var generatedElement))
+        {
+            if (generatedElement.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+            {
+                return false;
+            }
+
+            titleIsGenerated = generatedElement.GetBoolean();
+        }
+
         var startsAtUtc = existing?.StartsAtUtc ?? default;
         if (payload.TryGetProperty("startsAtUtc", out var startsElement) &&
             (startsElement.ValueKind != JsonValueKind.String ||
@@ -1578,11 +1595,25 @@ public static class WorkspaceCommandProcessor
             return false;
         }
 
+        var recordingPolicy = existing?.RecordingPolicy ?? MeetingRecordingPolicy.Inherit;
+        if (payload.TryGetProperty("recordingPolicy", out var policyElement))
+        {
+            if (policyElement.ValueKind != JsonValueKind.String ||
+                !Enum.TryParse<MeetingRecordingPolicy>(
+                    policyElement.GetString(),
+                    ignoreCase: true,
+                    out recordingPolicy) ||
+                !Enum.IsDefined(recordingPolicy))
+            {
+                return false;
+            }
+        }
+
         if (!TryReadPatchString(payload, "notes", existing?.Notes, out var notes) ||
             !TryReadPatchString(payload, "location", existing?.Location, out var location) ||
             !TryReadPatchString(payload, "link", existing?.Link, out var link) ||
             !TryReadPatchGuid(payload, "linkedTaskId", existing?.LinkedTaskId, out var linkedTaskId) ||
-            projectId == Guid.Empty || string.IsNullOrWhiteSpace(title) || startsAtUtc == default)
+            projectId == Guid.Empty || title is null || startsAtUtc == default)
         {
             return false;
         }
@@ -1595,7 +1626,9 @@ public static class WorkspaceCommandProcessor
             durationMinutes,
             location,
             link,
-            linkedTaskId);
+            linkedTaskId,
+            titleIsGenerated,
+            recordingPolicy);
         return true;
     }
 
@@ -1747,37 +1780,116 @@ public static class WorkspaceCommandProcessor
 
 public sealed class WorkspaceCommandDispatcher
 {
+    private static readonly JsonSerializerOptions TransactionJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+    };
+
     private readonly AppState _state;
     private readonly Action _saveState;
     private readonly Action _stateChanged;
+    private readonly Action<string, Exception?>? _diagnostic;
+    private readonly object _gate = new();
 
     public WorkspaceCommandDispatcher(
         AppState state,
         Action saveState,
-        Action stateChanged)
+        Action stateChanged,
+        Action<string, Exception?>? diagnostic = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _saveState = saveState ?? throw new ArgumentNullException(nameof(saveState));
         _stateChanged = stateChanged ?? throw new ArgumentNullException(nameof(stateChanged));
+        _diagnostic = diagnostic;
     }
 
     public WorkspaceCommandResult Dispatch(
         string json,
         DateTimeOffset? now = null)
     {
-        var result = WorkspaceCommandProcessor.Execute(_state, json, now);
-        if (!result.Success)
+        lock (_gate)
         {
+            var persistedBaseline = CloneState(_state);
+            var result = WorkspaceCommandProcessor.Execute(_state, json, now);
+            if (!result.Success)
+            {
+                return result;
+            }
+
+            try
+            {
+                _saveState();
+            }
+            catch (Exception ex)
+            {
+                RestoreState(persistedBaseline, _state);
+                Report("Workspace mutation rolled back after persistence failed.", ex);
+                return WorkspaceCommandResult.Failed(
+                    result.CommandId,
+                    "persistenceFailed",
+                    "Changes could not be saved. Your previous saved state was restored.");
+            }
+
+            if (AffectsTaskPresentation(json))
+            {
+                try
+                {
+                    _stateChanged();
+                }
+                catch (Exception ex)
+                {
+                    Report("Workspace mutation saved, but dependent views could not refresh.", ex);
+                    return result.WithWarning(
+                        "stateRefreshFailed",
+                        "Changes were saved, but dependent views could not refresh.");
+                }
+            }
+
             return result;
         }
+    }
 
-        _saveState();
-        if (AffectsTaskPresentation(json))
+    private static AppState CloneState(AppState state)
+    {
+        var json = JsonSerializer.Serialize(state, TransactionJsonOptions);
+        return JsonSerializer.Deserialize<AppState>(json, TransactionJsonOptions) ??
+               throw new InvalidOperationException("App state could not be cloned for a transaction.");
+    }
+
+    private static void RestoreState(AppState source, AppState target)
+    {
+        target.SchemaVersion = source.SchemaVersion;
+        target.Tasks = source.Tasks;
+        target.Projects = source.Projects;
+        target.Groups = source.Groups;
+        target.Meetings = source.Meetings;
+        target.TaskWorkSessions = source.TaskWorkSessions;
+        target.ContextSources = source.ContextSources;
+        target.ContextItems = source.ContextItems;
+        target.MeetingRecordings = source.MeetingRecordings;
+        target.MeetingTranscripts = source.MeetingTranscripts;
+        target.MeetingScreenshots = source.MeetingScreenshots;
+        target.MeetingAnalyses = source.MeetingAnalyses;
+        target.OverlaySettings = source.OverlaySettings;
+        target.WindowPlacement = source.WindowPlacement;
+        target.TreeManagerSettings = source.TreeManagerSettings;
+        target.WorkspaceSettings = source.WorkspaceSettings;
+        target.TelegramCapture = source.TelegramCapture;
+        target.CreatedAtUtc = source.CreatedAtUtc;
+        target.UpdatedAtUtc = source.UpdatedAtUtc;
+    }
+
+    private void Report(string message, Exception exception)
+    {
+        try
         {
-            _stateChanged();
+            _diagnostic?.Invoke(message, exception);
         }
-
-        return result;
+        catch
+        {
+            // Diagnostics must never change command persistence behavior.
+        }
     }
 
     private static bool AffectsTaskPresentation(string json)

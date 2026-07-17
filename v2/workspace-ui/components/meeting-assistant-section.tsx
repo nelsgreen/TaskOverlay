@@ -44,13 +44,16 @@ interface Props {
   commandError?: string | null
   onClearError?: () => void
   onCommand: (command: WorkspaceMeetingAssistantCommand) => boolean
+  defaultRecordingPolicy?: Exclude<MeetingRecordingPolicy, "Inherit">
+  onRecordingPolicyChange?: (policy: MeetingRecordingPolicy) => void
+  onBeforeRecordingStart?: () => Promise<boolean>
   showAnalysis?: boolean
   showTranscript?: boolean
 }
 
 const statusOptions: Status[] = ["TODO", "FOCUS", "WAIT", "DONE"]
 const policyOptions: { value: MeetingRecordingPolicy; label: string }[] = [
-  { value: "Inherit", label: "Inherit" },
+  { value: "Inherit", label: "Use app default" },
   { value: "Manual", label: "Manual" },
   { value: "AutoRecord", label: "Auto-record" },
 ]
@@ -67,6 +70,9 @@ export function MeetingAssistantSection({
   commandError,
   onClearError,
   onCommand,
+  defaultRecordingPolicy = "Manual",
+  onRecordingPolicyChange,
+  onBeforeRecordingStart,
   showAnalysis = true,
   showTranscript = true,
 }: Props) {
@@ -131,6 +137,12 @@ export function MeetingAssistantSection({
     onClearError?.()
     return onCommand(command)
   }
+  const startRecording = async () => {
+    if (onBeforeRecordingStart && !await onBeforeRecordingStart()) return
+    if (send({ type: "startMeetingRecording", meetingId: meet.id })) {
+      setPendingRecordingAction("start")
+    }
+  }
 
   const recordingControls = deriveMeetingRecordingControlState(
     meet.id,
@@ -173,12 +185,8 @@ export function MeetingAssistantSection({
             <button
               type="button"
               key={option.value}
-              disabled={readOnly}
-              onClick={() => send({
-                type: "setMeetingRecordingPolicy",
-                meetingId: meet.id,
-                policy: option.value,
-              })}
+              disabled={readOnly || !onRecordingPolicyChange}
+              onClick={() => onRecordingPolicyChange?.(option.value)}
               className={cn(
                 "rounded-md border px-2 py-1 text-[10px] font-medium",
                 (meet.recordingPolicy ?? "Inherit") === option.value
@@ -186,10 +194,15 @@ export function MeetingAssistantSection({
                   : "border-border text-muted-foreground hover:bg-accent",
               )}
             >
-              {option.label}
+              {option.value === "Inherit"
+                ? `${option.label} (${defaultRecordingPolicy === "AutoRecord" ? "Auto-record" : "Manual"})`
+                : option.label}
             </button>
           ))}
         </div>
+        <p className="mt-1.5 text-[10px] text-muted-foreground">
+          Use app default inherits the current global Settings preference.
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -206,11 +219,7 @@ export function MeetingAssistantSection({
             icon={Play}
             primary
             disabled={readOnly}
-            onClick={() => {
-              if (send({ type: "startMeetingRecording", meetingId: meet.id })) {
-                setPendingRecordingAction("start")
-              }
-            }}
+            onClick={() => void startRecording()}
           />
         )}
         {recordingControls.mode === "starting" && (
@@ -308,11 +317,9 @@ export function MeetingAssistantSection({
               readOnly={readOnly}
               send={send}
               showTranscript={showTranscript}
-              onStartAnother={recordingControls.mode === "start" ? () => {
-                if (send({ type: "startMeetingRecording", meetingId: meet.id })) {
-                  setPendingRecordingAction("start")
-                }
-              } : undefined}
+              onStartAnother={recordingControls.mode === "start"
+                ? () => void startRecording()
+                : undefined}
             />
           )}
 

@@ -1,11 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { CalendarDays, Clock, ExternalLink, MapPin, Save, Trash2, UndoDot, Video, X } from "lucide-react"
+import { CalendarDays, Clock, ExternalLink, MapPin, RefreshCw, Trash2, Video, X } from "lucide-react"
 import type {
   MeetDuration,
   MeetItem,
   MeetingAnalysisSnapshot,
+  MeetingRecordingPolicy,
   MeetingRecordingSnapshot,
   MeetingScreenshotSnapshot,
   MeetingTranscriptSnapshot,
@@ -18,7 +19,14 @@ import type {
   WorkspaceMeetingAssistantCommand,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { shouldCloseMeetModal, type MeetModalCloseReason } from "@/lib/meet-modal-policy"
+import { MeetingAutosaveQueue, type MeetSaveMode, type MeetSaveStatus } from "@/lib/meet-autosave"
+import type { MeetEditableField } from "@/lib/meeting-edit"
+import { applyMeetingTitleInput, generatedTitleForMeeting } from "@/lib/meeting-title"
+import {
+  isUntouchedNewMeeting,
+  shouldCloseMeetModal,
+  type MeetModalCloseReason,
+} from "@/lib/meet-modal-policy"
 import {
   MEET_WORKSPACE_TABS,
   shouldShowMeetDetailsActions,
@@ -32,9 +40,14 @@ interface Props {
   projects: Project[]
   tasks: Task[]
   /** Called on every draft change — auto-apply */
-  onApply: (meet: MeetItem) => void
-  onDelete: (id: string) => void
+  onPersist: (
+    meet: MeetItem,
+    fields: ReadonlySet<MeetEditableField>,
+    mutationSequence: number,
+  ) => Promise<void>
+  onDelete: (id: string) => Promise<boolean>
   onClose: () => void
+  isNewlyCreated?: boolean
   onOpenLinkedTask?: (taskId: string) => void
   focusTitle?: boolean
   onTitleFocused?: () => void
@@ -58,6 +71,7 @@ interface Props {
   meetingAssistantError?: string | null
   onClearMeetingAssistantError?: () => void
   onMeetingAssistantCommand?: (command: WorkspaceMeetingAssistantCommand) => boolean
+  defaultRecordingPolicy?: Exclude<MeetingRecordingPolicy, "Inherit">
 }
 
 const durationOptions: { value: MeetDuration; label: string }[] = [
@@ -116,9 +130,10 @@ export function MeetDetailsModal({
   meet,
   projects,
   tasks,
-  onApply,
+  onPersist,
   onDelete,
   onClose,
+  isNewlyCreated = false,
   onOpenLinkedTask,
   focusTitle = false,
   onTitleFocused,
@@ -138,23 +153,40 @@ export function MeetDetailsModal({
   meetingAssistantError = null,
   onClearMeetingAssistantError,
   onMeetingAssistantCommand,
+  defaultRecordingPolicy = "Manual",
 }: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
   const [activeTab, setActiveTab] = useState<MeetWorkspaceTab>("details")
+  const [saveStatus, setSaveStatus] = useState<MeetSaveStatus>("saved")
   const sessionBaseRef = useRef<MeetItem | null>(meet)
   const draftRef = useRef<MeetItem | null>(meet)
   const titleInputRef = useRef<HTMLInputElement>(null)
+  const sourceCommandSentRef = useRef(false)
+  const contextCommandSentRef = useRef(false)
+  const persistRef = useRef(onPersist)
+  persistRef.current = onPersist
+  const autosaveRef = useRef<MeetingAutosaveQueue<MeetItem, MeetEditableField> | null>(null)
+  if (!autosaveRef.current && meet) {
+    autosaveRef.current = new MeetingAutosaveQueue(
+      meet,
+      (value, fields, mutationSequence) => persistRef.current(value, fields, mutationSequence),
+      setSaveStatus,
+    )
+  }
+
+  useEffect(() => () => autosaveRef.current?.dispose(), [])
 
   useEffect(() => {
     const current = draftRef.current
-    const base = sessionBaseRef.current
-    const sameMeeting = current?.id === meet?.id && base?.id === meet?.id
-    const hasLocalChanges = sameMeeting && JSON.stringify(current) !== JSON.stringify(base)
-    if (hasLocalChanges && JSON.stringify(current) !== JSON.stringify(meet)) return
+    if (current && meet && current.id === meet.id && autosaveRef.current?.hasPending()) {
+      const merged: MeetItem = { ...current, activeTranscriptId: meet.activeTranscriptId }
+      setDraft(merged)
+      draftRef.current = merged
+      return
+    }
 
     setDraft(meet)
     draftRef.current = meet
-    sessionBaseRef.current = meet
   }, [meet])
 
   useEffect(() => {
@@ -170,20 +202,49 @@ export function MeetDetailsModal({
     })
   }, [focusTitle, meet, draft?.id, onTitleFocused])
 
-  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(sessionBaseRef.current)
-  const requestClose = useCallback((reason: MeetModalCloseReason) => {
-    const canClose = shouldCloseMeetModal(
-      reason,
-      dirty,
-      () => window.confirm("Discard unsaved MEET changes?"),
-    )
-    if (canClose) onClose()
-    return canClose
-  }, [dirty, onClose])
+  const flushAutosave = useCallback(
+    () => autosaveRef.current?.flush() ?? Promise.resolve(true),
+    [],
+  )
+  const requestClose = useCallback(async (reason: MeetModalCloseReason) => {
+    if (!shouldCloseMeetModal(reason)) return false
+    if (!await flushAutosave()) return false
+
+    const current = draftRef.current
+    const initial = sessionBaseRef.current
+    if (isNewlyCreated && current && initial && isUntouchedNewMeeting({
+      initial,
+      current,
+      hasRecordingOrSource:
+        sourceCommandSentRef.current ||
+        meetingRecordings.some((recording) => recording.meetingId === current.id) ||
+        meetingTranscripts.some((transcript) => transcript.meetingId === current.id) ||
+        meetingScreenshots.some((screenshot) => screenshot.meetingId === current.id),
+      hasContextLink:
+        contextCommandSentRef.current ||
+        contextSources.some((source) => source.linkedMeetingIds.includes(current.id)) ||
+        contextItems.some((item) => item.linkedMeetingIds.includes(current.id)),
+    })) {
+      if (!await onDelete(current.id)) return false
+    }
+
+    onClose()
+    return true
+  }, [
+    contextItems,
+    contextSources,
+    flushAutosave,
+    isNewlyCreated,
+    meetingRecordings,
+    meetingScreenshots,
+    meetingTranscripts,
+    onClose,
+    onDelete,
+  ])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") requestClose("escape")
+      if (event.key === "Escape") void requestClose("escape")
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
@@ -193,18 +254,51 @@ export function MeetDetailsModal({
     return null
   }
 
-  const set = <K extends keyof MeetItem>(key: K, value: MeetItem[K]) =>
-    setDraft((current) => {
-      const next = current ? { ...current, [key]: value } : current
-      draftRef.current = next
-      return next
-    })
+  const updateDraft = (
+    changes: Partial<MeetItem>,
+    fields: MeetEditableField[],
+    mode: MeetSaveMode,
+  ) => {
+    if (readOnly) return
+    const current = draftRef.current
+    if (!current) return
+    const next = { ...current, ...changes }
+    if ((next.titleIsGenerated ?? false) &&
+        fields.some((field) => field === "projectId" || field === "date" || field === "startTime")) {
+      next.title = generatedTitleForMeeting(next, projects)
+    }
+    draftRef.current = next
+    setDraft(next)
+    autosaveRef.current?.enqueue(next, fields, mode)
+  }
+
+  const updateTitle = (value: string) => {
+    const current = draftRef.current
+    if (!current) return
+    const next = applyMeetingTitleInput(current, value, projects)
+    updateDraft(
+      { title: next.title, titleIsGenerated: next.titleIsGenerated },
+      ["title", "titleIsGenerated"],
+      "debounced",
+    )
+  }
 
   const datePresets = getDatePresets()
   const endTime = draft.endTime || (draft.duration !== "custom" ? computeEndTime(draft.startTime, draft.duration) : "")
   const linkedTask = draft.linkedTaskId ? tasks.find((t) => t.id === draft.linkedTaskId) : null
   const linkedProject = linkedTask ? projects.find((p) => p.id === linkedTask.projectId) : null
   const hasMissingLinkedTask = !!draft.linkedTaskId && !linkedTask
+  const generatedTitle = generatedTitleForMeeting(draft, projects)
+  const sendContextCommand = (command: WorkspaceContextHubCommand) => {
+    const sent = onContextCommand?.(command) ?? false
+    if (sent) contextCommandSentRef.current = true
+    return sent
+  }
+  const sendMeetingAssistantCommand = (command: WorkspaceMeetingAssistantCommand) => {
+    const sent = onMeetingAssistantCommand?.(command) ?? false
+    if (sent && command.type !== "openMeetingLink") sourceCommandSentRef.current = true
+    return sent
+  }
 
   return (
     <div
@@ -218,20 +312,36 @@ export function MeetDetailsModal({
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="min-w-0">
           <h2 id="meet-details-title" className="truncate text-sm font-semibold text-foreground">
-            {draft.id === "meeting-draft" ? "Create MEET" : "MEET details"}
+            {isNewlyCreated ? "Create MEET" : "MEET details"}
           </h2>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
             Calendar item, context, recording, and Meeting Assistant
           </p>
         </div>
         <div className="ml-3 flex shrink-0 items-center gap-2">
+          {!readOnly && (
+            <span className="text-[10px] text-muted-foreground" aria-live="polite">
+              {saveStatus === "saving" && "Saving…"}
+              {saveStatus === "saved" && "Saved"}
+              {saveStatus === "failed" && (
+                <button
+                  type="button"
+                  onClick={() => void autosaveRef.current?.retry()}
+                  className="inline-flex items-center gap-1 text-destructive hover:underline"
+                >
+                  Save failed · Retry
+                  <RefreshCw className="size-3" />
+                </button>
+              )}
+            </span>
+          )}
           <span className="flex items-center gap-1.5 rounded-md bg-status-meet/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-status-meet">
             <Video className="size-3" />
             Meet
           </span>
           <button
             type="button"
-            onClick={() => requestClose("explicit")}
+            onClick={() => void requestClose("explicit")}
             aria-label="Close MEET details"
             className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
@@ -258,9 +368,6 @@ export function MeetDetailsModal({
             {tab}
           </button>
         ))}
-        {dirty && activeTab !== "details" && (
-          <span className="ml-auto text-[10px] text-amber-300">Unsaved Details changes</span>
-        )}
       </div>
 
       {shouldShowMeetDetailsActions(activeTab) && (
@@ -275,9 +382,9 @@ export function MeetDetailsModal({
           </label>
           <input
             ref={titleInputRef}
-            value={draft.title}
-            onChange={(e) => set("title", e.target.value)}
-            placeholder="Untitled MEET"
+            value={draft.titleIsGenerated ? "" : draft.title}
+            onChange={(e) => updateTitle(e.target.value)}
+            placeholder={generatedTitle}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-status-meet/50 focus:ring-2 focus:ring-status-meet/15"
           />
         </div>
@@ -290,7 +397,7 @@ export function MeetDetailsModal({
           <div className="relative">
             <select
               value={draft.projectId}
-              onChange={(e) => set("projectId", e.target.value)}
+              onChange={(e) => updateDraft({ projectId: e.target.value }, ["projectId"], "immediate")}
               className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2 pr-8 text-sm text-foreground outline-none transition-colors focus:border-status-meet/50"
             >
               {projects.map((p) => (
@@ -315,7 +422,7 @@ export function MeetDetailsModal({
               {datePresets.map((p) => (
                 <button
                   key={`${p.label}:${p.value}`}
-                  onClick={() => set("date", p.value)}
+                  onClick={() => updateDraft({ date: p.value }, ["date"], "immediate")}
                   className={cn(
                     "flex-1 rounded border px-1 py-1.5 text-center text-[10px] font-medium transition-colors",
                     draft.date === p.value
@@ -330,7 +437,7 @@ export function MeetDetailsModal({
             <input
               type="date"
               value={draft.date}
-              onChange={(e) => set("date", e.target.value)}
+              onChange={(e) => updateDraft({ date: e.target.value }, ["date"], "immediate")}
               className="w-full rounded border border-input bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-status-meet/50"
             />
           </div>
@@ -352,7 +459,7 @@ export function MeetDetailsModal({
                 <input
                   type="time"
                   value={draft.startTime}
-                  onChange={(e) => set("startTime", e.target.value)}
+                  onChange={(e) => updateDraft({ startTime: e.target.value }, ["startTime"], "immediate")}
                   className="w-full rounded border border-input bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-status-meet/50"
                 />
               </label>
@@ -361,7 +468,11 @@ export function MeetDetailsModal({
                 <input
                   type="time"
                   value={draft.endTime ?? ""}
-                  onChange={(e) => set("endTime", e.target.value || undefined)}
+                  onChange={(e) => updateDraft(
+                    { endTime: e.target.value || undefined },
+                    ["endTime"],
+                    "immediate",
+                  )}
                   placeholder={endTime}
                   className="w-full rounded border border-input bg-background px-2 py-1.5 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-status-meet/50"
                 />
@@ -374,7 +485,11 @@ export function MeetDetailsModal({
                 {durationOptions.map((d) => (
                   <button
                     key={d.value}
-                    onClick={() => { set("duration", d.value); set("endTime", undefined) }}
+                    onClick={() => updateDraft(
+                      { duration: d.value, endTime: undefined },
+                      ["duration", "endTime"],
+                      "immediate",
+                    )}
                     className={cn(
                       "rounded border px-1 py-1.5 text-[11px] font-medium transition-colors",
                       draft.duration === d.value && !draft.endTime
@@ -399,7 +514,11 @@ export function MeetDetailsModal({
           <input
             value={draft.location ?? ""}
             placeholder="Room 4, Zoom, Google Meet…"
-            onChange={(e) => set("location", e.target.value || undefined)}
+            onChange={(e) => updateDraft(
+              { location: e.target.value || undefined },
+              ["location"],
+              "debounced",
+            )}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-status-meet/50"
           />
         </div>
@@ -413,7 +532,11 @@ export function MeetDetailsModal({
           <input
             value={draft.link ?? ""}
             placeholder="meet.example.com/…"
-            onChange={(e) => set("link", e.target.value || undefined)}
+            onChange={(e) => updateDraft(
+              { link: e.target.value || undefined },
+              ["link"],
+              "debounced",
+            )}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-status-meet/50"
           />
         </div>
@@ -427,7 +550,11 @@ export function MeetDetailsModal({
             value={draft.notes ?? ""}
             placeholder="Agenda, context, links…"
             rows={3}
-            onChange={(e) => set("notes", e.target.value || undefined)}
+            onChange={(e) => updateDraft(
+              { notes: e.target.value || undefined },
+              ["notes"],
+              "debounced",
+            )}
             className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-status-meet/50"
           />
         </div>
@@ -439,7 +566,11 @@ export function MeetDetailsModal({
           </label>
           <select
             value={draft.linkedTaskId ?? ""}
-            onChange={(e) => set("linkedTaskId", e.target.value || undefined)}
+            onChange={(e) => updateDraft(
+              { linkedTaskId: e.target.value || undefined },
+              ["linkedTaskId"],
+              "immediate",
+            )}
             className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-status-meet/50"
           >
             <option value="">None</option>
@@ -458,8 +589,8 @@ export function MeetDetailsModal({
               {onOpenLinkedTask && (
                 <button
                   type="button"
-                  onClick={() => {
-                    if (requestClose("navigate")) onOpenLinkedTask(linkedTask.id)
+                  onClick={async () => {
+                    if (await requestClose("navigate")) onOpenLinkedTask(linkedTask.id)
                   }}
                   className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
@@ -488,9 +619,9 @@ export function MeetDetailsModal({
             meetItems={meetItems}
             contextSources={contextSources}
             contextItems={contextItems}
-            onCommand={onContextCommand}
-            onOpenContextHub={() => {
-              if (requestClose("navigate")) onOpenContextHub()
+            onCommand={sendContextCommand}
+            onOpenContextHub={async () => {
+              if (await requestClose("navigate")) onOpenContextHub()
             }}
             locked={readOnly}
           />
@@ -519,7 +650,14 @@ export function MeetDetailsModal({
           readOnly={readOnly}
           commandError={meetingAssistantError}
           onClearError={onClearMeetingAssistantError}
-          onCommand={onMeetingAssistantCommand}
+          onCommand={onMeetingAssistantCommand ? sendMeetingAssistantCommand : undefined}
+          defaultRecordingPolicy={defaultRecordingPolicy}
+          onRecordingPolicyChange={(policy) => updateDraft(
+            { recordingPolicy: policy },
+            ["recordingPolicy"],
+            "immediate",
+          )}
+          onBeforeRecordingStart={flushAutosave}
         />
       )}
 
@@ -534,7 +672,7 @@ export function MeetDetailsModal({
           activeRecording={activeRecording}
           activeRecordingOwnerTitle={activeRecordingOwnerTitle}
           readOnly={readOnly}
-          onCommand={onMeetingAssistantCommand}
+          onCommand={onMeetingAssistantCommand ? sendMeetingAssistantCommand : undefined}
         />
       )}
 
@@ -543,10 +681,10 @@ export function MeetDetailsModal({
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
         <button
           disabled={readOnly}
-          onClick={() => {
-            if (window.confirm(`Delete meeting "${draft.title || "Untitled"}"?`)) {
-              onDelete(draft.id)
-            }
+          onClick={async () => {
+            if (!window.confirm(`Delete meeting "${draft.title || "Untitled"}"?`)) return
+            if (!await flushAutosave()) return
+            if (await onDelete(draft.id)) onClose()
           }}
           className="flex items-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-1.5 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
         >
@@ -555,35 +693,11 @@ export function MeetDetailsModal({
         </button>
         <div className="flex items-center gap-2">
           <button
-            disabled={!dirty || readOnly}
-            onClick={() => {
-              draftRef.current = sessionBaseRef.current
-              setDraft(sessionBaseRef.current)
-            }}
-            className={cn(
-              "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-              dirty && !readOnly
-                ? "border-border text-foreground hover:bg-accent"
-                : "cursor-not-allowed border-border/40 text-muted-foreground/40",
-            )}
-          >
-            <UndoDot className="size-4" />
-            Revert
-          </button>
-          <button
             type="button"
-            onClick={() => requestClose("explicit")}
+            onClick={() => void requestClose("explicit")}
             className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             Close
-          </button>
-          <button
-            disabled={!dirty || !draft.title.trim() || readOnly}
-            onClick={() => onApply(draft)}
-            className="flex items-center gap-1.5 rounded-lg bg-status-meet px-3 py-1.5 text-sm font-semibold text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Save className="size-4" />
-            Save
           </button>
         </div>
       </div>

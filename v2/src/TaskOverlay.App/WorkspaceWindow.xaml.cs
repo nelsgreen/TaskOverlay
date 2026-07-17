@@ -27,6 +27,7 @@ public partial class WorkspaceWindow : Window
     private readonly Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>?
         _meetingTranscriptLoader;
     private readonly Func<MeetingScreenshot, string?>? _screenshotThumbnailLoader;
+    private readonly Func<MeetingRecordingPolicy>? _defaultRecordingPolicyLoader;
     private bool _initialized;
 
     public WorkspaceWindow(
@@ -40,19 +41,22 @@ public partial class WorkspaceWindow : Window
         Action<string, Exception?>? diagnostic = null,
         Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>?
             meetingTranscriptLoader = null,
-        Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null)
+        Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null,
+        Func<MeetingRecordingPolicy>? defaultRecordingPolicyLoader = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _diagnostic = diagnostic;
         _commandDispatcher = new WorkspaceCommandDispatcher(
             _state,
             saveState,
-            stateChanged);
+            stateChanged,
+            diagnostic);
         _runtimeCommandHandler = runtimeCommandHandler;
         _transcriptLoader = transcriptLoader;
         _activeRecordingIdLoader = activeRecordingIdLoader;
-        _diagnostic = diagnostic;
         _meetingTranscriptLoader = meetingTranscriptLoader;
         _screenshotThumbnailLoader = screenshotThumbnailLoader;
+        _defaultRecordingPolicyLoader = defaultRecordingPolicyLoader;
         InitializeComponent();
     }
 
@@ -196,10 +200,9 @@ public partial class WorkspaceWindow : Window
         {
             if (!TrySendSnapshot("command"))
             {
-                result = WorkspaceCommandResult.Failed(
-                    result.CommandId,
+                result = result.WithWarning(
                     "snapshotFailed",
-                    "Task was saved, but Workspace could not refresh its state.");
+                    "Changes were saved, but Workspace could not refresh its state.");
             }
         }
 
@@ -229,7 +232,9 @@ public partial class WorkspaceWindow : Window
             transcriptLoader: _transcriptLoader,
             activeMeetingRecordingId: _activeRecordingIdLoader?.Invoke(),
             meetingTranscriptLoader: _meetingTranscriptLoader,
-            screenshotThumbnailLoader: _screenshotThumbnailLoader);
+            screenshotThumbnailLoader: _screenshotThumbnailLoader,
+            defaultMeetingRecordingPolicy: _defaultRecordingPolicyLoader?.Invoke() ??
+                                           MeetingRecordingPolicy.Manual);
         SendMessage(snapshot);
     }
 

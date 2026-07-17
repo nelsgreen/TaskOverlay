@@ -126,6 +126,7 @@ export interface MeetItem {
   id: string
   projectId: string
   title: string
+  titleIsGenerated?: boolean
   notes?: string
   /** ISO date string e.g. "2026-07-04" */
   date: string
@@ -381,6 +382,7 @@ export interface WorkspaceSnapshotContract {
   meetingScreenshots: MeetingScreenshotSnapshot[]
   meetingAnalyses: MeetingAnalysisSnapshot[]
   activeMeetingRecordingId: string | null
+  defaultMeetingRecordingPolicy?: "Manual" | "AutoRecord"
   contextSources?: WorkspaceContextSourceSnapshot[]
   contextItems?: WorkspaceContextItemSnapshot[]
   activeNow: WorkspaceActiveNowSnapshot[]
@@ -497,6 +499,7 @@ export interface WorkspaceMeetingSnapshot {
   id: string
   projectId: string
   title: string
+  titleIsGenerated?: boolean
   notes: string
   startsAtUtc: string
   durationMinutes: number
@@ -563,6 +566,7 @@ export type WorkspaceMeetingCommand =
       type: "createMeeting"
       projectId: string
       title: string
+      titleIsGenerated?: boolean
       startsAtUtc: string
       durationMinutes: number
       notes?: string | null
@@ -575,12 +579,14 @@ export type WorkspaceMeetingCommand =
       meetingId: string
       projectId?: string
       title?: string
+      titleIsGenerated?: boolean
       startsAtUtc?: string
       durationMinutes?: number
       notes?: string | null
       location?: string | null
       link?: string | null
       linkedTaskId?: string | null
+      recordingPolicy?: MeetingRecordingPolicy
     }
   | { type: "deleteMeeting"; meetingId: string }
 
@@ -770,6 +776,8 @@ export interface WorkspaceCommandResult {
   success: boolean
   errorCode: string | null
   errorMessage: string | null
+  warningCode?: string | null
+  warningMessage?: string | null
   createdTaskId?: string | null
   createdSectionId?: string | null
   createdMeetingId?: string | null

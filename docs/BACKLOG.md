@@ -477,6 +477,15 @@ Product direction:
   - optional linked task.
 - MEET persists in `AppState` / `state.json`; Workspace CRUD uses the WebView2
   command -> C# service -> save -> fresh snapshot path.
+- Opening a new MEET immediately persists a stable-ID draft with its project,
+  schedule, and generated fallback title. Details then autosaves field patches
+  through one ordered queue; text is debounced, discrete fields are immediate,
+  and pending edits flush before Close or recording starts. There is no manual
+  Save/Revert action in MEET Details.
+- A failed Workspace persistence operation rolls authoritative `AppState` back
+  to its last durable value. A later unrelated command cannot persist that
+  failed patch; Retry reapplies the current intended patch. Snapshot refresh
+  failure after a successful disk save is reported separately from Save failed.
 - MEET Timeline interaction is implemented:
   - Timeline is a visual upcoming-events / attention horizon;
   - click MEET row -> MEET Details;
@@ -485,7 +494,8 @@ Product direction:
   drag/drop rescheduling through the connected `updateMeeting` path.
 - Default meeting duration is 30 minutes.
 - Connected MEET recording and Meeting Assistant foundation is implemented:
-  - explicit per-MEET recording policy: Off / Ask / Auto;
+  - per-MEET recording policy: Use app default / Manual / Auto-record, with the
+    inherited effective default shown in the UI;
   - Compact direct AAC/M4A is the default, with microphone, system, and mixed
     tracks encoded through Windows Media Foundation and no full-meeting WAV
     intermediate;

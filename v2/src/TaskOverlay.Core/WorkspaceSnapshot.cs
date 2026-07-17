@@ -18,6 +18,7 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceMeetingScreenshotSnapshot> MeetingScreenshots,
     IReadOnlyList<WorkspaceMeetingAnalysisSnapshot> MeetingAnalyses,
     string? ActiveMeetingRecordingId,
+    string DefaultMeetingRecordingPolicy,
     IReadOnlyList<WorkspaceContextSourceSnapshot> ContextSources,
     IReadOnlyList<WorkspaceContextItemSnapshot> ContextItems,
     IReadOnlyList<WorkspaceActiveNowSnapshot> ActiveNow,
@@ -90,6 +91,7 @@ public sealed record WorkspaceMeetingSnapshot(
     string Id,
     string ProjectId,
     string Title,
+    bool TitleIsGenerated,
     string Notes,
     DateTimeOffset StartsAtUtc,
     int DurationMinutes,
@@ -310,7 +312,8 @@ public static class WorkspaceSnapshotFactory
         Func<MeetingRecording, string?>? transcriptLoader = null,
         Guid? activeMeetingRecordingId = null,
         Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>? meetingTranscriptLoader = null,
-        Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null)
+        Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null,
+        MeetingRecordingPolicy defaultMeetingRecordingPolicy = MeetingRecordingPolicy.Manual)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -433,6 +436,7 @@ public static class WorkspaceSnapshotFactory
                 FormatId(meeting.Id),
                 FormatId(meeting.ProjectId),
                 meeting.Title,
+                meeting.TitleIsGenerated,
                 meeting.Notes,
                 meeting.StartsAtUtc,
                 meeting.DurationMinutes,
@@ -780,6 +784,9 @@ public static class WorkspaceSnapshotFactory
             runtimeActiveRecordingId is Guid recordingId
                 ? FormatId(recordingId)
                 : null,
+            defaultMeetingRecordingPolicy == MeetingRecordingPolicy.AutoRecord
+                ? MeetingRecordingPolicy.AutoRecord.ToString()
+                : MeetingRecordingPolicy.Manual.ToString(),
             contextSources,
             contextItems,
             activeNow,

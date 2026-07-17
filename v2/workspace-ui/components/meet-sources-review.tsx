@@ -16,6 +16,7 @@ import {
 import type {
   MeetItem,
   MeetingAnalysisSnapshot,
+  MeetingRecordingPolicy,
   MeetingRecordingSnapshot,
   MeetingScreenshotSnapshot,
   MeetingTranscriptSnapshot,
@@ -43,6 +44,9 @@ interface SharedProps {
   commandError?: string | null
   onClearError?: () => void
   onCommand?: (command: WorkspaceMeetingAssistantCommand) => boolean
+  defaultRecordingPolicy?: Exclude<MeetingRecordingPolicy, "Inherit">
+  onRecordingPolicyChange?: (policy: MeetingRecordingPolicy) => void
+  onBeforeRecordingStart?: () => Promise<boolean>
 }
 
 export function MeetingSourcesWorkspace({
@@ -58,12 +62,15 @@ export function MeetingSourcesWorkspace({
   commandError,
   onClearError,
   onCommand,
+  defaultRecordingPolicy = "Manual",
+  onRecordingPolicyChange,
+  onBeforeRecordingStart,
 }: SharedProps) {
   const meetTranscripts = transcripts
     .filter((transcript) => transcript.meetingId === meet.id)
     .sort((left, right) => right.createdAtUtc.localeCompare(left.createdAtUtc))
   const meetScreenshots = sortMeetingScreenshots(meet.id, screenshots)
-  const sourceActionsDisabled = readOnly || !onCommand || meet.id === "meeting-draft"
+  const sourceActionsDisabled = readOnly || !onCommand
   const send = (command: WorkspaceMeetingAssistantCommand) => onCommand?.(command) ?? false
 
   return (
@@ -98,12 +105,6 @@ export function MeetingSourcesWorkspace({
           </div>
         </div>
 
-        {meet.id === "meeting-draft" && (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-300">
-            Save this MEET before attaching source files.
-          </p>
-        )}
-
         {onCommand && (
           <MeetingAssistantSection
             meet={meet}
@@ -117,6 +118,9 @@ export function MeetingSourcesWorkspace({
             commandError={commandError}
             onClearError={onClearError}
             onCommand={onCommand}
+            defaultRecordingPolicy={defaultRecordingPolicy}
+            onRecordingPolicyChange={onRecordingPolicyChange}
+            onBeforeRecordingStart={onBeforeRecordingStart}
             showAnalysis={false}
             showTranscript={false}
           />

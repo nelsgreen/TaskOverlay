@@ -388,7 +388,7 @@ public static class StateMigrator
         var meetingIds = new HashSet<Guid>();
         foreach (var meeting in state.Meetings.ToList())
         {
-            if (string.IsNullOrWhiteSpace(meeting.Title) || meeting.StartsAtUtc == default)
+            if (meeting.StartsAtUtc == default)
             {
                 state.Meetings.Remove(meeting);
                 changed = true;
@@ -408,14 +408,22 @@ public static class StateMigrator
                 changed = true;
             }
 
-            var title = meeting.Title.Trim();
+            var projectName = state.Projects.FirstOrDefault(project =>
+                project.Id == meeting.ProjectId)?.Name;
+            var title = string.IsNullOrWhiteSpace(meeting.Title)
+                ? MeetingService.GenerateTitle(projectName, meeting.StartsAtUtc)
+                : meeting.Title.Trim();
+            var titleIsGenerated = string.IsNullOrWhiteSpace(meeting.Title) ||
+                                   meeting.TitleIsGenerated;
             var notes = meeting.Notes?.Trim() ?? string.Empty;
             var location = meeting.Location?.Trim() ?? string.Empty;
             var link = meeting.Link?.Trim() ?? string.Empty;
             if (meeting.Title != title || meeting.Notes != notes ||
-                meeting.Location != location || meeting.Link != link)
+                meeting.Location != location || meeting.Link != link ||
+                meeting.TitleIsGenerated != titleIsGenerated)
             {
                 meeting.Title = title;
+                meeting.TitleIsGenerated = titleIsGenerated;
                 meeting.Notes = notes;
                 meeting.Location = location;
                 meeting.Link = link;

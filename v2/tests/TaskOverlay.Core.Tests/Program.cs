@@ -160,6 +160,7 @@ internal static class Program
             ("workspace command notes persistence", WorkspaceCommandNotesPersistence),
             ("workspace command title persistence", WorkspaceCommandTitlePersistence),
             ("workspace command contract rejection", WorkspaceCommandContractRejection),
+            ("workspace command persistence rollback", WorkspaceCommandPersistenceRollback),
             ("workspace task work session commands and persistence", WorkspaceTaskWorkSessionCommandsAndPersistence),
             ("workspace task work session validation", WorkspaceTaskWorkSessionValidation),
             ("workspace task work session migration fixtures", WorkspaceTaskWorkSessionMigrationFixtures),
@@ -174,6 +175,7 @@ internal static class Program
             ("workspace command deadline persistence", WorkspaceCommandDeadlinePersistence),
             ("workspace legacy state without meetings", WorkspaceLegacyStateWithoutMeetings),
             ("workspace meeting command persistence", WorkspaceMeetingCommandPersistence),
+            ("workspace generated meeting draft autosave persistence", WorkspaceGeneratedMeetingDraftAutosavePersistence),
             ("workspace meeting validation and repair", WorkspaceMeetingValidationAndRepair),
             ("workspace meeting snapshot and linked task cleanup", WorkspaceMeetingSnapshotAndLinkedTaskCleanup),
             ("workspace active now collapsed persistence", WorkspaceActiveNowCollapsedPersistence),
@@ -4760,6 +4762,88 @@ internal static class Program
         Assert(task.Title != "No change", "Rejected contract must not mutate state.");
     }
 
+    private static void WorkspaceCommandPersistenceRollback()
+    {
+        var now = DateTimeOffset.Parse("2026-07-17T12:00:00Z");
+        var state = AppState.CreateDefault(now);
+        var meeting = new MeetingService(state).Create(new MeetingUpdate(
+            state.Projects[0].Id,
+            "Persisted title",
+            null,
+            now.AddHours(1),
+            30,
+            null,
+            null,
+            null), now)!;
+        var saveAttempt = 0;
+        var durableWrites = new List<string>();
+        var refreshCount = 0;
+        var dispatcher = new WorkspaceCommandDispatcher(
+            state,
+            () =>
+            {
+                saveAttempt += 1;
+                if (saveAttempt == 1)
+                {
+                    throw new IOException("Synthetic persistence failure.");
+                }
+
+                durableWrites.Add(JsonSerializer.Serialize(state));
+            },
+            () => refreshCount += 1);
+
+        var failedPatch = dispatcher.Dispatch(WorkspaceCommandJson(
+            "rollback-meet", "updateMeeting", new
+            {
+                meetingId = meeting.Id.ToString("N"),
+                title = "Failed title",
+                titleIsGenerated = false
+            }), now.AddMinutes(1));
+        Assert(!failedPatch.Success && failedPatch.ErrorCode == "persistenceFailed" &&
+               state.Meetings.Single(item => item.Id == meeting.Id).Title == "Persisted title" &&
+               refreshCount == 0,
+            "A persistence failure must roll the authoritative in-memory state back.");
+
+        var unrelated = dispatcher.Dispatch(WorkspaceCommandJson(
+            "rollback-unrelated", "updateTaskStatus", new
+            {
+                taskId = state.Tasks[0].Id.ToString("N"),
+                status = "WAIT"
+            }), now.AddMinutes(2));
+        Assert(unrelated.Success && durableWrites.Count == 1 &&
+               !durableWrites[0].Contains("Failed title", StringComparison.Ordinal) &&
+               state.Meetings.Single(item => item.Id == meeting.Id).Title == "Persisted title",
+            "A later unrelated save must not persist a previously failed MEET patch.");
+
+        var retry = dispatcher.Dispatch(WorkspaceCommandJson(
+            "rollback-retry", "updateMeeting", new
+            {
+                meetingId = meeting.Id.ToString("N"),
+                title = "Retried title",
+                titleIsGenerated = false
+            }), now.AddMinutes(3));
+        Assert(retry.Success &&
+               state.Meetings.Single(item => item.Id == meeting.Id).Title == "Retried title" &&
+               durableWrites.Count(write =>
+                   write.Contains("Retried title", StringComparison.Ordinal)) == 1,
+            "Retry must apply and persist the current intended patch exactly once.");
+
+        var refreshWarningDispatcher = new WorkspaceCommandDispatcher(
+            state,
+            () => durableWrites.Add(JsonSerializer.Serialize(state)),
+            () => throw new InvalidOperationException("Synthetic refresh failure."));
+        var refreshWarning = refreshWarningDispatcher.Dispatch(WorkspaceCommandJson(
+            "refresh-warning", "updateMeeting", new
+            {
+                meetingId = meeting.Id.ToString("N"),
+                location = "Room 7"
+            }), now.AddMinutes(4));
+        Assert(refreshWarning.Success && refreshWarning.WarningCode == "stateRefreshFailed" &&
+               state.Meetings.Single(item => item.Id == meeting.Id).Location == "Room 7" &&
+               durableWrites[^1].Contains("Room 7", StringComparison.Ordinal),
+            "A refresh failure after durable save must remain successful and report a separate warning.");
+    }
+
     private static void WorkspaceTaskWorkSessionCommandsAndPersistence()
     {
         WithTemporaryDirectory(directory =>
@@ -6199,6 +6283,102 @@ internal static class Program
         });
     }
 
+    private static void WorkspaceGeneratedMeetingDraftAutosavePersistence()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-17T09:00:00Z");
+            var startsAtUtc = DateTimeOffset.Parse("2026-07-17T10:30:00Z");
+            var state = AppState.CreateDefault(now);
+            var project = state.Projects[0];
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+
+            var create = dispatcher.Dispatch(WorkspaceCommandJson(
+                "generated-meet-create", "createMeeting", new
+                {
+                    projectId = project.Id.ToString("N"),
+                    title = string.Empty,
+                    titleIsGenerated = true,
+                    startsAtUtc = startsAtUtc.ToString("O"),
+                    durationMinutes = 30
+                }), now);
+            Assert(create.Success && Guid.TryParse(create.CreatedMeetingId, out _),
+                "Opening a new MEET should immediately persist a stable meeting id.");
+            var meetingId = Guid.Parse(create.CreatedMeetingId!);
+
+            var afterCreate = store.Load();
+            var created = afterCreate.Meetings.Single(meeting => meeting.Id == meetingId);
+            Assert(created.TitleIsGenerated &&
+                   created.Title == MeetingService.GenerateTitle(project.Name, startsAtUtc),
+                "A blank new MEET should persist a usable generated project/date title.");
+
+            var snapshot = WorkspaceSnapshotFactory.Create(
+                afterCreate,
+                now,
+                WorkspaceSnapshotFactory.ConnectedMode,
+                defaultMeetingRecordingPolicy: MeetingRecordingPolicy.AutoRecord);
+            var snapshotMeeting = snapshot.Meetings.Single(meeting => meeting.Id == meetingId.ToString("N"));
+            Assert(snapshotMeeting.TitleIsGenerated &&
+                   snapshot.DefaultMeetingRecordingPolicy == MeetingRecordingPolicy.AutoRecord.ToString(),
+                "Workspace snapshot should expose generated-title state and the inherited recording default.");
+
+            var pendingRecording = new MeetingRecordingService(afterCreate).CreatePending(
+                meetingId,
+                MeetingRecordingSourceKind.ManualMeet,
+                $"meetings/{meetingId:N}/recordings/{Guid.NewGuid():N}",
+                now.AddSeconds(1));
+            Assert(pendingRecording is not null,
+                "A newly opened persisted MEET should accept recording immediately without a manual Save.");
+
+            var authored = new WorkspaceCommandDispatcher(
+                afterCreate,
+                () => store.Save(afterCreate),
+                () => { }).Dispatch(WorkspaceCommandJson(
+                    "generated-meet-title", "updateMeeting", new
+                    {
+                        meetingId = meetingId.ToString("N"),
+                        title = "User planning session",
+                        titleIsGenerated = false
+                    }), now.AddMinutes(1));
+            Assert(authored.Success, "The first user-authored title patch should succeed.");
+            var afterTitle = store.Load();
+            var renamed = afterTitle.Meetings.Single(meeting => meeting.Id == meetingId);
+            Assert(renamed.Title == "User planning session" && !renamed.TitleIsGenerated,
+                "The first genuine title input must replace, not append to, the generated title.");
+
+            var discrete = new WorkspaceCommandDispatcher(
+                afterTitle,
+                () => store.Save(afterTitle),
+                () => { }).Dispatch(WorkspaceCommandJson(
+                    "generated-meet-policy", "updateMeeting", new
+                    {
+                        meetingId = meetingId.ToString("N"),
+                        recordingPolicy = "AutoRecord"
+                    }), now.AddMinutes(2));
+            Assert(discrete.Success, "A discrete recording-policy autosave patch should succeed.");
+            var restarted = store.Load();
+            var persisted = restarted.Meetings.Single(meeting => meeting.Id == meetingId);
+            Assert(persisted.Title == "User planning session" &&
+                   persisted.RecordingPolicy == MeetingRecordingPolicy.AutoRecord &&
+                   restarted.MeetingRecordings.Any(recording =>
+                       recording.Id == pendingRecording!.Id && recording.MeetId == meetingId),
+                "Generated-title replacement, discrete autosave, and attached recording should survive restart.");
+
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            var meetingJson = root["meetings"]!.AsArray().Single()!.AsObject();
+            meetingJson.Remove("titleIsGenerated");
+            File.WriteAllText(
+                store.StatePath,
+                root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            var legacyTitleState = store.Load();
+            var legacyTitledMeeting = legacyTitleState.Meetings.Single(meeting => meeting.Id == meetingId);
+            Assert(legacyTitledMeeting.Title == "User planning session" &&
+                   !legacyTitledMeeting.TitleIsGenerated,
+                "Existing titled meetings without the additive generated-title flag must remain user-authored.");
+        });
+    }
+
     private static void WorkspaceMeetingValidationAndRepair()
     {
         var now = DateTimeOffset.Parse("2026-07-11T10:00:00Z");
@@ -6248,12 +6428,15 @@ internal static class Program
         });
         state.Meetings.Add(new MeetingItem { Title = "   ", StartsAtUtc = now });
         Assert(StateMigrator.RepairCurrentState(state), "Corrupt meetings should be repaired.");
-        Assert(state.Meetings.Count == 1 &&
+        Assert(state.Meetings.Count == 2 &&
                state.Meetings[0].ProjectId == state.Projects[0].Id &&
                state.Meetings[0].Title == "Repair me" &&
                state.Meetings[0].DurationMinutes == MeetingItem.DefaultDurationMinutes &&
-               state.Meetings[0].LinkedTaskId is null,
-            "Repair should remove invalid drafts and normalize safe meeting fields.");
+               state.Meetings[0].LinkedTaskId is null &&
+               state.Meetings[1].ProjectId == state.Projects[0].Id &&
+               state.Meetings[1].TitleIsGenerated &&
+               !string.IsNullOrWhiteSpace(state.Meetings[1].Title),
+            "Repair should retain recoverable drafts with generated titles and normalize safe meeting fields.");
     }
 
     private static void WorkspaceMeetingSnapshotAndLinkedTaskCleanup()
