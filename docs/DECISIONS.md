@@ -8,11 +8,19 @@ item.
 
 - TaskOverlay is memory-support, attention-support, and work-recovery software,
   not just a task list.
+- TaskOverlay is a personal Windows-first working-memory system. It should
+  provide a practical interface to the user's external working memory, not just
+  a place to store tasks or context snippets.
 - WPF v2 is the active product.
 - Go v1 is legacy.
 - Workspace is the main management surface.
 - Overlay is the attention layer, not the full task manager.
 - Tree is the master structure.
+- Cross-platform distribution, Web/PWA, macOS support, multi-user accounts, and
+  commercial infrastructure are deferred until the Windows product is mature
+  and proves useful beyond its owner.
+- Telegram/mobile capture is important as an ingestion path into the Windows
+  app. It is not currently a general cross-platform TaskOverlay client.
 - Repo docs are the source of truth for backlog/decisions/roadmap; chat memory
   alone is not.
 
@@ -42,6 +50,11 @@ item.
 - `localStorage` must not be used for production persistence.
 - No mock-only production controls.
 - Backups are backup, not sync.
+- Raw source artifacts should be preserved immutably with provenance. Derived
+  analysis should be versioned, reviewable, retryable, and re-creatable.
+- Existing notes, context, MEET transcripts, recordings, Telegram messages, and
+  other captured material should support later backfill analysis and
+  re-analysis.
 
 ## Overlay And Attention
 
@@ -222,6 +235,32 @@ item.
   confirmation. AI must never mutate tasks/MEET/context directly. The MEET
   Assistant implements the first bounded ProposedActions review/apply path;
   future AI features must reuse the same explicit-review boundary.
+- Future unified capture should introduce a `SourceArtifact` / Context Inbox
+  layer over existing notes/context, MEET recordings, imported audio,
+  transcripts, screenshots, Telegram captures, phone-originated recordings,
+  system call recordings, phone screenshots/shared files, and post-call user
+  recollections. This layer is future work and must not bypass the current
+  connected AppState/bridge path.
+- Context Inbox processing states should distinguish Captured, Needs
+  transcription, Ready for analysis, Needs review, Accepted, Rejected, and
+  Failed.
+- Durable context creation is review-first by default. AI may suggest people,
+  projects, workstreams, topics, item types, contradictions, and superseded
+  items, but the user must be able to Accept, Edit, Split, Merge, Change scope,
+  Change topic, or Reject before durable context is created.
+- Future attributed knowledge separates Person, Project, Workstream, Topic,
+  ContextItem, and Source reference. Person identity is global; speaker
+  identity is transcript-local until linked to a global Person; speaker
+  attribution is not the same as context scope.
+- A MEET project is only a default hint and does not determine the scope of
+  every statement. One source may produce multiple ContextItems across
+  projects, workstreams, and topics.
+- Context scope must support Project, multiple projects, workspace/general,
+  personal, and unassigned / needs scope review.
+- Do not silently overwrite older information. Preserve chronology,
+  corrections, changing positions, contradictions, and exact source references.
+- User recollection is a valid source type, but must not be represented as an
+  exact quote or direct recording of another person.
 - Context Pack is a read-only export generated from stored TaskOverlay data;
   deprecated/superseded items are excluded by default. Not shipped in the
   foundation PR (expanded export shipped later - see the Context Pack entry
@@ -355,6 +394,21 @@ item.
 - Plain text and command captures create raw capture / SourceDocument drafts
   for user review. Voice, transcription, AI interpretation, and automatic
   final task/MEET creation are later work.
+- Telegram ingestion should later accept voice messages, audio files, text,
+  screenshots/images, documents, and forwarded materials. The original artifact
+  must be preserved, transcribed or visually analyzed when appropriate, split
+  into candidates, and sent through Context Inbox.
+- Phone-originated capture should later include one-tap personal voice capture,
+  shared voice messages/files, screenshots, imported system call recordings,
+  imported Telegram/WhatsApp materials, and immediate post-call user
+  recollection when an actual call recording is unavailable.
+- The user's normal phone-call setup uses a Bluetooth headset. Ambient
+  speakerphone recording is not an acceptable fallback.
+- Do not promise reliable third-party Telegram or WhatsApp call recording on
+  stock Android. Prefer native/system call recording where supported,
+  high-quality Telegram/WhatsApp capture through the Windows recording path,
+  importing externally created recordings, or post-call recollection as a
+  clearly labeled fallback source.
 - PR 3 (done) adds status/diagnostics, not new capture behavior: a volatile,
   non-secret `TelegramCaptureDiagnostics` snapshot in `TaskOverlay.Core`
   reports one of `NotConfigured` / `Disabled` / `Running` /
@@ -379,6 +433,28 @@ item.
 - Full sync/mobile/cloud comes later.
 - Server-mediated offline-first sync is preferred.
 - P2P/CRDT is not the first sync architecture.
+- Web/PWA, macOS, multi-user backend, and commercial distribution are
+  explicitly deferred possibilities after product maturity and external
+  usefulness are validated. They are not active roadmap work.
+
+## Context Assistant
+
+- Context Assistant is the future primary conversational interface to
+  ContextHUB outside meetings.
+- It should support text questions first and voice input later.
+- Search must support combinations of Person, Project, Workstream, Topic,
+  MEET, transcript, ContextItem, source document, date, and status.
+- Answers must be grounded in retrieved context and include navigable source
+  references to ContextItems, meetings, transcript timestamps, screenshots,
+  source documents, recordings, or recollections.
+- The assistant must surface contradictions and say when confirmed information
+  is unavailable.
+- Chat messages and model answers are not themselves trusted source material.
+  They may create proposed facts, risks, questions, decisions, or tasks only
+  through explicit review.
+- The same future context-query service should later power Workspace Context
+  Chat, voice question input, Overlay Quick Ask, Meeting Brief, Meeting
+  Overlay, and Live Meeting Copilot.
 
 ## Process
 

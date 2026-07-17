@@ -21,6 +21,104 @@ Active product scope:
 - No `localStorage` production persistence.
 - No mock-only production controls.
 
+Product direction:
+
+- TaskOverlay is a personal Windows-first working-memory system. Its purpose is
+  not merely to store context, but to provide a practical interface to the
+  user's external working memory.
+- Cross-platform distribution, Web/PWA, macOS support, multi-user accounts, and
+  commercial infrastructure are intentionally deferred until the Windows product
+  is mature and proves useful beyond its owner.
+- Specialized mobile and Telegram capture remain important because they supply
+  context to the Windows application. They are not currently a general
+  cross-platform TaskOverlay client.
+- Build capture-first:
+  - reliably preserve raw source materials;
+  - process and transcribe them;
+  - derive structured knowledge;
+  - review proposed knowledge;
+  - use confirmed context for search, briefs, and assistance.
+- Original source artifacts must remain immutable and keep provenance. Derived
+  analysis must be versioned, reviewable, retryable, and re-creatable when new
+  analyzers or context modules are introduced.
+- Previously captured notes, context, MEET transcripts, recordings, Telegram
+  messages, and other source material should support backfill analysis and
+  re-analysis.
+
+## Unified Source Capture And Context Inbox
+
+- Add a future unified `SourceArtifact` / source layer and Context Inbox for:
+  - existing TaskOverlay notes/context;
+  - MEET recordings;
+  - imported audio;
+  - imported transcripts;
+  - screenshots;
+  - Telegram text, voice, audio, images, documents, and forwarded materials;
+  - phone-originated recordings;
+  - system call recordings;
+  - phone screenshots and shared files;
+  - user recollections recorded after an unrecorded conversation.
+- Context Inbox processing states should include:
+  - Captured;
+  - Needs transcription;
+  - Ready for analysis;
+  - Needs review;
+  - Accepted;
+  - Rejected;
+  - Failed.
+- Source artifacts must preserve the original payload/provenance separately
+  from normalized transcripts, extracted text, screenshots, analysis runs, and
+  accepted ContextItems.
+- User recollection is a valid source type, but must not be represented as an
+  exact quote or direct recording of another person.
+
+## Attributed Working Memory
+
+- Future attributed knowledge should support these independent dimensions:
+  - Person;
+  - Project;
+  - Workstream;
+  - Topic;
+  - ContextItem;
+  - Source reference.
+- Person identity is global. A person's role or relationship may differ by
+  project.
+- Speaker identity is local to a transcript until linked to a global Person.
+  Speaker attribution is not the same as context scope.
+- A MEET project is only a default hint and does not determine the scope of
+  every statement.
+- Workstream is a larger work direction. Topic is a persistent discussion thread
+  inside or across workstreams.
+- One source may produce multiple ContextItems across different projects,
+  workstreams, and topics.
+- Context scope must support Project, multiple projects, workspace/general,
+  personal, and unassigned / needs scope review.
+- Attributed statements should preserve:
+  - who said or reported it;
+  - what was said;
+  - when it occurred;
+  - when it was captured;
+  - related projects;
+  - related workstreams;
+  - related topics;
+  - exact source references;
+  - current status such as NeedsReview, Confirmed, Disputed, Contradicted, or
+    Superseded.
+- Do not silently overwrite older information. Preserve chronology,
+  corrections, changing positions, and contradictions.
+
+## Review-First Automation
+
+- Initial AI-assisted context mode should be review required.
+- AI may suggest people, projects, workstreams, topics, fact/decision/risk/
+  question/commitment/instruction/deadline types, contradictions, and possible
+  superseded items.
+- The user must be able to Accept, Edit, Split, Merge, Change scope, Change
+  topic, or Reject before durable context is created.
+- Later optional modes may include suggest-only, auto-link with review, and
+  explicitly enabled high-confidence auto-apply. Automatic durable context
+  creation must not be the default.
+
 ## Backup
 
 - Hide or rename user-facing "Work" in backup UI. "Work" is an internal future
