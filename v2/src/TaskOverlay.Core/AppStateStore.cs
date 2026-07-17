@@ -47,7 +47,8 @@ public sealed class AppStateStore
                 return defaultState;
             }
 
-            var json = File.ReadAllText(StatePath);
+            var json = File.ReadAllBytes(StatePath);
+            ThrowIfFutureSchema(json, StatePath);
             var state = JsonSerializer.Deserialize<AppState>(json, _jsonOptions);
             if (state is null)
             {
@@ -210,6 +211,31 @@ public sealed class AppStateStore
         catch
         {
             // Diagnostics must never change storage behavior.
+        }
+    }
+
+    internal static void ThrowIfFutureSchema(ReadOnlyMemory<byte> json, string statePath)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("schemaVersion", out var schemaVersion))
+        {
+            return;
+        }
+
+        if (schemaVersion.ValueKind != JsonValueKind.Number ||
+            !schemaVersion.TryGetInt32(out var storedSchemaVersion))
+        {
+            throw new InvalidDataException("State schemaVersion must be an integer.");
+        }
+
+        if (storedSchemaVersion > AppState.CurrentSchemaVersion)
+        {
+            throw new UnsupportedFutureStateVersionException(
+                storedSchemaVersion,
+                AppState.CurrentSchemaVersion,
+                statePath);
         }
     }
 

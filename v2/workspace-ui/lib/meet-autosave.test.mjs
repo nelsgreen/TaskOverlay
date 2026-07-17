@@ -108,3 +108,35 @@ test("failed edits remain retryable without losing the latest value", async () =
   assert.equal(statuses.at(-1), "saved")
   queue.dispose()
 })
+
+test("a later failure cannot invalidate an earlier durable flush", async () => {
+  const operations = []
+  const queue = new MeetingAutosaveQueue(
+    { title: "Initial" },
+    (value) => new Promise((resolve, reject) => {
+      operations.push({ title: value.title, resolve, reject })
+    }),
+    () => undefined,
+  )
+
+  queue.enqueue({ title: "Revision A" }, ["title"], "immediate")
+  const flushA = queue.flush()
+  await wait()
+  queue.enqueue({ title: "Revision B" }, ["title"], "immediate")
+
+  operations[0].resolve()
+  await wait()
+  operations[1].reject(new Error("B failed"))
+  await wait()
+
+  assert.equal(await flushA, true)
+  assert.equal(queue.getStatus(), "failed")
+
+  const retryB = queue.retry()
+  await wait()
+  assert.equal(operations[2].title, "Revision B")
+  operations[2].resolve()
+  assert.equal(await retryB, true)
+  assert.equal(queue.getStatus(), "saved")
+  queue.dispose()
+})

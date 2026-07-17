@@ -97,6 +97,7 @@ internal static class Program
             ("window placement off-screen correction", WindowPlacementOffScreenCorrection),
             ("collapsed panel opens inward", CollapsedPanelOpensInward),
             ("corrupted state backup", CorruptedStateBackup),
+            ("future state schema load protection", FutureStateSchemaLoadProtection),
             ("crash log contents", CrashLogContents),
             ("diagnostic callback isolation", DiagnosticCallbackIsolation),
             ("backup filename generation", BackupFilenameGeneration),
@@ -145,6 +146,7 @@ internal static class Program
             ("backup discovery fallback and freshness", BackupDiscoveryFallbackAndFreshness),
             ("backup restore safety pair", BackupRestoreSafetyPair),
             ("backup restore rejects invalid state", BackupRestoreRejectsInvalidState),
+            ("backup restore rejects future schema", BackupRestoreRejectsFutureSchema),
             ("clipboard lines create multiple tasks", ClipboardLinesCreateMultipleTasks),
             ("single clipboard task collapses lines", SingleClipboardTaskCollapsesLines),
             ("clipboard task with description", ClipboardTaskWithDescription),
@@ -3135,6 +3137,48 @@ internal static class Program
         });
     }
 
+    private static void FutureStateSchemaLoadProtection()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            store.Save(AppState.CreateDefault());
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            var futureVersion = AppState.CurrentSchemaVersion + 1;
+            root["schemaVersion"] = futureVersion;
+            File.WriteAllText(
+                store.StatePath,
+                root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            var originalBytes = File.ReadAllBytes(store.StatePath);
+
+            for (var attempt = 0; attempt < 2; attempt += 1)
+            {
+                UnsupportedFutureStateVersionException? failure = null;
+                try
+                {
+                    store.Load();
+                }
+                catch (UnsupportedFutureStateVersionException ex)
+                {
+                    failure = ex;
+                }
+
+                Assert(failure is not null &&
+                       failure.StoredSchemaVersion == futureVersion &&
+                       failure.SupportedSchemaVersion == AppState.CurrentSchemaVersion &&
+                       failure.StatePath == store.StatePath,
+                    "Future state must fail with its stored/supported versions and path.");
+                Assert(File.ReadAllBytes(store.StatePath).SequenceEqual(originalBytes),
+                    "Future state must remain byte-for-byte unchanged after load refusal.");
+            }
+
+            Assert(!Directory.EnumerateFiles(directory, "state.corrupt.*.json").Any(),
+                "Future state must not be mislabeled as corrupt.");
+            Assert(!File.Exists(store.BackupPath),
+                "Future state refusal must not create or replace a state backup.");
+        });
+    }
+
     private static void CrashLogContents()
     {
         WithTemporaryDirectory(directory =>
@@ -4215,6 +4259,57 @@ internal static class Program
             Assert(
                 !Directory.EnumerateFiles(backupDirectory, "*_before-restore.json").Any(),
                 "Invalid restore must not create a misleading safety backup.");
+        });
+    }
+
+    private static void BackupRestoreRejectsFutureSchema()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var localDirectory = Path.Combine(directory, "local");
+            var backupDirectory = Path.Combine(directory, "backups");
+            Directory.CreateDirectory(localDirectory);
+            Directory.CreateDirectory(backupDirectory);
+            var store = new AppStateStore(localDirectory);
+            store.Save(AppState.CreateDefault());
+            var localBytes = File.ReadAllBytes(store.StatePath);
+
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            var futureVersion = AppState.CurrentSchemaVersion + 3;
+            root["schemaVersion"] = futureVersion;
+            var futurePath = Path.Combine(
+                backupDirectory,
+                "TaskOverlay_Work_REMOTEPC_2026-07-17_12-00.json");
+            File.WriteAllText(
+                futurePath,
+                root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            var futureBytes = File.ReadAllBytes(futurePath);
+            var candidate = new BackupCandidate(
+                futurePath,
+                null,
+                DateTimeOffset.Parse("2026-07-17T12:00:00Z"),
+                DateTimeOffset.Parse("2026-07-17T12:00:00Z"),
+                "REMOTEPC",
+                "Work");
+
+            var result = new BackupService(store.StatePath).RestoreLatestBackup(
+                new BackupConfiguration(true, backupDirectory, 30, 14, 100),
+                candidate,
+                DateTimeOffset.Parse("2026-07-17T12:05:00Z"),
+                "LOCALPC");
+
+            Assert(!result.Succeeded &&
+                   result.Message.Contains(futureVersion.ToString(), StringComparison.Ordinal) &&
+                   result.Message.Contains(
+                       AppState.CurrentSchemaVersion.ToString(),
+                       StringComparison.Ordinal),
+                "Future backup restore must report stored and supported schema versions.");
+            Assert(File.ReadAllBytes(store.StatePath).SequenceEqual(localBytes),
+                "Rejected future restore must preserve local state byte-for-byte.");
+            Assert(File.ReadAllBytes(futurePath).SequenceEqual(futureBytes),
+                "Rejected future restore must preserve the selected backup byte-for-byte.");
+            Assert(!Directory.EnumerateFiles(backupDirectory, "*_before-restore.json").Any(),
+                "Future backup must be rejected before a safety backup is created.");
         });
     }
 

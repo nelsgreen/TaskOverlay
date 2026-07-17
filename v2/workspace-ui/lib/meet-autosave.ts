@@ -164,6 +164,11 @@ export class MeetingAutosaveQueue<T, F extends string> {
   private resolveFailedWaiters(failedRevision: number): void {
     for (let index = this.waiters.length - 1; index >= 0; index -= 1) {
       const waiter = this.waiters[index]
+      if (waiter.targetRevision <= this.savedRevision) {
+        this.waiters.splice(index, 1)
+        waiter.resolve(true)
+        continue
+      }
       if (waiter.targetRevision > failedRevision) continue
       this.waiters.splice(index, 1)
       waiter.resolve(false)

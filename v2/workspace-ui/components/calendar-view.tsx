@@ -85,7 +85,7 @@ interface CalendarViewProps {
   viewMode: "day" | "week"; selectedDate: string
   projects: Project[]; sections: Section[]; tasks: Task[]; taskWorkSessions: TaskWorkSession[]; meetItems: MeetItem[]
   selectedProjectIds: string[]; selectedTaskId: string | null; selectedMeetId: string | null
-  showDone: boolean; canSchedule: boolean
+  showDone: boolean; canSchedule: boolean; createMeetDisabled?: boolean
   onSelectTask: (taskId: string) => void; onSelectMeet: (meetId: string) => void
   onPickDay: (dateKey: string) => void
   onCreateTaskAtSlot: (dateKey: string, startMin: number) => void
@@ -101,6 +101,7 @@ interface CalendarViewProps {
 export function CalendarView({
   viewMode, selectedDate, projects, sections, tasks, taskWorkSessions, meetItems,
   selectedProjectIds, selectedTaskId, selectedMeetId, showDone, canSchedule,
+  createMeetDisabled = false,
   onSelectTask, onSelectMeet, onPickDay, onCreateTaskAtSlot, onCreateMeetAtSlot,
   onCreateTaskWorkSession, onUpdateTaskWorkSession, onRequestDeleteTaskWorkSession,
   onSetTaskStatus, onMoveMeet, onRequestDeleteMeet,
@@ -455,6 +456,7 @@ export function CalendarView({
             setMenu(null)
           }}
           canSchedule={canSchedule}
+          canCreateMeet={canSchedule && !createMeetDisabled}
         />
       )}
     </div>
@@ -472,6 +474,7 @@ function CalendarContextMenu({
   onRemoveBlock,
   onSetTaskStatus,
   canSchedule,
+  canCreateMeet,
 }: {
   menu: CalendarMenuState
   onClose: () => void
@@ -482,6 +485,7 @@ function CalendarContextMenu({
   onRemoveBlock: () => void
   onSetTaskStatus: (status: Status) => void
   canSchedule: boolean
+  canCreateMeet: boolean
 }) {
   return (
     <div
@@ -506,7 +510,7 @@ function CalendarContextMenu({
             type="button"
             role="menuitem"
             onClick={onCreateMeet}
-            disabled={!canSchedule}
+            disabled={!canCreateMeet}
             className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             Create MEET

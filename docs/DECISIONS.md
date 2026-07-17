@@ -75,10 +75,17 @@ item.
 - MEET Details uses one ordered patch-autosave queue: text changes are
   debounced, discrete controls persist immediately, and pending edits flush
   before Close and recording. Save/Revert buttons are not part of this flow.
-- Workspace commands are transactional at the `AppState`/save boundary. If
-  persistence throws, authoritative memory is restored to the pre-command
-  durable state. A failure after disk persistence in a dependent refresh or
-  snapshot send is a separate warning and does not roll back the saved change.
+- Commands dispatched through `WorkspaceCommandDispatcher` are transactional
+  at the `AppState`/save boundary. If persistence throws, authoritative memory
+  is restored to the pre-command durable state. A failure after disk
+  persistence in a dependent refresh or snapshot send is a separate warning
+  and does not roll back the saved change. Meeting Assistant's asynchronous
+  import/transcription/analysis/recording operations are outside this guarantee
+  until their persistence boundaries receive equivalent hardening.
+- A state file or restore candidate with a schema newer than the running build
+  supports must be rejected before migration, repair, backup fallback, or any
+  write. Startup must identify both versions and the untouched state path, then
+  require a newer TaskOverlay build.
 - Handle is a functional surface, not branding.
 - Handle anchor is the source of truth and must not be derived from panel
   position.

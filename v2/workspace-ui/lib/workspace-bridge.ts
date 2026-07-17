@@ -91,6 +91,7 @@ export interface WorkspaceBridgeState {
   sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
   sendMeetingCommand(command: WorkspaceMeetingCommand): boolean
   sendMeetingCommandTracked(command: WorkspaceMeetingCommand): Promise<WorkspaceCommandResult>
+  requestSnapshot(): boolean
   sendTaskWorkSessionCommand(command: WorkspaceTaskWorkSessionCommand): boolean
   sendContextHubCommand(command: WorkspaceContextHubCommand): boolean
   sendMeetingAssistantCommand(command: WorkspaceMeetingAssistantCommand): boolean
@@ -251,6 +252,18 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     })
   }, [postCommand])
 
+  const requestSnapshot = useCallback((): boolean => {
+    const webview = window.chrome?.webview
+    if (!webview || snapshot?.mode !== "connected") return false
+    try {
+      webview.postMessage({ schemaVersion: 1, messageType: "snapshotRequest" })
+      return true
+    } catch {
+      setError("Workspace snapshot refresh could not be requested.")
+      return false
+    }
+  }, [snapshot?.mode])
+
   const sendTaskWorkSessionCommand = useCallback((command: WorkspaceTaskWorkSessionCommand): boolean =>
     postCommand(command), [postCommand])
 
@@ -284,6 +297,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     sendWorkspaceContext,
     sendMeetingCommand,
     sendMeetingCommandTracked,
+    requestSnapshot,
     sendTaskWorkSessionCommand,
     sendContextHubCommand,
     sendMeetingAssistantCommand,

@@ -53,6 +53,8 @@ interface Props {
   onCalendarViewModeChange: (mode: "day" | "week") => void
   onCalendarAddMeeting: () => void
   calendarAddMeetingDisabled?: boolean
+  calendarAddMeetingLabel?: string
+  calendarAddMeetingError?: string | null
   wsFilter: WorkstreamFilter
   onWsFilterChange: (filter: WorkstreamFilter) => void
   wsSummary: Record<string, number>
@@ -137,6 +139,8 @@ export function WorkspaceHeader({
   onCalendarViewModeChange,
   onCalendarAddMeeting,
   calendarAddMeetingDisabled = false,
+  calendarAddMeetingLabel = "MEET",
+  calendarAddMeetingError = null,
   wsFilter,
   onWsFilterChange,
   wsSummary,
@@ -271,6 +275,8 @@ export function WorkspaceHeader({
             onViewModeChange={onCalendarViewModeChange}
             onAddMeeting={onCalendarAddMeeting}
             addMeetingDisabled={calendarAddMeetingDisabled}
+            addMeetingLabel={calendarAddMeetingLabel}
+            addMeetingError={calendarAddMeetingError}
           />
         )}
         {tab === "workstreams" && (
@@ -539,6 +545,8 @@ function CalendarToolbar({
   onViewModeChange,
   onAddMeeting,
   addMeetingDisabled,
+  addMeetingLabel,
+  addMeetingError,
 }: {
   selectedDate: string
   viewMode: "day" | "week"
@@ -550,6 +558,8 @@ function CalendarToolbar({
   onViewModeChange: (mode: "day" | "week") => void
   onAddMeeting: () => void
   addMeetingDisabled?: boolean
+  addMeetingLabel: string
+  addMeetingError: string | null
 }) {
   const today = todayKey()
   const isToday = selectedDate === today && viewMode === "day"
@@ -628,6 +638,14 @@ function CalendarToolbar({
             />
           </button>
         </label>
+        {addMeetingError && (
+          <span
+            className="max-w-48 truncate text-[10px] text-destructive"
+            title={addMeetingError}
+          >
+            {addMeetingError}
+          </span>
+        )}
         <button
           type="button"
           onClick={onAddMeeting}
@@ -636,7 +654,7 @@ function CalendarToolbar({
           className="flex h-6 items-center gap-1.5 rounded-md border border-status-meet/35 bg-status-meet/10 px-2.5 text-[11px] font-semibold text-status-meet transition-colors hover:bg-status-meet/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus className="size-3.5" />
-          MEET
+          {addMeetingLabel}
         </button>
       </div>
     </>

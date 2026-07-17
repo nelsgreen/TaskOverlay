@@ -482,10 +482,19 @@ Product direction:
   through one ordered queue; text is debounced, discrete fields are immediate,
   and pending edits flush before Close or recording starts. There is no manual
   Save/Revert action in MEET Details.
-- A failed Workspace persistence operation rolls authoritative `AppState` back
-  to its last durable value. A later unrelated command cannot persist that
-  failed patch; Retry reapplies the current intended patch. Snapshot refresh
-  failure after a successful disk save is reported separately from Save failed.
+- A failed `WorkspaceCommandDispatcher` persistence operation rolls
+  authoritative `AppState` back to its last durable value. A later unrelated
+  dispatcher command cannot persist that failed patch; Retry reapplies the
+  current intended patch. Snapshot refresh failure after a successful disk save
+  is reported separately from Save failed.
+- Follow-up reliability work: apply an equivalent transactional/rollback audit
+  to Meeting Assistant's asynchronous import, transcription, analysis,
+  recording deletion, and screenshot operations. They are not covered by the
+  dispatcher guarantee above.
+- Newer state schemas are blocked before migration/repair and left byte-for-byte
+  unchanged; backup restore also rejects newer schemas before creating a safety
+  backup or replacing local data. Manual artifact QA should verify the blocking
+  startup message and no-write exit path.
 - MEET Timeline interaction is implemented:
   - Timeline is a visual upcoming-events / attention horizon;
   - click MEET row -> MEET Details;

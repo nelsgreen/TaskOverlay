@@ -69,6 +69,7 @@ public partial class App : System.Windows.Application
             _stateStore = new AppStateStore(
                 _diagnostics.StateDirectory,
                 (message, exception) => _diagnostics.Log(message, exception));
+            _state = _stateStore.Load();
             _localSettingsStore = new LocalSettingsStore(
                 _diagnostics.StateDirectory,
                 (message, exception) => _diagnostics.Log(message, exception));
@@ -86,7 +87,6 @@ public partial class App : System.Windows.Application
             _backupService = new BackupService(
                 _stateStore.StatePath,
                 (message, exception) => _diagnostics.Log(message, exception));
-            _state = _stateStore.Load();
             _openAiApiKeyStore = new OpenAiApiKeyStore(
                 _diagnostics.StateDirectory,
                 (message, exception) => _diagnostics.Log(message, exception));
@@ -126,6 +126,22 @@ public partial class App : System.Windows.Application
             StartBackupTimer();
             StartMeetingAutoRecordTimer();
             _diagnostics.Log("Application startup completed.");
+        }
+        catch (UnsupportedFutureStateVersionException ex)
+        {
+            _stateWritesSuppressed = true;
+            _isShuttingDown = true;
+            _diagnostics?.Log("Startup stopped because state was created by a newer version.", ex);
+            MessageBox.Show(
+                $"TaskOverlay cannot safely open this data file.\n\n" +
+                $"Stored schema version: {ex.StoredSchemaVersion}\n" +
+                $"Supported schema version: {ex.SupportedSchemaVersion}\n" +
+                $"State file: {ex.StatePath}\n\n" +
+                "Install or run a newer TaskOverlay build. The state file was not changed.",
+                "Newer TaskOverlay data detected",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown();
         }
         catch (Exception ex)
         {

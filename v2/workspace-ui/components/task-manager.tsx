@@ -38,6 +38,10 @@ import {
   type MeetEditableField,
 } from "@/lib/meeting-edit"
 import { generatedMeetingTitle } from "@/lib/meeting-title"
+import {
+  MeetingCreateGuard,
+  type MeetingCreatePhase,
+} from "@/lib/meeting-create-guard"
 import { WorkspaceHeader } from "./workspace-header"
 import { ContextPackModal } from "./context-pack-modal"
 import { ProjectScopeBar } from "./project-scope-bar"
@@ -93,6 +97,12 @@ export function TaskManager() {
   const [meetModalOpen, setMeetModalOpen] = useState(false)
   const [newlyCreatedMeetId, setNewlyCreatedMeetId] = useState<string | null>(null)
   const [pendingMeetDeleteId, setPendingMeetDeleteId] = useState<string | null>(null)
+  const [meetingCreatePhase, setMeetingCreatePhase] = useState<MeetingCreatePhase>("idle")
+  const [meetingCreateError, setMeetingCreateError] = useState<string | null>(null)
+  const meetingCreateGuardRef = useRef<MeetingCreateGuard | null>(null)
+  if (!meetingCreateGuardRef.current) {
+    meetingCreateGuardRef.current = new MeetingCreateGuard(setMeetingCreatePhase)
+  }
   // Sections need local state in mock mode so "Add workstream" stays usable for
   // orientation; connected mode always uses the authoritative snapshot sections.
   const [mockSectionList, setMockSectionList] = useState<Section[]>(mockSections)
@@ -152,6 +162,12 @@ export function TaskManager() {
   const meetingTranscripts = bridge.data?.meetingTranscripts ?? []
   const meetingScreenshots = bridge.data?.meetingScreenshots ?? []
   const meetingAnalyses = bridge.data?.meetingAnalyses ?? []
+
+  useEffect(() => {
+    if (meetingCreateGuardRef.current?.reconcile(meetItems.map((meeting) => meeting.id))) {
+      setMeetingCreateError(null)
+    }
+  }, [meetItems])
   const activeMeetingRecording = meetingRecordings.find((recording) =>
     recording.id === bridge.data?.activeMeetingRecordingId) ?? null
   const activeMeetingRecordingOwnerTitle = activeMeetingRecording?.meetingId
@@ -1323,19 +1339,37 @@ export function TaskManager() {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId) return
     if (readOnly) return
+    if (connected && meetingCreateGuardRef.current?.isCreateBlocked()) return
     const projectName = projects.find((project) => project.id === projectId)?.name
     const draft = createMeetingDraft(crypto.randomUUID(), projectId, projectName, dateKey, startMin)
     if (dateKey) setCalendarSelectedDate(dateKey)
     setTab("calendar")
     if (connected) {
-      bridge.sendMeetingCommand({
-        type: "createMeeting",
-        projectId: draft.projectId,
-        title: "",
-        titleIsGenerated: true,
-        startsAtUtc: meetStartIso(draft),
-        durationMinutes: meetDurationMinutes(draft),
-      })
+      setMeetingCreateError(null)
+      const createGuard = meetingCreateGuardRef.current
+      if (!createGuard) return
+      void createGuard.create(() =>
+        bridge.sendMeetingCommandTracked({
+          type: "createMeeting",
+          projectId: draft.projectId,
+          title: "",
+          titleIsGenerated: true,
+          startsAtUtc: meetStartIso(draft),
+          durationMinutes: meetDurationMinutes(draft),
+        })).then((result) => {
+          if (!result) return
+          if (!result.success) {
+            setMeetingCreateError(result.errorMessage ?? "MEET could not be created.")
+            return
+          }
+          if (result.warningCode === "snapshotFailed") {
+            setMeetingCreateError(
+              "MEET was saved, but Workspace did not refresh. Retry refresh to open it.",
+            )
+          }
+        }).catch(() => {
+          setMeetingCreateError("MEET could not be created. Try again.")
+        })
       return
     }
     if (bridged) return
@@ -1345,6 +1379,10 @@ export function TaskManager() {
     setMeetModalOpen(true)
     setPendingTitleFocusMeetId(draft.id)
     setSelectedTimelineItemId(`meet:${draft.id}`)
+  }
+
+  const handleMeetingCreateRefresh = () => {
+    meetingCreateGuardRef.current?.requestRefresh(bridge.requestSnapshot)
   }
 
   const confirmCalendarDelete = () => {
@@ -1492,8 +1530,20 @@ export function TaskManager() {
             onCalendarStep={handleCalendarStep}
             onCalendarShowDoneChange={setCalendarShowDone}
             onCalendarViewModeChange={setCalendarViewMode}
-            onCalendarAddMeeting={() => handleCreateMeeting(calendarSelectedDate)}
-            calendarAddMeetingDisabled={readOnly}
+            onCalendarAddMeeting={meetingCreatePhase === "refresh-required"
+              ? handleMeetingCreateRefresh
+              : () => handleCreateMeeting(calendarSelectedDate)}
+            calendarAddMeetingDisabled={readOnly ||
+              meetingCreatePhase === "creating" ||
+              meetingCreatePhase === "awaiting-reconciliation"}
+            calendarAddMeetingLabel={meetingCreatePhase === "creating"
+              ? "Creating..."
+              : meetingCreatePhase === "awaiting-reconciliation"
+                ? "Loading..."
+                : meetingCreatePhase === "refresh-required"
+                  ? "Retry refresh"
+                  : "MEET"}
+            calendarAddMeetingError={meetingCreateError}
             wsFilter={wsFilter}
             onWsFilterChange={setWsFilter}
             wsSummary={wsSummary}
@@ -1669,6 +1719,7 @@ export function TaskManager() {
                 selectedMeetId={selectedMeetId}
                 showDone={calendarShowDone}
                 canSchedule={connected || !bridged}
+                createMeetDisabled={meetingCreatePhase !== "idle"}
                 onSelectTask={selectTask}
                 onSelectMeet={selectMeet}
                 onPickDay={handleCalendarPickDay}

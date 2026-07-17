@@ -177,6 +177,12 @@ public partial class WorkspaceWindow : Window
             return;
         }
 
+        if (IsSnapshotRequest(e.WebMessageAsJson))
+        {
+            TrySendSnapshot("client retry");
+            return;
+        }
+
         WorkspaceCommandResult result;
         try
         {
@@ -207,6 +213,25 @@ public partial class WorkspaceWindow : Window
         }
 
         TrySendMessage(result);
+    }
+
+    private static bool IsSnapshotRequest(string json)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty("messageType", out var messageType) &&
+                   messageType.ValueKind == System.Text.Json.JsonValueKind.String &&
+                   string.Equals(
+                       messageType.GetString(),
+                       "snapshotRequest",
+                       StringComparison.Ordinal);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

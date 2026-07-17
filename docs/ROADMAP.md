@@ -92,9 +92,10 @@ never a direct mutation without explicit user confirmation (see DECISIONS
 10. Dedicated connected MEET modal - implemented as Details / Sources / Review;
     TASK Details remains in the right sidebar. New MEETs receive an immediate
     persisted stable ID and generated title; Details uses ordered patch
-    autosave with durable failure rollback and no Save/Revert buttons. Pending
-    edits flush before Close or recording, and modal close does not stop an
-    active recording.
+    autosave through transactional `WorkspaceCommandDispatcher` mutations and
+    has no Save/Revert buttons. Pending edits flush before Close or recording,
+    and modal close does not stop an active recording. Equivalent rollback for
+    asynchronous Meeting Assistant operations remains follow-up work.
 11. Managed M4A/WAV/MP3 import, non-destructive processing ranges, TXT/MD/SRT/
     VTT transcript versions, explicit active transcript, revision-bound stale
     analysis, and manual timestamped screenshots - implemented.
