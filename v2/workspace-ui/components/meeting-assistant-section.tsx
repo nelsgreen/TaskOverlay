@@ -33,7 +33,6 @@ import type {
 import { cn } from "@/lib/utils"
 import { deriveMeetingRecordingControlState } from "@/lib/meeting-recording-controls"
 import { resolveMeetingRecordingSelection } from "@/lib/meeting-recording-selection"
-import { isValidMeetingLinkUrl } from "@/lib/meeting-link"
 import { proposedActionLabel } from "@/lib/meeting-proposed-action"
 
 interface Props {
@@ -166,19 +165,9 @@ export function MeetingAssistantSection({
     || selectedRecording?.state === "Analyzing"
 
   return (
-    <section className="space-y-3 rounded-lg border border-border bg-card/40 p-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <FileAudio className="size-4 shrink-0 text-status-meet" />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-widest text-foreground">
-            Recording &amp; Meeting Assistant
-          </h3>
-          <p className="mt-0.5 text-[10px] text-muted-foreground">
-            Local two-track capture. AI suggestions require explicit review.
-          </p>
-        </div>
-      </div>
-
+    // The parent Sources column ("Recording & audio") is the surface — no
+    // extra bordered wrapper or permanent explanatory heading of its own.
+    <section className="space-y-3">
       {commandError && (
         <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive">
           <span className="min-w-0 flex-1">{commandError}</span>
@@ -232,13 +221,6 @@ export function MeetingAssistantSection({
       </div>
 
       <div className="flex flex-wrap gap-1.5">
-        {isValidMeetingLinkUrl(meet.link) && (
-          <ActionButton
-            label="Join call"
-            icon={ExternalLink}
-            onClick={() => send({ type: "openMeetingLink", meetingId: meet.id })}
-          />
-        )}
         {recordingControls.mode === "start" && (
           <ActionButton
             label="Start recording"
@@ -457,9 +439,22 @@ function RecordingCard({
   const [rangeUntil, setRangeUntil] = useState(
     recording.processUntilSeconds == null ? "" : String(recording.processUntilSeconds),
   )
+  // Range-save confirmation lives in a fixed-size slot beside the button so
+  // success feedback never reflows the surrounding layout.
+  const [rangeSaved, setRangeSaved] = useState(false)
+  const rangeSavedTimer = useRef<number | null>(null)
+  const confirmRangeSaved = () => {
+    setRangeSaved(true)
+    if (rangeSavedTimer.current) window.clearTimeout(rangeSavedTimer.current)
+    rangeSavedTimer.current = window.setTimeout(() => setRangeSaved(false), 2_500)
+  }
+  useEffect(() => () => {
+    if (rangeSavedTimer.current) window.clearTimeout(rangeSavedTimer.current)
+  }, [])
   useEffect(() => {
     setRangeFrom(recording.processFromSeconds == null ? "" : String(recording.processFromSeconds))
     setRangeUntil(recording.processUntilSeconds == null ? "" : String(recording.processUntilSeconds))
+    setRangeSaved(false)
   }, [recording.id, recording.processFromSeconds, recording.processUntilSeconds])
 
   const canTranscribe = !recording.keepLocalOnly
@@ -474,7 +469,7 @@ function RecordingCard({
       && track.fileName.trim().length > 0)
 
   return (
-    <div className="space-y-2 rounded-md border border-border bg-background/50 p-2.5">
+    <div className="space-y-2 rounded-md border border-border bg-card p-2.5">
       <div className="flex min-w-0 items-center gap-2">
         <span className={cn(
           "size-2 shrink-0 rounded-full",
@@ -493,7 +488,7 @@ function RecordingCard({
         <TrackHealth icon={Mic} label="Microphone" value={recording.microphoneHealth} />
       </div>
 
-      <div className="space-y-1 rounded border border-border/70 bg-card/40 p-2 text-[10px] text-muted-foreground">
+      <div className="space-y-1 rounded bg-background/40 p-2 text-[10px] text-muted-foreground">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span>Format: <strong className="text-foreground">{formatRecordingFormat(recording.recordingFormat)}</strong></span>
           <span>{formatDuration(recording.durationSeconds)} - {formatBytes(recording.totalBytes)}</span>
@@ -515,7 +510,7 @@ function RecordingCard({
       </div>
 
       {recording.sourceKind === "Imported" && (
-        <div className="space-y-2 rounded border border-border/70 bg-card/30 p-2">
+        <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
               Transcription range
@@ -526,19 +521,19 @@ function RecordingCard({
               onClick={() => {
                 setRangeFrom("")
                 setRangeUntil("")
-                send({
+                if (send({
                   type: "setImportedAudioRange",
                   recordingId: recording.id,
                   fromSeconds: null,
                   untilSeconds: null,
-                })
+                })) confirmRangeSaved()
               }}
               className="text-[10px] font-medium text-status-meet disabled:opacity-40"
             >
               Use full recording
             </button>
           </div>
-          <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
+          <div className="grid grid-cols-[1fr_1fr_auto_auto] items-center gap-1.5">
             <input
               type="number"
               min={0}
@@ -566,17 +561,27 @@ function RecordingCard({
                 const until = rangeUntil.trim() ? Number(rangeUntil) : null
                 if ((from !== null && !Number.isFinite(from)) ||
                     (until !== null && !Number.isFinite(until))) return
-                send({
+                if (send({
                   type: "setImportedAudioRange",
                   recordingId: recording.id,
                   fromSeconds: from,
                   untilSeconds: until,
-                })
+                })) confirmRangeSaved()
               }}
               className="h-7 rounded border border-border px-2 text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
             >
               Save range
             </button>
+            {/* Fixed-size confirmation slot — feedback appears here without
+                moving the recording selector, cards, or columns. */}
+            <span className="flex w-12 shrink-0 items-center gap-1 text-[10px] text-status-focus" aria-live="polite">
+              {rangeSaved && (
+                <>
+                  <Check className="size-3" aria-hidden="true" />
+                  Saved
+                </>
+              )}
+            </span>
           </div>
           <p className="text-[9px] text-muted-foreground">
             The original is unchanged. This range is used the next time you transcribe.
@@ -585,7 +590,7 @@ function RecordingCard({
       )}
 
       {transcriptionSource && (
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded border border-status-meet/25 bg-status-meet/5 px-2 py-1.5 text-[10px] text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded bg-background/40 px-2 py-1.5 text-[10px] text-muted-foreground">
           <span>
             Transcription source:{" "}
             <strong className="text-foreground">{transcriptionSource.fileName}</strong>
@@ -619,6 +624,24 @@ function RecordingCard({
             ))}
           </div>
         </details>
+      )}
+
+      {recording.keepLocalOnly && !isRuntimeActive && (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+          Cloud transcription is blocked for this recording.
+          <button
+            type="button"
+            disabled={readOnly}
+            onClick={() => send({
+              type: "setMeetingRecordingLocalOnly",
+              recordingId: recording.id,
+              keepLocalOnly: false,
+            })}
+            className="font-medium text-status-meet hover:underline disabled:opacity-40"
+          >
+            Allow transcription
+          </button>
+        </p>
       )}
 
       <div className="flex flex-wrap gap-1.5">
@@ -692,36 +715,23 @@ function RecordingCard({
             onClick={() => send({ type: "setMeetingRecordingFormat", format: "Wav" })}
           />
         )}
-        <ActionButton
-          label={recording.keepLocalOnly ? "Audio stays local" : "Keep audio local"}
-          icon={Check}
-          disabled={readOnly || recording.state === "Recording"}
-          onClick={() => send({
-            type: "setMeetingRecordingLocalOnly",
-            recordingId: recording.id,
-            keepLocalOnly: !recording.keepLocalOnly,
-          })}
-        />
-        <ActionButton
-          label="Delete"
-          icon={Trash2}
-          danger
-          disabled={readOnly || recording.state === "Recording" || recording.state === "Stopping"}
-          onClick={() => {
-            if (window.confirm(
-              "Delete this recording and all derived transcript/analysis files? This cannot be undone.",
-            )) {
-              send({ type: "deleteMeetingRecording", recordingId: recording.id })
-            }
-          }}
-        />
+        {/* Delete stays visually separated from processing/utility actions. */}
+        <div className="ml-auto">
+          <ActionButton
+            label="Delete"
+            icon={Trash2}
+            danger
+            disabled={readOnly || recording.state === "Recording" || recording.state === "Stopping"}
+            onClick={() => {
+              if (window.confirm(
+                "Delete this recording and all derived transcript/analysis files? This cannot be undone.",
+              )) {
+                send({ type: "deleteMeetingRecording", recordingId: recording.id })
+              }
+            }}
+          />
+        </div>
       </div>
-
-      {recording.keepLocalOnly && (
-        <p className="text-[10px] text-muted-foreground">
-          Cloud transcription is disabled for this recording. Existing transcripts and analyses are kept.
-        </p>
-      )}
 
       {!isRuntimeActive && (recording.state === "Recording" || recording.state === "Stopping") && (
         <p className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-300">
@@ -788,7 +798,6 @@ export function AnalysisReview({
       <div className="flex items-center gap-2">
         <Bot className="size-4 text-status-meet" />
         <span className="text-[11px] font-semibold text-foreground">Meeting Assistant</span>
-        <span className="ml-auto text-[10px] text-muted-foreground">{analysis.state}</span>
       </div>
       {analysis.lastError && (
         <p className="text-[10px] text-destructive">{analysis.lastError}</p>
@@ -825,10 +834,9 @@ export function AnalysisReview({
                     })}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5 text-[9px] uppercase tracking-wide text-muted-foreground">
-                      <span>{proposedActionLabel(action.type)}</span>
-                      <span>{action.reviewState}</span>
-                    </div>
+                    <span className="text-[10px] font-medium text-muted-foreground">
+                      {proposedActionLabel(action.type)}
+                    </span>
                     <input
                       value={edit.title ?? ""}
                       disabled={!editable || readOnly}
@@ -894,12 +902,7 @@ export function AnalysisReview({
                     {formatSegment(action)} {action.sourceExcerpt}
                   </blockquote>
                 )}
-                {action.rationale && (
-                  <p className="text-[10px] text-muted-foreground">
-                    {action.rationale}
-                    {action.confidence > 0 && ` (model confidence: ${Math.round(action.confidence * 100)}%)`}
-                  </p>
-                )}
+                {action.rationale && <p className="text-[10px] text-muted-foreground">{action.rationale}</p>}
                 {editable && (
                   <button
                     type="button"

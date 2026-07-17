@@ -101,11 +101,14 @@ test("transcript cards have large-target accessible selection without action bub
   assert.match(sources, /event\.stopPropagation\(\)[\s\S]{0,80}onClick\(\)/)
 })
 
-test("range copy explains metadata-only behavior", () => {
+test("range copy explains metadata-only behavior without a layout-shifting banner", () => {
   const assistant = fs.readFileSync(new URL("../components/meeting-assistant-section.tsx", import.meta.url), "utf8")
   const controller = fs.readFileSync(new URL("./meeting-operation-state.ts", import.meta.url), "utf8")
   assert.match(assistant, /Transcription range/)
   assert.match(assistant, /Save range/)
   assert.match(assistant, /The original is unchanged\. This range is used the next time you transcribe\./)
-  assert.match(controller, /Range saved for the next transcription\./)
+  // Success feedback is a reserved fixed-size slot beside the button; the
+  // controller no longer raises a document-flow notice for range saves.
+  assert.doesNotMatch(controller, /Range saved for the next transcription/)
+  assert.match(assistant, /confirmRangeSaved/)
 })

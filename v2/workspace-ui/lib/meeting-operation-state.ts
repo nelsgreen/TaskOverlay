@@ -90,9 +90,10 @@ export function useMeetingOperationController(
       void sendTracked(command).then((result) => {
         if (!result.success) {
           setError(result.errorMessage ?? "Meeting Assistant command failed.")
-        } else if (command.type === "setImportedAudioRange") {
-          setNotice("Range saved for the next transcription.")
         }
+        // Range-save success is confirmed locally beside the Save range button
+        // (a reserved, fixed-size slot) — never as a document-flow banner that
+        // shifts the whole Sources layout downward.
       })
       return true
     }
