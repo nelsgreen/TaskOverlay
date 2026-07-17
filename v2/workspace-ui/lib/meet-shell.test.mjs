@@ -49,20 +49,24 @@ test("secondary header line drops blank parts and joins with a middot", () => {
   assert.equal(buildMeetSecondaryLine([null, undefined, ""]), "")
 })
 
-test("geometry constants describe an adaptive near-fullscreen shell", () => {
-  assert.equal(MEET_SHELL_GEOMETRY.maxWidthPx, 1600)
-  assert.equal(MEET_SHELL_GEOMETRY.maxHeightPx, 1000)
-  assert.equal(MEET_SHELL_GEOMETRY.viewportMarginPx, 16)
+test("geometry constants describe a bounded, clearly intentional shell", () => {
+  assert.equal(MEET_SHELL_GEOMETRY.maxWidthPx, 1280)
+  assert.equal(MEET_SHELL_GEOMETRY.maxHeightPx, 820)
+  assert.equal(MEET_SHELL_GEOMETRY.viewportWidthPercent, 90)
+  assert.equal(MEET_SHELL_GEOMETRY.viewportHeightPercent, 88)
+  // Must stay well below a near-fullscreen clamp.
+  assert.ok(MEET_SHELL_GEOMETRY.maxWidthPx < 1600)
+  assert.ok(MEET_SHELL_GEOMETRY.maxHeightPx < 1000)
 })
 
-test("modal geometry is adaptive, viewport-clamped, and stable across tabs", () => {
-  // Near-fullscreen clamp, applied once on the shell box independent of the tab.
-  assert.match(component, /min\(1600px,calc\(100vw-16px\)\)/)
-  assert.match(component, /min\(1000px,calc\(100dvh-16px\)\)/)
-  assert.equal(component.match(/w-\[min\(1600px/g)?.length, 1)
-  assert.equal(component.match(/h-\[min\(1000px/g)?.length, 1)
-  // The old fixed 1180x720 target must be fully gone.
-  assert.doesNotMatch(component, /1180px|720px/)
+test("modal geometry is bounded, viewport-clamped, and stable across tabs", () => {
+  // Bounded clamp, applied once on the shell box independent of the tab.
+  assert.match(component, /min\(1280px,90vw\)/)
+  assert.match(component, /min\(820px,88dvh\)/)
+  assert.equal(component.match(/w-\[min\(1280px/g)?.length, 1)
+  assert.equal(component.match(/h-\[min\(820px/g)?.length, 1)
+  // The rejected near-fullscreen geometry must be fully gone.
+  assert.doesNotMatch(component, /1600px|calc\(100vw-16px\)|calc\(100dvh-16px\)/)
 })
 
 test("Details uses a wider editable column than Context (not 50/50)", () => {

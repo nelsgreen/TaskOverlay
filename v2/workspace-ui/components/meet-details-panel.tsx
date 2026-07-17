@@ -348,14 +348,14 @@ export function MeetDetailsModal({
     // Scrim never closes the modal (backdrop click is a no-op by product decision).
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-2 backdrop-blur-sm">
       {/*
-        Adaptive near-fullscreen geometry (up to ~1600×1000, otherwise the whole
-        viewport minus a small margin) so the MEET workspace uses almost all of a
-        work laptop's screen and keeps a constant size across Details / Sources /
-        Review — height is viewport-derived, never content-derived. `.meet-shell`
-        scopes the improved MEET-only palette.
+        Bounded, clearly intentional modal — capped well below the viewport so a
+        normal desktop keeps visible Workspace margins on every side, and scaled
+        down on smaller Workspace sizes. Height stays viewport-derived (not
+        content-derived) so geometry is constant across Details / Sources /
+        Review. `.meet-shell` scopes the improved MEET-only palette.
       */}
       <div
-        className="meet-shell flex h-[min(1000px,calc(100dvh-16px))] w-[min(1600px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl border border-border bg-sidebar text-foreground shadow-2xl shadow-black/60"
+        className="meet-shell flex h-[min(820px,88dvh)] w-[min(1280px,90vw)] flex-col overflow-hidden rounded-xl border border-border bg-sidebar text-foreground shadow-2xl shadow-black/60"
         role="dialog"
         aria-modal="true"
         aria-labelledby="meet-details-title"
@@ -449,6 +449,7 @@ export function MeetDetailsModal({
                     <input
                       id="meet-title-input"
                       ref={titleInputRef}
+                      tabIndex={1}
                       value={draft.titleIsGenerated ? "" : draft.title}
                       onChange={(e) => updateTitle(e.target.value)}
                       placeholder={generatedTitle}
@@ -574,6 +575,7 @@ export function MeetDetailsModal({
                     </label>
                     <input
                       id="meet-location-input"
+                      tabIndex={2}
                       value={draft.location ?? ""}
                       placeholder="Room, Zoom, Meet…"
                       onChange={(e) => updateDraft(
@@ -591,6 +593,7 @@ export function MeetDetailsModal({
                     </label>
                     <input
                       id="meet-link-input"
+                      tabIndex={3}
                       value={draft.link ?? ""}
                       placeholder="meet.example.com/…"
                       onChange={(e) => updateDraft(
@@ -651,6 +654,7 @@ export function MeetDetailsModal({
                   <label htmlFor="meet-notes-input" className={labelClass}>Notes / Agenda</label>
                   <textarea
                     id="meet-notes-input"
+                    tabIndex={4}
                     value={draft.notes ?? ""}
                     placeholder="Agenda, context, links…"
                     onChange={(e) => updateDraft(
