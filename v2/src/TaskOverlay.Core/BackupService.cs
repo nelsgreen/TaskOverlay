@@ -611,7 +611,20 @@ public sealed class BackupService
     {
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var json = File.ReadAllBytes(path);
+            try
+            {
+                AppStateStore.ThrowIfFutureSchema(json, path);
+            }
+            catch (UnsupportedFutureStateVersionException ex)
+            {
+                error =
+                    $"Backup schema version {ex.StoredSchemaVersion} is newer than supported " +
+                    $"version {ex.SupportedSchemaVersion}. Restore was not started.";
+                return false;
+            }
+
+            using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object ||
                 !root.TryGetProperty("tasks", out var tasks) ||
@@ -626,7 +639,7 @@ public sealed class BackupService
             error = string.Empty;
             return true;
         }
-        catch (Exception ex) when (ex is IOException or JsonException)
+        catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException)
         {
             error = $"Backup validation failed: {ex.Message}";
             return false;

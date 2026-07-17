@@ -21,6 +21,104 @@ Active product scope:
 - No `localStorage` production persistence.
 - No mock-only production controls.
 
+Product direction:
+
+- TaskOverlay is a personal Windows-first working-memory system. Its purpose is
+  not merely to store context, but to provide a practical interface to the
+  user's external working memory.
+- Cross-platform distribution, Web/PWA, macOS support, multi-user accounts, and
+  commercial infrastructure are intentionally deferred until the Windows product
+  is mature and proves useful beyond its owner.
+- Specialized mobile and Telegram capture remain important because they supply
+  context to the Windows application. They are not currently a general
+  cross-platform TaskOverlay client.
+- Build capture-first:
+  - reliably preserve raw source materials;
+  - process and transcribe them;
+  - derive structured knowledge;
+  - review proposed knowledge;
+  - use confirmed context for search, briefs, and assistance.
+- Original source artifacts must remain immutable and keep provenance. Derived
+  analysis must be versioned, reviewable, retryable, and re-creatable when new
+  analyzers or context modules are introduced.
+- Previously captured notes, context, MEET transcripts, recordings, Telegram
+  messages, and other source material should support backfill analysis and
+  re-analysis.
+
+## Unified Source Capture And Context Inbox
+
+- Add a future unified `SourceArtifact` / source layer and Context Inbox for:
+  - existing TaskOverlay notes/context;
+  - MEET recordings;
+  - imported audio;
+  - imported transcripts;
+  - screenshots;
+  - Telegram text, voice, audio, images, documents, and forwarded materials;
+  - phone-originated recordings;
+  - system call recordings;
+  - phone screenshots and shared files;
+  - user recollections recorded after an unrecorded conversation.
+- Context Inbox processing states should include:
+  - Captured;
+  - Needs transcription;
+  - Ready for analysis;
+  - Needs review;
+  - Accepted;
+  - Rejected;
+  - Failed.
+- Source artifacts must preserve the original payload/provenance separately
+  from normalized transcripts, extracted text, screenshots, analysis runs, and
+  accepted ContextItems.
+- User recollection is a valid source type, but must not be represented as an
+  exact quote or direct recording of another person.
+
+## Attributed Working Memory
+
+- Future attributed knowledge should support these independent dimensions:
+  - Person;
+  - Project;
+  - Workstream;
+  - Topic;
+  - ContextItem;
+  - Source reference.
+- Person identity is global. A person's role or relationship may differ by
+  project.
+- Speaker identity is local to a transcript until linked to a global Person.
+  Speaker attribution is not the same as context scope.
+- A MEET project is only a default hint and does not determine the scope of
+  every statement.
+- Workstream is a larger work direction. Topic is a persistent discussion thread
+  inside or across workstreams.
+- One source may produce multiple ContextItems across different projects,
+  workstreams, and topics.
+- Context scope must support Project, multiple projects, workspace/general,
+  personal, and unassigned / needs scope review.
+- Attributed statements should preserve:
+  - who said or reported it;
+  - what was said;
+  - when it occurred;
+  - when it was captured;
+  - related projects;
+  - related workstreams;
+  - related topics;
+  - exact source references;
+  - current status such as NeedsReview, Confirmed, Disputed, Contradicted, or
+    Superseded.
+- Do not silently overwrite older information. Preserve chronology,
+  corrections, changing positions, and contradictions.
+
+## Review-First Automation
+
+- Initial AI-assisted context mode should be review required.
+- AI may suggest people, projects, workstreams, topics, fact/decision/risk/
+  question/commitment/instruction/deadline types, contradictions, and possible
+  superseded items.
+- The user must be able to Accept, Edit, Split, Merge, Change scope, Change
+  topic, or Reject before durable context is created.
+- Later optional modes may include suggest-only, auto-link with review, and
+  explicitly enabled high-confidence auto-apply. Automatic durable context
+  creation must not be the default.
+
 ## Backup
 
 - Hide or rename user-facing "Work" in backup UI. "Work" is an internal future
@@ -357,7 +455,9 @@ Active product scope:
     bare "--";
   - adjacent scheduled blocks have usable resize handles at their shared
     boundary, in both Day and Week, for task/task, MEET/MEET, and task/MEET
-    combinations.
+    combinations;
+  - completed task/MEET drag or resize suppresses click-to-open, while a normal
+    click and keyboard activation still open Details.
 - Duration chips / resize handles:
   - 15/30/45/60/90/120.
 - Gantt-like future planning view.
@@ -379,6 +479,24 @@ Active product scope:
   - optional linked task.
 - MEET persists in `AppState` / `state.json`; Workspace CRUD uses the WebView2
   command -> C# service -> save -> fresh snapshot path.
+- Opening a new MEET immediately persists a stable-ID draft with its project,
+  schedule, and generated fallback title. Details then autosaves field patches
+  through one ordered queue; text is debounced, discrete fields are immediate,
+  and pending edits flush before Close or recording starts. There is no manual
+  Save/Revert action in MEET Details.
+- A failed `WorkspaceCommandDispatcher` persistence operation rolls
+  authoritative `AppState` back to its last durable value. A later unrelated
+  dispatcher command cannot persist that failed patch; Retry reapplies the
+  current intended patch. Snapshot refresh failure after a successful disk save
+  is reported separately from Save failed.
+- Follow-up reliability work: apply an equivalent transactional/rollback audit
+  to Meeting Assistant's asynchronous import, transcription, analysis,
+  recording deletion, and screenshot operations. They are not covered by the
+  dispatcher guarantee above.
+- Newer state schemas are blocked before migration/repair and left byte-for-byte
+  unchanged; backup restore also rejects newer schemas before creating a safety
+  backup or replacing local data. Manual artifact QA should verify the blocking
+  startup message and no-write exit path.
 - MEET Timeline interaction is implemented:
   - Timeline is a visual upcoming-events / attention horizon;
   - click MEET row -> MEET Details;
@@ -387,7 +505,8 @@ Active product scope:
   drag/drop rescheduling through the connected `updateMeeting` path.
 - Default meeting duration is 30 minutes.
 - Connected MEET recording and Meeting Assistant foundation is implemented:
-  - explicit per-MEET recording policy: Off / Ask / Auto;
+  - per-MEET recording policy: Use app default / Manual / Auto-record, with the
+    inherited effective default shown in the UI;
   - Compact direct AAC/M4A is the default, with microphone, system, and mixed
     tracks encoded through Windows Media Foundation and no full-meeting WAV
     intermediate;
@@ -410,6 +529,31 @@ Active product scope:
     ProposedActions use one large Workspace modal. TASK Details remains in the
     right sidebar, and closing the MEET modal does not stop recording or
     finalization.
+- The MEET source/review workspace is implemented as one responsive modal with
+  `Details / Sources / Review`:
+  - Details owns scheduling, agenda, linked task, and compact linked context;
+  - Sources owns local recordings, managed M4A/WAV/MP3 imports, non-destructive
+    processing ranges, generated/imported TXT/MD/SRT/VTT transcripts, explicit
+    active transcript selection, and manual user-selected PNG screenshots;
+  - imported originals are copied into managed MEET storage and remain usable
+    if the external source is moved or deleted;
+  - Review combines the active transcript, its revision-bound analysis,
+    timestamped screenshot references, ProposedActions, and an intentionally
+    empty future project-context-update area;
+  - transcript segments use stable speaker IDs while transcript-level mappings
+    own original labels, display names, and the current-user marker; original
+    imported/provider artifacts remain unchanged;
+  - changing a transcript revision marks prior analysis stale and requires an
+    explicit re-run.
+  - long-running transcription/analysis has shared authoritative runtime state
+    across Sources and Review, immediate duplicate-click protection,
+    indeterminate stage and elapsed-time feedback, and distinct neutral
+    cancellation versus failure cleanup. Provider percentages are not
+    fabricated; cancellation restores Ready and preserves prior durable output.
+  - transcript cards support large-target click and keyboard activation while
+    nested Analyze/Open/Delete actions do not change the active transcript;
+  - Save range stores seconds-based metadata for the next transcription and
+    does not process or modify the original audio.
 - Recurrence, calendar sync, direct meeting-platform APIs, and live
   transcription remain later work.
 - Handle next MEET countdown.
@@ -418,7 +562,25 @@ Active product scope:
   - recording-device hot-plug and degraded-track recovery polish;
   - periodic finalized M4A segments to bound unexpected-process crash loss;
   - richer emergency-recording inbox and classification flow;
-  - transcript editing/search and ContextHUB source promotion;
+  - transcript search and ContextHUB source promotion;
+  - transcript editor actions: rename speaker globally, mark speaker as You,
+    merge speakers, edit individual segments, and explicitly re-run stale
+    analysis after transcript edits;
+  - editable transcript as a working document, timestamp-to-source-audio
+    playback, and user-created transcript revisions;
+  - Russian-first transcription with project glossary/technical anglicisms;
+    AI cleanup must create a reviewable revision, never silently replace text;
+  - analysis prompt enrichment from the MEET project and approved ContextHUB
+    context;
+  - human-readable Proposed Action labels, calibrated-or-hidden confidence,
+    inherited project name instead of `MEET project`, simpler Review scrolling,
+    readable 11-12px metadata, and human-readable mm:ss transcription ranges;
+  - visual MEET migration remains a separate UI project;
+  - user speaker identification and known-speaker samples;
+  - AI-proposed ContextItem candidates with explicit review, Meeting Brief,
+    overlay meeting mode, and live transcription/copilot;
+  - OCR/multimodal screenshot analysis and video recording;
+  - Meeting Assistant Settings redesign;
   - additional transcription/analysis providers, including local Whisper;
   - chunk retry/progress polish and recording retention controls.
 

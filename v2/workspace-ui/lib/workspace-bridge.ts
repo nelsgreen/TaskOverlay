@@ -1,10 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
   MeetItem,
   MeetingAnalysisSnapshot,
+  MeetingOperationSnapshot,
   MeetingRecordingSnapshot,
+  MeetingScreenshotSnapshot,
+  MeetingTranscriptSnapshot,
   Project,
   Section,
   TabKey,
@@ -59,8 +62,12 @@ export interface WorkspaceData {
   timelineItems: TimelineItem[]
   meetItems: MeetItem[]
   meetingRecordings: MeetingRecordingSnapshot[]
+  meetingTranscripts: MeetingTranscriptSnapshot[]
+  meetingScreenshots: MeetingScreenshotSnapshot[]
   meetingAnalyses: MeetingAnalysisSnapshot[]
+  meetingOperations: MeetingOperationSnapshot[]
   activeMeetingRecordingId: string | null
+  defaultMeetingRecordingPolicy: "Manual" | "AutoRecord"
   contextSources: WorkspaceContextSourceSnapshot[]
   contextItems: WorkspaceContextItemSnapshot[]
   context: WorkspaceContextSnapshot
@@ -85,9 +92,12 @@ export interface WorkspaceBridgeState {
   sendCreateSection(input: Omit<WorkspaceCreateSectionCommand, "type">): boolean
   sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
   sendMeetingCommand(command: WorkspaceMeetingCommand): boolean
+  sendMeetingCommandTracked(command: WorkspaceMeetingCommand): Promise<WorkspaceCommandResult>
+  requestSnapshot(): boolean
   sendTaskWorkSessionCommand(command: WorkspaceTaskWorkSessionCommand): boolean
   sendContextHubCommand(command: WorkspaceContextHubCommand): boolean
   sendMeetingAssistantCommand(command: WorkspaceMeetingAssistantCommand): boolean
+  sendMeetingAssistantCommandTracked(command: WorkspaceMeetingAssistantCommand): Promise<WorkspaceCommandResult>
   clearError(): void
   clearLastCreatedTaskId(): void
   clearLastCreatedSectionId(): void
@@ -105,6 +115,10 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const [lastCreatedMeetingId, setLastCreatedMeetingId] = useState<string | null>(null)
   const [lastCreatedContextSourceId, setLastCreatedContextSourceId] = useState<string | null>(null)
   const [lastCreatedContextItemId, setLastCreatedContextItemId] = useState<string | null>(null)
+  const commandResultWaiters = useRef(new Map<
+    string,
+    (result: WorkspaceCommandResult) => void
+  >())
 
   useEffect(() => {
     const webview = window.chrome?.webview
@@ -122,11 +136,17 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
 
       if (isWorkspaceCommandResult(data)) {
         const result = data
+        const waiter = commandResultWaiters.current.get(result.commandId)
+        if (waiter) {
+          commandResultWaiters.current.delete(result.commandId)
+          waiter(result)
+        }
         setPendingCommands((pending) =>
           pending.filter((command) => command.commandId !== result.commandId))
         if (!result.success) {
-          setError(result.errorMessage ?? "Workspace command failed.")
+          if (!waiter) setError(result.errorMessage ?? "Workspace command failed.")
         } else {
+          if (result.warningMessage) setError(result.warningMessage)
           if (result.createdTaskId) setLastCreatedTaskId(result.createdTaskId)
           if (result.createdSectionId) setLastCreatedSectionId(result.createdSectionId)
           if (result.createdMeetingId) setLastCreatedMeetingId(result.createdMeetingId)
@@ -139,7 +159,20 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     webview.addEventListener("message", onMessage)
     window.__taskOverlayWorkspaceMessages?.forEach(handleMessage)
     window.__taskOverlayWorkspaceMessages = undefined
-    return () => webview.removeEventListener("message", onMessage)
+    return () => {
+      webview.removeEventListener("message", onMessage)
+      for (const [commandId, resolve] of commandResultWaiters.current) {
+        resolve({
+          schemaVersion: 1,
+          messageType: "commandResult",
+          commandId,
+          success: false,
+          errorCode: "bridgeClosed",
+          errorMessage: "Workspace closed before the command completed.",
+        })
+      }
+      commandResultWaiters.current.clear()
+    }
   }, [])
 
   const data = useMemo(
@@ -202,6 +235,38 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const sendMeetingCommand = useCallback((command: WorkspaceMeetingCommand): boolean =>
     postCommand(command), [postCommand])
 
+  const sendMeetingCommandTracked = useCallback((
+    command: WorkspaceMeetingCommand,
+  ): Promise<WorkspaceCommandResult> => {
+    const commandId = createCommandId()
+    return new Promise((resolve) => {
+      commandResultWaiters.current.set(commandId, resolve)
+      if (postCommand(command, commandId)) return
+
+      commandResultWaiters.current.delete(commandId)
+      resolve({
+        schemaVersion: 1,
+        messageType: "commandResult",
+        commandId,
+        success: false,
+        errorCode: "bridgeUnavailable",
+        errorMessage: "Workspace command could not be sent.",
+      })
+    })
+  }, [postCommand])
+
+  const requestSnapshot = useCallback((): boolean => {
+    const webview = window.chrome?.webview
+    if (!webview || snapshot?.mode !== "connected") return false
+    try {
+      webview.postMessage({ schemaVersion: 1, messageType: "snapshotRequest" })
+      return true
+    } catch {
+      setError("Workspace snapshot refresh could not be requested.")
+      return false
+    }
+  }, [snapshot?.mode])
+
   const sendTaskWorkSessionCommand = useCallback((command: WorkspaceTaskWorkSessionCommand): boolean =>
     postCommand(command), [postCommand])
 
@@ -210,6 +275,25 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
 
   const sendMeetingAssistantCommand = useCallback((command: WorkspaceMeetingAssistantCommand): boolean =>
     postCommand(command), [postCommand])
+
+  const sendMeetingAssistantCommandTracked = useCallback((
+    command: WorkspaceMeetingAssistantCommand,
+  ): Promise<WorkspaceCommandResult> => {
+    const commandId = createCommandId()
+    return new Promise((resolve) => {
+      commandResultWaiters.current.set(commandId, resolve)
+      if (postCommand(command, commandId)) return
+      commandResultWaiters.current.delete(commandId)
+      resolve({
+        schemaVersion: 1,
+        messageType: "commandResult",
+        commandId,
+        success: false,
+        errorCode: "bridgeUnavailable",
+        errorMessage: "Workspace command could not be sent.",
+      })
+    })
+  }, [postCommand])
 
   const clearError = useCallback(() => setError(null), [])
   const clearLastCreatedTaskId = useCallback(() => setLastCreatedTaskId(null), [])
@@ -234,9 +318,12 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     sendCreateSection,
     sendWorkspaceContext,
     sendMeetingCommand,
+    sendMeetingCommandTracked,
+    requestSnapshot,
     sendTaskWorkSessionCommand,
     sendContextHubCommand,
     sendMeetingAssistantCommand,
+    sendMeetingAssistantCommandTracked,
     clearError,
     clearLastCreatedTaskId,
     clearLastCreatedSectionId,
@@ -261,7 +348,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
 function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceSnapshotContract>
-  return candidate.schemaVersion === 3 &&
+  return candidate.schemaVersion === 5 &&
     (candidate.mode === "readonly" || candidate.mode === "connected") &&
     typeof candidate.generatedAtUtc === "string" &&
     Array.isArray(candidate.projects) &&
@@ -270,7 +357,10 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
     Array.isArray(candidate.taskWorkSessions) &&
     Array.isArray(candidate.meetings) &&
     Array.isArray(candidate.meetingRecordings) &&
+    Array.isArray(candidate.meetingTranscripts) &&
+    Array.isArray(candidate.meetingScreenshots) &&
     Array.isArray(candidate.meetingAnalyses) &&
+    Array.isArray(candidate.meetingOperations) &&
     (candidate.activeMeetingRecordingId === null ||
       typeof candidate.activeMeetingRecordingId === "string") &&
     Array.isArray(candidate.activeNow) &&
@@ -331,8 +421,14 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     timelineItems,
     meetItems,
     meetingRecordings: snapshot.meetingRecordings,
+    meetingTranscripts: snapshot.meetingTranscripts,
+    meetingScreenshots: snapshot.meetingScreenshots,
     meetingAnalyses: snapshot.meetingAnalyses,
+    meetingOperations: snapshot.meetingOperations,
     activeMeetingRecordingId: snapshot.activeMeetingRecordingId,
+    defaultMeetingRecordingPolicy: snapshot.defaultMeetingRecordingPolicy === "AutoRecord"
+      ? "AutoRecord"
+      : "Manual",
     // Snapshot rows are used as-is (ids already snapshot-format); ?? [] keeps
     // a host built before ContextHUB from breaking the whole snapshot.
     contextSources: snapshot.contextSources ?? [],
@@ -355,6 +451,7 @@ function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): Me
     id: source.id,
     projectId: source.projectId,
     title: source.title,
+    titleIsGenerated: source.titleIsGenerated ?? false,
     notes: source.notes || undefined,
     date: local.date,
     startTime: local.time,
@@ -363,6 +460,7 @@ function adaptMeeting(source: WorkspaceSnapshotContract["meetings"][number]): Me
     location: source.location || undefined,
     link: source.link || undefined,
     linkedTaskId: source.linkedTaskId ?? undefined,
+    activeTranscriptId: source.activeTranscriptId ?? undefined,
     recordingPolicy: source.recordingPolicy,
   }
 }

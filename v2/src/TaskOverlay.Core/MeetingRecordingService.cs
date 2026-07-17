@@ -232,6 +232,23 @@ public sealed class MeetingRecordingService
         return true;
     }
 
+    public bool MarkReadyAfterCancellation(Guid recordingId, DateTimeOffset? now = null)
+    {
+        var recording = Find(recordingId);
+        if (recording is null || recording.State is not (
+                MeetingRecordingState.Processing or
+                MeetingRecordingState.Transcribing or
+                MeetingRecordingState.Analyzing))
+        {
+            return false;
+        }
+
+        recording.State = MeetingRecordingState.Ready;
+        recording.LastError = string.Empty;
+        recording.UpdatedAtUtc = now ?? DateTimeOffset.UtcNow;
+        return true;
+    }
+
     public bool MarkFailed(Guid recordingId, string? error, DateTimeOffset? now = null)
     {
         var recording = Find(recordingId);

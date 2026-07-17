@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -24,6 +25,12 @@ public partial class WorkspaceWindow : Window
     private readonly Func<MeetingRecording, string?>? _transcriptLoader;
     private readonly Func<Guid?>? _activeRecordingIdLoader;
     private readonly Action<string, Exception?>? _diagnostic;
+    private readonly Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>?
+        _meetingTranscriptLoader;
+    private readonly Func<MeetingScreenshot, string?>? _screenshotThumbnailLoader;
+    private readonly Func<MeetingRecordingPolicy>? _defaultRecordingPolicyLoader;
+    private readonly Func<IReadOnlyList<WorkspaceMeetingOperationSnapshot>>?
+        _meetingOperationLoader;
     private bool _initialized;
 
     public WorkspaceWindow(
@@ -34,17 +41,27 @@ public partial class WorkspaceWindow : Window
             runtimeCommandHandler = null,
         Func<MeetingRecording, string?>? transcriptLoader = null,
         Func<Guid?>? activeRecordingIdLoader = null,
-        Action<string, Exception?>? diagnostic = null)
+        Action<string, Exception?>? diagnostic = null,
+        Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>?
+            meetingTranscriptLoader = null,
+        Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null,
+        Func<MeetingRecordingPolicy>? defaultRecordingPolicyLoader = null,
+        Func<IReadOnlyList<WorkspaceMeetingOperationSnapshot>>? meetingOperationLoader = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _diagnostic = diagnostic;
         _commandDispatcher = new WorkspaceCommandDispatcher(
             _state,
             saveState,
-            stateChanged);
+            stateChanged,
+            diagnostic);
         _runtimeCommandHandler = runtimeCommandHandler;
         _transcriptLoader = transcriptLoader;
         _activeRecordingIdLoader = activeRecordingIdLoader;
-        _diagnostic = diagnostic;
+        _meetingTranscriptLoader = meetingTranscriptLoader;
+        _screenshotThumbnailLoader = screenshotThumbnailLoader;
+        _defaultRecordingPolicyLoader = defaultRecordingPolicyLoader;
+        _meetingOperationLoader = meetingOperationLoader;
         InitializeComponent();
     }
 
@@ -165,6 +182,12 @@ public partial class WorkspaceWindow : Window
             return;
         }
 
+        if (IsSnapshotRequest(e.WebMessageAsJson))
+        {
+            TrySendSnapshot("client retry");
+            return;
+        }
+
         WorkspaceCommandResult result;
         try
         {
@@ -188,14 +211,32 @@ public partial class WorkspaceWindow : Window
         {
             if (!TrySendSnapshot("command"))
             {
-                result = WorkspaceCommandResult.Failed(
-                    result.CommandId,
+                result = result.WithWarning(
                     "snapshotFailed",
-                    "Task was saved, but Workspace could not refresh its state.");
+                    "Changes were saved, but Workspace could not refresh its state.");
             }
         }
 
         TrySendMessage(result);
+    }
+
+    private static bool IsSnapshotRequest(string json)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty("messageType", out var messageType) &&
+                   messageType.ValueKind == System.Text.Json.JsonValueKind.String &&
+                   string.Equals(
+                       messageType.GetString(),
+                       "snapshotRequest",
+                       StringComparison.Ordinal);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -219,7 +260,12 @@ public partial class WorkspaceWindow : Window
             _state,
             mode: WorkspaceSnapshotFactory.ConnectedMode,
             transcriptLoader: _transcriptLoader,
-            activeMeetingRecordingId: _activeRecordingIdLoader?.Invoke());
+            activeMeetingRecordingId: _activeRecordingIdLoader?.Invoke(),
+            meetingTranscriptLoader: _meetingTranscriptLoader,
+            screenshotThumbnailLoader: _screenshotThumbnailLoader,
+            defaultMeetingRecordingPolicy: _defaultRecordingPolicyLoader?.Invoke() ??
+                                           MeetingRecordingPolicy.Manual,
+            meetingOperations: _meetingOperationLoader?.Invoke());
         SendMessage(snapshot);
     }
 

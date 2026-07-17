@@ -47,7 +47,8 @@ public sealed class AppStateStore
                 return defaultState;
             }
 
-            var json = File.ReadAllText(StatePath);
+            var json = File.ReadAllBytes(StatePath);
+            ThrowIfFutureSchema(json, StatePath);
             var state = JsonSerializer.Deserialize<AppState>(json, _jsonOptions);
             if (state is null)
             {
@@ -213,6 +214,31 @@ public sealed class AppStateStore
         }
     }
 
+    internal static void ThrowIfFutureSchema(ReadOnlyMemory<byte> json, string statePath)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("schemaVersion", out var schemaVersion))
+        {
+            return;
+        }
+
+        if (schemaVersion.ValueKind != JsonValueKind.Number ||
+            !schemaVersion.TryGetInt32(out var storedSchemaVersion))
+        {
+            throw new InvalidDataException("State schemaVersion must be an integer.");
+        }
+
+        if (storedSchemaVersion > AppState.CurrentSchemaVersion)
+        {
+            throw new UnsupportedFutureStateVersionException(
+                storedSchemaVersion,
+                AppState.CurrentSchemaVersion,
+                statePath);
+        }
+    }
+
     private static void Validate(AppState? state)
     {
         if (state is null)
@@ -234,6 +260,8 @@ public sealed class AppStateStore
             state.ContextSources is null ||
             state.ContextItems is null ||
             state.MeetingRecordings is null ||
+            state.MeetingTranscripts is null ||
+            state.MeetingScreenshots is null ||
             state.MeetingAnalyses is null ||
             state.OverlaySettings is null ||
             state.WindowPlacement is null ||
@@ -264,6 +292,8 @@ public sealed class AppStateStore
             .Select(session => session.Id)
             .ToHashSet();
         var recordingIds = state.MeetingRecordings.Select(recording => recording.Id).ToHashSet();
+        var transcriptIds = state.MeetingTranscripts.Select(transcript => transcript.Id).ToHashSet();
+        var screenshotIds = state.MeetingScreenshots.Select(screenshot => screenshot.Id).ToHashSet();
         var analysisIds = state.MeetingAnalyses.Select(analysis => analysis.Id).ToHashSet();
         if (projectIds.Count != state.Projects.Count ||
             groupIds.Count != state.Groups.Count ||
@@ -271,6 +301,8 @@ public sealed class AppStateStore
             meetingIds.Count != state.Meetings.Count ||
             taskWorkSessionIds.Count != state.TaskWorkSessions.Count ||
             recordingIds.Count != state.MeetingRecordings.Count ||
+            transcriptIds.Count != state.MeetingTranscripts.Count ||
+            screenshotIds.Count != state.MeetingScreenshots.Count ||
             analysisIds.Count != state.MeetingAnalyses.Count)
         {
             throw new InvalidDataException("State file contains duplicate node IDs.");
@@ -310,7 +342,7 @@ public sealed class AppStateStore
 
             if (task.SourceReferences is not null && task.SourceReferences.Any(reference =>
                     reference is null ||
-                    !recordingIds.Contains(reference.RecordingId) ||
+                    reference.RecordingId is Guid recordingId && !recordingIds.Contains(recordingId) ||
                     !analysisIds.Contains(reference.AnalysisId)))
             {
                 throw new InvalidDataException("State file contains an invalid task source reference.");
@@ -325,7 +357,10 @@ public sealed class AppStateStore
                 meeting.StartsAtUtc == default ||
                 meeting.DurationMinutes <= 0 ||
                 meeting.DurationMinutes > MeetingService.MaximumDurationMinutes ||
-                meeting.LinkedTaskId is Guid linkedTaskId && !taskIds.Contains(linkedTaskId))
+                meeting.LinkedTaskId is Guid linkedTaskId && !taskIds.Contains(linkedTaskId) ||
+                meeting.ActiveTranscriptId is Guid activeTranscriptId &&
+                !state.MeetingTranscripts.Any(transcript =>
+                    transcript.Id == activeTranscriptId && transcript.MeetId == meeting.Id))
             {
                 throw new InvalidDataException("State file contains an invalid meeting.");
             }
@@ -348,16 +383,57 @@ public sealed class AppStateStore
                     !Enum.IsDefined(track.Kind) ||
                     !Enum.IsDefined(track.FinalizationState) ||
                     !Enum.IsDefined(track.ValidationState) ||
-                    track.SegmentFiles is null))
+                    track.SegmentFiles is null) ||
+                recording.ProcessFromSeconds is < 0 ||
+                recording.ProcessUntilSeconds is <= 0 ||
+                recording.ProcessFromSeconds is double from &&
+                recording.ProcessUntilSeconds is double until && until <= from)
             {
                 throw new InvalidDataException("State file contains an invalid meeting recording.");
+            }
+        }
+
+        foreach (var transcript in state.MeetingTranscripts)
+        {
+            if (transcript.Id == Guid.Empty ||
+                transcript.MeetId is Guid transcriptMeetId && !meetingIds.Contains(transcriptMeetId) ||
+                transcript.RecordingId is Guid recordingId && !recordingIds.Contains(recordingId) ||
+                !RecordingPathPolicy.IsSafeRelativePath(transcript.StorageFolderRelativePath) ||
+                string.IsNullOrWhiteSpace(transcript.NormalizedArtifactFile) ||
+                transcript.RevisionId == Guid.Empty ||
+                transcript.Speakers is null ||
+                transcript.ImportWarnings is null ||
+                transcript.Speakers.Any(speaker =>
+                    speaker is null || string.IsNullOrWhiteSpace(speaker.SpeakerId)) ||
+                transcript.Speakers.Select(speaker => speaker.SpeakerId)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Count() != transcript.Speakers.Count)
+            {
+                throw new InvalidDataException("State file contains an invalid meeting transcript.");
+            }
+        }
+
+        foreach (var screenshot in state.MeetingScreenshots)
+        {
+            if (screenshot.Id == Guid.Empty ||
+                !meetingIds.Contains(screenshot.MeetId) ||
+                screenshot.RecordingId is Guid recordingId && !recordingIds.Contains(recordingId) ||
+                !RecordingPathPolicy.IsSafeRelativePath(screenshot.StorageFolderRelativePath) ||
+                string.IsNullOrWhiteSpace(screenshot.FileName) ||
+                screenshot.Width <= 0 || screenshot.Height <= 0 || screenshot.Bytes < 0 ||
+                screenshot.OffsetFromRecordingStartSeconds is < 0 ||
+                !Enum.IsDefined(screenshot.SourceKind))
+            {
+                throw new InvalidDataException("State file contains an invalid meeting screenshot.");
             }
         }
 
         foreach (var analysis in state.MeetingAnalyses)
         {
             if (analysis.Id == Guid.Empty ||
-                !recordingIds.Contains(analysis.RecordingId) ||
+                analysis.RecordingId is Guid recordingId && !recordingIds.Contains(recordingId) ||
+                analysis.TranscriptId is not Guid transcriptId ||
+                !transcriptIds.Contains(transcriptId) ||
+                analysis.TranscriptRevisionId is null ||
                 analysis.MeetId is Guid meetId && !meetingIds.Contains(meetId) ||
                 analysis.ProposedActions is null ||
                 analysis.Decisions is null ||

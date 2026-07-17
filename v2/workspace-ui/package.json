@@ -9,7 +9,12 @@
     "lint": "eslint .",
     "test:recording-controls": "node --test lib/meeting-recording-controls.test.mjs",
     "test:recording-selection": "node --test lib/meeting-recording-selection.test.mjs",
-    "test:meet-modal": "node --test lib/meet-modal-policy.test.mjs"
+    "test:meet-modal": "node --test lib/meet-modal-policy.test.mjs",
+    "test:meet-autosave": "node --test lib/meet-autosave.test.mjs",
+    "test:meet-create": "node --test lib/meeting-create-guard.test.mjs",
+    "test:meeting-edit": "node --test lib/meeting-edit.test.mjs",
+    "test:meet-workspace": "node --test lib/meet-workspace-policy.test.mjs",
+    "test:meet-operations": "node --test lib/meeting-operation-state.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

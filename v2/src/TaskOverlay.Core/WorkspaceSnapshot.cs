@@ -14,8 +14,12 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceTaskWorkSessionSnapshot> TaskWorkSessions,
     IReadOnlyList<WorkspaceMeetingSnapshot> Meetings,
     IReadOnlyList<WorkspaceMeetingRecordingSnapshot> MeetingRecordings,
+    IReadOnlyList<WorkspaceMeetingTranscriptSnapshot> MeetingTranscripts,
+    IReadOnlyList<WorkspaceMeetingScreenshotSnapshot> MeetingScreenshots,
     IReadOnlyList<WorkspaceMeetingAnalysisSnapshot> MeetingAnalyses,
+    IReadOnlyList<WorkspaceMeetingOperationSnapshot> MeetingOperations,
     string? ActiveMeetingRecordingId,
+    string DefaultMeetingRecordingPolicy,
     IReadOnlyList<WorkspaceContextSourceSnapshot> ContextSources,
     IReadOnlyList<WorkspaceContextItemSnapshot> ContextItems,
     IReadOnlyList<WorkspaceActiveNowSnapshot> ActiveNow,
@@ -88,12 +92,14 @@ public sealed record WorkspaceMeetingSnapshot(
     string Id,
     string ProjectId,
     string Title,
+    bool TitleIsGenerated,
     string Notes,
     DateTimeOffset StartsAtUtc,
     int DurationMinutes,
     string Location,
     string Link,
     string? LinkedTaskId,
+    string? ActiveTranscriptId,
     string RecordingPolicy,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
@@ -106,6 +112,12 @@ public sealed record WorkspaceMeetingRecordingSnapshot(
     DateTimeOffset? StartedAtUtc,
     DateTimeOffset? StoppedAtUtc,
     string RecordingFormat,
+    string OriginalFileName,
+    string ManagedFileName,
+    DateTimeOffset? ImportedAtUtc,
+    long ImportedFileBytes,
+    double? ProcessFromSeconds,
+    double? ProcessUntilSeconds,
     double DurationSeconds,
     long TotalBytes,
     string SystemAudioHealth,
@@ -138,9 +150,71 @@ public sealed record WorkspaceMeetingRecordingTrackSnapshot(
     string ValidationState,
     string Error);
 
+public sealed record WorkspaceMeetingTranscriptSnapshot(
+    string Id,
+    string MeetingId,
+    string? RecordingId,
+    string Origin,
+    string Format,
+    string Provider,
+    string SourceLabel,
+    string OriginalFileName,
+    DateTimeOffset? ImportedAtUtc,
+    bool HasTimestamps,
+    bool HasSpeakerLabels,
+    bool IsActive,
+    string RevisionId,
+    bool OriginalAvailable,
+    bool NormalizedAvailable,
+    bool MarkdownAvailable,
+    string Text,
+    IReadOnlyList<WorkspaceTranscriptSegmentSnapshot> Segments,
+    IReadOnlyList<WorkspaceTranscriptSpeakerSnapshot> Speakers,
+    IReadOnlyList<string> Warnings,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);
+
+public sealed record WorkspaceTranscriptSegmentSnapshot(
+    int Index,
+    double? StartSeconds,
+    double? EndSeconds,
+    string Text,
+    string? SpeakerId,
+    string? SpeakerName);
+
+public sealed record WorkspaceTranscriptSpeakerSnapshot(
+    string SpeakerId,
+    string OriginalLabel,
+    string DisplayName,
+    bool IsCurrentUser);
+
+public sealed record WorkspaceMeetingScreenshotSnapshot(
+    string Id,
+    string MeetingId,
+    string? RecordingId,
+    DateTimeOffset CapturedAtUtc,
+    double? OffsetFromRecordingStartSeconds,
+    string FileName,
+    int Width,
+    int Height,
+    string SourceKind,
+    string SourceLabel,
+    long Bytes,
+    bool IsAvailable,
+    string? ThumbnailDataUrl);
+
+public sealed record MeetingTranscriptSnapshotContent(
+    NormalizedTranscript? Transcript,
+    bool OriginalAvailable,
+    bool NormalizedAvailable,
+    bool MarkdownAvailable);
+
 public sealed record WorkspaceMeetingAnalysisSnapshot(
     string Id,
-    string RecordingId,
+    string? RecordingId,
+    string TranscriptId,
+    string TranscriptRevisionId,
+    bool IsStale,
     string? MeetingId,
     string State,
     string Provider,
@@ -158,6 +232,16 @@ public sealed record WorkspaceMeetingAnalysisSnapshot(
     string LastError,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
+
+public sealed record WorkspaceMeetingOperationSnapshot(
+    string Id,
+    string Kind,
+    string Stage,
+    string? MeetingId,
+    string? RecordingId,
+    string? TranscriptId,
+    DateTimeOffset StartedAtUtc,
+    bool CancellationRequested);
 
 public sealed record WorkspaceMeetingSourceReferenceSnapshot(
     double? StartSeconds,
@@ -228,7 +312,7 @@ public sealed record WorkspaceTimelineItemSnapshot(
 
 public static class WorkspaceSnapshotFactory
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 5;
     public const string ReadOnlyMode = "readonly";
     public const string ConnectedMode = "connected";
 
@@ -237,7 +321,11 @@ public static class WorkspaceSnapshotFactory
         DateTimeOffset? now = null,
         string mode = ReadOnlyMode,
         Func<MeetingRecording, string?>? transcriptLoader = null,
-        Guid? activeMeetingRecordingId = null)
+        Guid? activeMeetingRecordingId = null,
+        Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>? meetingTranscriptLoader = null,
+        Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null,
+        MeetingRecordingPolicy defaultMeetingRecordingPolicy = MeetingRecordingPolicy.Manual,
+        IReadOnlyList<WorkspaceMeetingOperationSnapshot>? meetingOperations = null)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -360,6 +448,7 @@ public static class WorkspaceSnapshotFactory
                 FormatId(meeting.Id),
                 FormatId(meeting.ProjectId),
                 meeting.Title,
+                meeting.TitleIsGenerated,
                 meeting.Notes,
                 meeting.StartsAtUtc,
                 meeting.DurationMinutes,
@@ -367,6 +456,9 @@ public static class WorkspaceSnapshotFactory
                 meeting.Link,
                 meeting.LinkedTaskId is Guid linkedTaskId && taskIds.Contains(linkedTaskId)
                     ? FormatId(linkedTaskId)
+                    : null,
+                meeting.ActiveTranscriptId is Guid activeTranscriptId
+                    ? FormatId(activeTranscriptId)
                     : null,
                 meeting.RecordingPolicy.ToString(),
                 meeting.CreatedAtUtc,
@@ -405,6 +497,12 @@ public static class WorkspaceSnapshotFactory
                     recording.StartedAtUtc,
                     recording.StoppedAtUtc,
                     recording.RecordingFormat.ToString(),
+                    recording.OriginalFileName,
+                    recording.ManagedFileName,
+                    recording.ImportedAtUtc,
+                    recording.ImportedFileBytes,
+                    recording.ProcessFromSeconds,
+                    recording.ProcessUntilSeconds,
                     validTracks.Select(track => track.DurationSeconds).DefaultIfEmpty(0).Max(),
                     validTracks.Sum(track => track.Bytes),
                     recording.SystemAudioHealth.ToString(),
@@ -456,14 +554,99 @@ public static class WorkspaceSnapshotFactory
                 }
             })
             .ToList();
+        var sourceTranscripts = state.MeetingTranscripts ?? new List<MeetingTranscript>();
+        var transcripts = sourceTranscripts
+            .Where(transcript => transcript.MeetId is Guid meetId && meetingById.ContainsKey(meetId))
+            .OrderByDescending(transcript => transcript.CreatedAtUtc)
+            .ThenBy(transcript => transcript.Id)
+            .Select(transcript =>
+            {
+                var content = meetingTranscriptLoader?.Invoke(transcript);
+                var normalized = content?.Transcript;
+                var mappings = transcript.Speakers ?? new List<TranscriptSpeaker>();
+                var speakers = mappings
+                    .Where(speaker => !string.IsNullOrWhiteSpace(speaker.SpeakerId))
+                    .GroupBy(speaker => speaker.SpeakerId, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+                var segments = (normalized?.Segments ?? new List<TranscriptSegment>())
+                    .OrderBy(segment => segment.Index)
+                    .Select(segment => new WorkspaceTranscriptSegmentSnapshot(
+                        segment.Index,
+                        transcript.HasTimestamps ? segment.StartSeconds : null,
+                        transcript.HasTimestamps ? segment.EndSeconds : null,
+                        segment.Text,
+                        segment.SpeakerId,
+                        string.IsNullOrWhiteSpace(segment.SpeakerId) &&
+                        string.IsNullOrWhiteSpace(segment.Speaker)
+                            ? null
+                            : TranscriptSpeakerMapping.ResolveDisplayName(segment, speakers)))
+                    .ToList();
+                return new WorkspaceMeetingTranscriptSnapshot(
+                    FormatId(transcript.Id),
+                    FormatId(transcript.MeetId!.Value),
+                    transcript.RecordingId is Guid recordingId ? FormatId(recordingId) : null,
+                    transcript.Origin.ToString(),
+                    transcript.Format.ToString(),
+                    transcript.Provider,
+                    transcript.SourceLabel,
+                    transcript.OriginalFileName,
+                    transcript.ImportedAtUtc,
+                    transcript.HasTimestamps,
+                    transcript.HasSpeakerLabels,
+                    meetingById[transcript.MeetId.Value].ActiveTranscriptId == transcript.Id,
+                    FormatId(transcript.RevisionId),
+                    content?.OriginalAvailable == true,
+                    content?.NormalizedAvailable == true,
+                    content?.MarkdownAvailable == true,
+                    normalized?.Text ?? string.Empty,
+                    segments,
+                    mappings.Select(speaker => new WorkspaceTranscriptSpeakerSnapshot(
+                        speaker.SpeakerId,
+                        speaker.OriginalLabel,
+                        speaker.DisplayName,
+                        speaker.IsCurrentUser)).ToList(),
+                    transcript.ImportWarnings ?? new List<string>(),
+                    transcript.CreatedAtUtc,
+                    transcript.UpdatedAtUtc);
+            })
+            .ToList();
+        var screenshots = (state.MeetingScreenshots ?? new List<MeetingScreenshot>())
+            .Where(screenshot => meetingById.ContainsKey(screenshot.MeetId))
+            .OrderBy(screenshot => screenshot.CapturedAtUtc)
+            .ThenBy(screenshot => screenshot.Id)
+            .Select(screenshot =>
+            {
+                var thumbnail = screenshotThumbnailLoader?.Invoke(screenshot);
+                return new WorkspaceMeetingScreenshotSnapshot(
+                    FormatId(screenshot.Id),
+                    FormatId(screenshot.MeetId),
+                    screenshot.RecordingId is Guid recordingId ? FormatId(recordingId) : null,
+                    screenshot.CapturedAtUtc,
+                    screenshot.OffsetFromRecordingStartSeconds,
+                    screenshot.FileName,
+                    screenshot.Width,
+                    screenshot.Height,
+                    screenshot.SourceKind.ToString(),
+                    screenshot.SourceLabel,
+                    screenshot.Bytes,
+                    thumbnail is not null,
+                    thumbnail);
+            })
+            .ToList();
         var recordingIdSet = sourceRecordings.Select(recording => recording.Id).ToHashSet();
+        var transcriptById = sourceTranscripts.ToDictionary(transcript => transcript.Id);
         var analyses = (state.MeetingAnalyses ?? new List<MeetingAnalysis>())
-            .Where(analysis => recordingIdSet.Contains(analysis.RecordingId))
+            .Where(analysis => analysis.TranscriptId is Guid transcriptId &&
+                               transcriptById.ContainsKey(transcriptId))
             .OrderByDescending(analysis => analysis.UpdatedAtUtc)
             .ThenBy(analysis => analysis.Id)
             .Select(analysis => new WorkspaceMeetingAnalysisSnapshot(
                 FormatId(analysis.Id),
-                FormatId(analysis.RecordingId),
+                analysis.RecordingId is Guid recordingId ? FormatId(recordingId) : null,
+                FormatId(analysis.TranscriptId!.Value),
+                FormatId(analysis.TranscriptRevisionId!.Value),
+                transcriptById[analysis.TranscriptId.Value].RevisionId !=
+                analysis.TranscriptRevisionId.Value,
                 analysis.MeetId is Guid meetId ? FormatId(meetId) : null,
                 analysis.State.ToString(),
                 analysis.Provider,
@@ -607,10 +790,16 @@ public static class WorkspaceSnapshotFactory
             taskWorkSessions,
             meetings,
             recordings,
+            transcripts,
+            screenshots,
             analyses,
+            meetingOperations ?? Array.Empty<WorkspaceMeetingOperationSnapshot>(),
             runtimeActiveRecordingId is Guid recordingId
                 ? FormatId(recordingId)
                 : null,
+            defaultMeetingRecordingPolicy == MeetingRecordingPolicy.AutoRecord
+                ? MeetingRecordingPolicy.AutoRecord.ToString()
+                : MeetingRecordingPolicy.Manual.ToString(),
             contextSources,
             contextItems,
             activeNow,

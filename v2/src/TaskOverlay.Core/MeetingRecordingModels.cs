@@ -14,7 +14,8 @@ public enum MeetingRecordingSourceKind
 {
     ScheduledMeet,
     ManualMeet,
-    Emergency
+    Emergency,
+    Imported
 }
 
 public enum MeetingRecordingState
@@ -43,7 +44,8 @@ public enum MeetingRecordingFormat
 {
     // Zero remains WAV so recordings written before schema v5 deserialize safely.
     Wav,
-    AacM4a
+    AacM4a,
+    Mp3
 }
 
 public enum MeetingRecordingTrackKind
@@ -112,6 +114,12 @@ public sealed class MeetingRecording
     public string TranscriptFile { get; set; } = string.Empty;
     public string TranscriptMarkdownFile { get; set; } = string.Empty;
     public string AnalysisFile { get; set; } = string.Empty;
+    public string OriginalFileName { get; set; } = string.Empty;
+    public string ManagedFileName { get; set; } = string.Empty;
+    public DateTimeOffset? ImportedAtUtc { get; set; }
+    public long ImportedFileBytes { get; set; }
+    public double? ProcessFromSeconds { get; set; }
+    public double? ProcessUntilSeconds { get; set; }
     public AudioTrackHealth SystemAudioHealth { get; set; } = AudioTrackHealth.Unknown;
     public AudioTrackHealth MicrophoneHealth { get; set; } = AudioTrackHealth.Unknown;
     public string LastError { get; set; } = string.Empty;
@@ -126,12 +134,16 @@ public sealed class MeetingRecording
 
 public sealed class NormalizedTranscript
 {
+    public Guid TranscriptId { get; set; }
+    public Guid RevisionId { get; set; } = Guid.NewGuid();
     public Guid RecordingId { get; set; }
     public string Provider { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     public string Language { get; set; } = string.Empty;
     public string Text { get; set; } = string.Empty;
+    public bool HasTimestamps { get; set; }
     public List<TranscriptSegment> Segments { get; set; } = new();
+    public List<TranscriptSpeaker> Speakers { get; set; } = new();
     public DateTimeOffset GeneratedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -141,6 +153,8 @@ public sealed class TranscriptSegment
     public double StartSeconds { get; set; }
     public double EndSeconds { get; set; }
     public string Text { get; set; } = string.Empty;
+    public string? SpeakerId { get; set; }
+    // Retained only for migration/provenance of legacy provider labels.
     public string? Speaker { get; set; }
 }
 
@@ -157,7 +171,9 @@ public enum MeetingAnalysisState
 public sealed class MeetingAnalysis
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid RecordingId { get; set; }
+    public Guid? RecordingId { get; set; }
+    public Guid? TranscriptId { get; set; }
+    public Guid? TranscriptRevisionId { get; set; }
     public Guid? MeetId { get; set; }
     public MeetingAnalysisState State { get; set; } = MeetingAnalysisState.Pending;
     public string Provider { get; set; } = string.Empty;
@@ -225,7 +241,7 @@ public sealed class ProposedAction
 public sealed class TaskSourceReference
 {
     public Guid? MeetId { get; set; }
-    public Guid RecordingId { get; set; }
+    public Guid? RecordingId { get; set; }
     public Guid AnalysisId { get; set; }
     public Guid ProposedActionId { get; set; }
     public double? SegmentStartSeconds { get; set; }

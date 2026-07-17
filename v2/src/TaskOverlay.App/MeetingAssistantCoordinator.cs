@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using NAudio.Wave;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
@@ -22,10 +23,14 @@ public sealed record MeetingAssistantOperationResult(
     Guid? MeetingId = null,
     Guid? AnalysisId = null,
     IReadOnlyList<Guid>? CreatedTaskIds = null,
-    IReadOnlyList<Guid>? CreatedContextItemIds = null)
+    IReadOnlyList<Guid>? CreatedContextItemIds = null,
+    bool Cancelled = false)
 {
     public static MeetingAssistantOperationResult Fail(string error) =>
         new(false, error);
+
+    public static MeetingAssistantOperationResult Cancel(string message, Guid? recordingId = null) =>
+        new(false, message, RecordingId: recordingId, Cancelled: true);
 }
 
 public sealed class MeetingAssistantCoordinator : IAsyncDisposable
@@ -37,12 +42,14 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     private readonly Action _stateChanged;
     private readonly Action<string, Exception?>? _diagnostic;
     private readonly MeetingRecordingStorage _storage;
+    private readonly MeetingSourceStorage _sourceStorage;
+    private readonly MeetingTranscriptService _transcriptService;
     private readonly IMeetingRecorder _recorder;
     private readonly IMeetingAudioProcessor _audioProcessor;
     private readonly ITranscriptionProvider _transcriptionProvider;
     private readonly IMeetingAnalysisProvider _analysisProvider;
     private readonly SemaphoreSlim _recordingGate = new(1, 1);
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _processing = new();
+    private readonly ConcurrentDictionary<Guid, ProcessingOperation> _processing = new();
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -79,14 +86,31 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                             throw new ArgumentNullException(nameof(analysisProvider));
         _diagnostic = diagnostic;
         _storage = new MeetingRecordingStorage(stateDirectory);
+        _sourceStorage = new MeetingSourceStorage(stateDirectory);
+        _transcriptService = new MeetingTranscriptService(state, _sourceStorage);
+        RepairManagedTranscriptArtifacts();
     }
 
     public string RecordingsRoot => _storage.RootDirectory;
     public MeetingRecorderRuntimeStatus RuntimeStatus => _recorder.Status;
+    public IReadOnlyList<WorkspaceMeetingOperationSnapshot> ProcessingOperations =>
+        _processing.Values
+            .OrderBy(operation => operation.StartedAtUtc)
+            .Select(operation => operation.ToSnapshot())
+            .ToList();
     public IReadOnlyList<AudioDeviceDescriptor> MicrophoneDevices =>
         _recorder.GetMicrophoneDevices();
     public IReadOnlyList<AudioDeviceDescriptor> SystemOutputDevices =>
         _recorder.GetSystemOutputDevices();
+
+    public Guid? GetActiveRecordingIdForMeeting(Guid meetingId)
+    {
+        var recordingId = RuntimeStatus.RecordingId;
+        return recordingId is Guid id && _state.MeetingRecordings.Any(recording =>
+                recording.Id == id && recording.MeetId == meetingId && recording.IsActive)
+            ? id
+            : null;
+    }
 
     public string? LoadTranscriptText(MeetingRecording recording)
     {
@@ -109,6 +133,80 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             InvalidDataException or
             JsonException)
         {
+            return null;
+        }
+    }
+
+    public MeetingTranscriptSnapshotContent? LoadTranscriptContent(MeetingTranscript transcript)
+    {
+        try
+        {
+            var originalAvailable = File.Exists(_sourceStorage.ResolveTranscriptFile(
+                transcript,
+                transcript.OriginalArtifactFile));
+            var normalizedAvailable = File.Exists(_sourceStorage.ResolveTranscriptFile(
+                transcript,
+                transcript.NormalizedArtifactFile));
+            var markdownAvailable = transcript.MarkdownArtifactFile.Length > 0 &&
+                                    File.Exists(_sourceStorage.ResolveTranscriptFile(
+                                        transcript,
+                                        transcript.MarkdownArtifactFile));
+            var normalized = normalizedAvailable ? _transcriptService.Load(transcript) : null;
+            return new MeetingTranscriptSnapshotContent(
+                normalized,
+                originalAvailable,
+                normalizedAvailable,
+                markdownAvailable);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   InvalidDataException or JsonException)
+        {
+            Report($"MEET transcript artifact unavailable: transcriptId={transcript.Id:N}.", ex);
+            return new MeetingTranscriptSnapshotContent(null, false, false, false);
+        }
+    }
+
+    public string? LoadScreenshotThumbnailDataUrl(MeetingScreenshot screenshot)
+    {
+        try
+        {
+            var path = _sourceStorage.ResolveScreenshotFile(screenshot);
+            if (!File.Exists(path) || !path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            using var source = System.Drawing.Image.FromFile(path);
+            const int maximumWidth = 360;
+            const int maximumHeight = 220;
+            var scale = Math.Min(
+                1,
+                Math.Min(
+                    maximumWidth / (double)source.Width,
+                    maximumHeight / (double)source.Height));
+            var width = Math.Max(1, (int)Math.Round(source.Width * scale));
+            var height = Math.Max(1, (int)Math.Round(source.Height * scale));
+            using var thumbnail = new System.Drawing.Bitmap(
+                width,
+                height,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var graphics = System.Drawing.Graphics.FromImage(thumbnail))
+            {
+                graphics.CompositingQuality =
+                    System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+                graphics.InterpolationMode =
+                    System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                graphics.DrawImage(source, 0, 0, width, height);
+            }
+
+            using var output = new MemoryStream();
+            thumbnail.Save(output, System.Drawing.Imaging.ImageFormat.Png);
+            return $"data:image/png;base64,{Convert.ToBase64String(output.ToArray())}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   InvalidDataException or ArgumentException or OutOfMemoryException)
+        {
+            Report($"MEET screenshot unavailable: screenshotId={screenshot.Id:N}.", ex);
             return null;
         }
     }
@@ -338,24 +436,22 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             _persistLocalSettings();
         }
 
-        if (!_processing.TryAdd(
-                recordingId,
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)))
+        var service = new MeetingRecordingService(_state);
+        var recording = service.Find(recordingId);
+        if (recording is null)
+        {
+            return MeetingAssistantOperationResult.Fail("Recording was not found.");
+        }
+
+        var processingOperation = ProcessingOperation.ForTranscription(recording, cancellationToken);
+        if (!_processing.TryAdd(recordingId, processingOperation))
         {
             return MeetingAssistantOperationResult.Fail(
                 "This recording already has a processing operation in progress.");
         }
 
-        var operation = _processing[recordingId];
-        var token = operation.Token;
-        var service = new MeetingRecordingService(_state);
-        var recording = service.Find(recordingId);
-        if (recording is null)
-        {
-            CompleteProcessing(recordingId);
-            return MeetingAssistantOperationResult.Fail("Recording was not found.");
-        }
-
+        _stateChanged();
+        var token = processingOperation.Cancellation.Token;
         try
         {
             Report(
@@ -380,7 +476,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 microphonePath,
                 mixedPath,
                 token);
-            ClearPreviousTranscriptionArtifacts(recording, folder);
+            ClearPreviousTranscriptionChunks(recording, folder);
             Persist(recording);
             var mixedBitrate = recording.Tracks.FirstOrDefault(track =>
                 track.Kind == MeetingRecordingTrackKind.Mixed)?.Bitrate ?? 96_000;
@@ -394,7 +490,9 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                     recording.MicrophoneTrackStartedAtUtc,
                     ExistingMixedAudioPath: mixedPath,
                     RecordingFormat: recording.RecordingFormat,
-                    MixedAudioBitrate: mixedBitrate),
+                    MixedAudioBitrate: mixedBitrate,
+                    ProcessFromSeconds: recording.ProcessFromSeconds,
+                    ProcessUntilSeconds: recording.ProcessUntilSeconds),
                 token);
             var sourceFingerprint = await TranscriptionAudioDiagnostics.InspectAsync(
                 processing.MixedAudioPath,
@@ -426,6 +524,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 .Where(path => path is not null)
                 .Cast<string>()
                 .ToList();
+            UpdateProcessingStage(recordingId, "Transcribing");
             Persist(recording);
 
             var chunkFingerprints = new List<TranscriptionAudioFingerprint>();
@@ -463,16 +562,23 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 responses.Add(response);
                 offset += chunk.Duration;
             }
+            token.ThrowIfCancellationRequested();
 
+            var transcriptId = Guid.NewGuid();
+            var transcriptRevisionId = Guid.NewGuid();
             var normalized = ComposeTranscript(
                 recordingId,
+                transcriptId,
+                transcriptRevisionId,
                 _transcriptionProvider.Name,
                 _localSettings.MeetingAssistant.TranscriptionModel,
                 responses);
+            TranscriptSpeakerMapping.EnsureStableSpeakers(normalized);
             var layout = LayoutFor(recording);
+            var rawResponse = BuildRawResponseArray(responses);
             MeetingRecordingStorage.WriteTextAtomic(
                 layout.TranscriptRawPath,
-                BuildRawResponseArray(responses));
+                rawResponse);
             _storage.WriteJsonAtomic(layout.TranscriptPath, normalized);
             MeetingRecordingStorage.WriteTextAtomic(
                 layout.TranscriptMarkdownPath,
@@ -489,6 +595,41 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                     "Transcript could not be associated with its recording.");
             }
 
+            if (recording.MeetId is Guid transcriptMeetId)
+            {
+                var sourceLayout = _sourceStorage.CreateTranscriptLayout(
+                    transcriptMeetId,
+                    transcriptId,
+                    ".json");
+                MeetingRecordingStorage.WriteTextAtomic(sourceLayout.OriginalPath, rawResponse);
+                _sourceStorage.WriteTranscript(sourceLayout, normalized);
+                var transcript = new MeetingTranscript
+                {
+                    Id = transcriptId,
+                    MeetId = transcriptMeetId,
+                    RecordingId = recordingId,
+                    Origin = MeetingTranscriptOrigin.Generated,
+                    Format = MeetingTranscriptFormat.NormalizedJson,
+                    Provider = _transcriptionProvider.Name,
+                    Model = _localSettings.MeetingAssistant.TranscriptionModel,
+                    SourceLabel = "TaskOverlay",
+                    StorageFolderRelativePath = sourceLayout.RelativeFolder,
+                    OriginalArtifactFile = Path.GetFileName(sourceLayout.OriginalPath),
+                    NormalizedArtifactFile = Path.GetFileName(sourceLayout.NormalizedPath),
+                    MarkdownArtifactFile = Path.GetFileName(sourceLayout.MarkdownPath),
+                    HasTimestamps = normalized.HasTimestamps,
+                    HasSpeakerLabels = normalized.Speakers.Count > 0,
+                    RevisionId = transcriptRevisionId,
+                    Speakers = normalized.Speakers.Select(CloneSpeaker).ToList(),
+                    CreatedAtUtc = normalized.GeneratedAtUtc,
+                    UpdatedAtUtc = normalized.GeneratedAtUtc
+                };
+                _state.MeetingTranscripts.Add(transcript);
+                var owner = _state.Meetings.First(item => item.Id == transcriptMeetId);
+                owner.ActiveTranscriptId = transcript.Id;
+                owner.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            }
+
             Persist(recording);
             Report(
                 $"MEET transcription completed: recordingId={recordingId:N}; " +
@@ -501,9 +642,11 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            service.MarkFailed(recordingId, "Transcription was cancelled. Original audio was kept.");
+            service.MarkReadyAfterCancellation(recordingId);
             Persist(recording);
-            return MeetingAssistantOperationResult.Fail(recording.LastError);
+            return MeetingAssistantOperationResult.Cancel(
+                "Transcription cancelled. Original audio was kept.",
+                recordingId);
         }
         catch (Exception ex) when (
             ex is IOException or
@@ -528,44 +671,65 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         Guid recordingId,
         CancellationToken cancellationToken = default)
     {
-        if (!_processing.TryAdd(
-                recordingId,
-                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)))
-        {
-            return MeetingAssistantOperationResult.Fail(
-                "This recording already has a processing operation in progress.");
-        }
-
-        var operation = _processing[recordingId];
-        var service = new MeetingRecordingService(_state);
-        var recording = service.Find(recordingId);
+        var recording = new MeetingRecordingService(_state).Find(recordingId);
         if (recording is null)
         {
-            CompleteProcessing(recordingId);
             return MeetingAssistantOperationResult.Fail("Recording was not found.");
         }
 
+        var transcript = ResolveTranscriptForRecording(recording);
+        return transcript is null
+            ? MeetingAssistantOperationResult.Fail(
+                "Transcript file is missing. Retry transcription first.")
+            : await AnalyzeTranscriptAsync(transcript.Id, cancellationToken);
+    }
+
+    public async Task<MeetingAssistantOperationResult> AnalyzeTranscriptAsync(
+        Guid transcriptId,
+        CancellationToken cancellationToken = default)
+    {
+        var transcriptMetadata = _state.MeetingTranscripts.FirstOrDefault(item =>
+            item.Id == transcriptId);
+        if (transcriptMetadata is null)
+        {
+            return MeetingAssistantOperationResult.Fail("Transcript was not found.");
+        }
+
+        var processingOperation = ProcessingOperation.ForAnalysis(
+            transcriptMetadata,
+            cancellationToken);
+        if (!_processing.TryAdd(transcriptId, processingOperation))
+        {
+            return MeetingAssistantOperationResult.Fail(
+                "This transcript already has an analysis operation in progress.");
+        }
+
+        _stateChanged();
+        var recording = transcriptMetadata.RecordingId is Guid recordingId
+            ? new MeetingRecordingService(_state).Find(recordingId)
+            : null;
+        var recordingService = new MeetingRecordingService(_state);
         try
         {
-            var transcriptPath = ResolveOptional(recording, recording.TranscriptFile);
-            if (transcriptPath is null || !File.Exists(transcriptPath))
+            if (recording is not null)
             {
-                return MeetingAssistantOperationResult.Fail(
-                    "Transcript file is missing. Retry transcription first.");
+                if (!recordingService.MarkAnalyzing(recording.Id))
+                {
+                    return MeetingAssistantOperationResult.Fail(
+                        "Recording is not ready for analysis.");
+                }
+
+                Persist(recording);
             }
 
-            if (!service.MarkAnalyzing(recordingId))
-            {
-                return MeetingAssistantOperationResult.Fail(
-                    "Recording is not ready for analysis.");
-            }
-
-            Persist(recording);
-            var transcript = JsonSerializer.Deserialize<NormalizedTranscript>(
-                                 await File.ReadAllTextAsync(transcriptPath, operation.Token),
-                                 _jsonOptions) ??
-                             throw new InvalidDataException("Transcript file is invalid.");
-            var meeting = recording.MeetId is Guid meetId
+            var transcript = _transcriptService.Load(transcriptMetadata);
+            transcript.Text = TranscriptSpeakerMapping.BuildAnalysisText(
+                transcript,
+                transcriptMetadata.Speakers);
+            transcript.Speakers = transcriptMetadata.Speakers.Select(CloneSpeaker).ToList();
+            transcript.TranscriptId = transcriptMetadata.Id;
+            transcript.RevisionId = transcriptMetadata.RevisionId;
+            var meeting = transcriptMetadata.MeetId is Guid meetId
                 ? _state.Meetings.FirstOrDefault(item => item.Id == meetId)
                 : null;
             var projectId = meeting?.ProjectId ?? _state.Projects
@@ -580,37 +744,60 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
             var providerResult = await _analysisProvider.AnalyzeAsync(
                 new MeetingAnalysisProviderRequest(
-                    recordingId,
-                    recording.MeetId,
+                    recording?.Id,
+                    transcriptMetadata.Id,
+                    transcriptMetadata.RevisionId,
+                    transcriptMetadata.MeetId,
                     projectId,
                     meeting?.Title ?? "Emergency recording",
                     transcript,
                     _localSettings.MeetingAssistant.AnalysisModel),
-                operation.Token);
+                processingOperation.Cancellation.Token);
+            processingOperation.Cancellation.Token.ThrowIfCancellationRequested();
             _state.MeetingAnalyses.RemoveAll(analysis =>
-                analysis.RecordingId == recordingId &&
+                analysis.TranscriptId == transcriptId &&
                 analysis.State == MeetingAnalysisState.Failed);
             _state.MeetingAnalyses.Add(providerResult.Analysis);
-            var layout = LayoutFor(recording);
-            _storage.WriteJsonAtomic(
-                layout.AnalysisPath,
+            var transcriptFolder = _sourceStorage.ResolveFolder(
+                transcriptMetadata.StorageFolderRelativePath);
+            var analysisPath = Path.Combine(
+                transcriptFolder,
+                $"analysis-{providerResult.Analysis.Id:N}.json");
+            MeetingRecordingStorage.WriteTextAtomic(
+                analysisPath,
+                JsonSerializer.Serialize(
                 new
                 {
                     providerRawJson = providerResult.RawJson,
                     analysis = providerResult.Analysis
-                });
-            service.MarkReady(recordingId, Path.GetFileName(layout.AnalysisPath));
-            Persist(recording);
+                },
+                _jsonOptions));
+            if (recording is not null)
+            {
+                recordingService.MarkReady(recording.Id, Path.GetFileName(analysisPath));
+                Persist(recording);
+            }
+            else
+            {
+                PersistStateAndNotify();
+            }
+
             return new MeetingAssistantOperationResult(
                 true,
-                RecordingId: recordingId,
+                RecordingId: recording?.Id,
                 AnalysisId: providerResult.Analysis.Id);
         }
         catch (OperationCanceledException)
         {
-            service.MarkFailed(recordingId, "Analysis was cancelled. Transcript and audio were kept.");
-            Persist(recording);
-            return MeetingAssistantOperationResult.Fail(recording.LastError);
+            if (recording is not null)
+            {
+                recordingService.MarkReadyAfterCancellation(recording.Id);
+                Persist(recording);
+            }
+
+            return MeetingAssistantOperationResult.Cancel(
+                "Analysis cancelled. Previous analysis was kept.",
+                recording?.Id);
         }
         catch (Exception ex) when (
             ex is IOException or
@@ -620,25 +807,316 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             OpenAiProviderException or
             JsonException)
         {
-            service.MarkFailed(recordingId, SafeMessage(ex));
+            if (recording is not null)
+            {
+                recordingService.MarkFailed(recording.Id, SafeMessage(ex));
+            }
+
             var failed = new MeetingAnalysis
             {
-                RecordingId = recordingId,
-                MeetId = recording.MeetId,
+                RecordingId = recording?.Id,
+                TranscriptId = transcriptMetadata.Id,
+                TranscriptRevisionId = transcriptMetadata.RevisionId,
+                MeetId = transcriptMetadata.MeetId,
                 State = MeetingAnalysisState.Failed,
                 Provider = _analysisProvider.Name,
                 Model = _localSettings.MeetingAssistant.AnalysisModel,
                 LastError = SafeMessage(ex)
             };
             _state.MeetingAnalyses.Add(failed);
-            Persist(recording);
+            if (recording is not null)
+            {
+                Persist(recording);
+            }
+            else
+            {
+                PersistStateAndNotify();
+            }
+
             Report("MEET analysis failed.", ex);
-            return MeetingAssistantOperationResult.Fail(recording.LastError);
+            return MeetingAssistantOperationResult.Fail(SafeMessage(ex));
         }
         finally
         {
-            CompleteProcessing(recordingId);
+            CompleteProcessing(transcriptId);
         }
+    }
+
+    public MeetingAssistantOperationResult ImportAudio(
+        Guid meetingId,
+        string sourcePath,
+        DateTimeOffset? now = null)
+    {
+        if (!_state.Meetings.Any(meeting => meeting.Id == meetingId))
+        {
+            return MeetingAssistantOperationResult.Fail("MEET was not found.");
+        }
+
+        var source = Path.GetFullPath(sourcePath);
+        var extension = Path.GetExtension(source).ToLowerInvariant();
+        var format = extension switch
+        {
+            ".m4a" => MeetingRecordingFormat.AacM4a,
+            ".wav" => MeetingRecordingFormat.Wav,
+            ".mp3" => MeetingRecordingFormat.Mp3,
+            _ => (MeetingRecordingFormat?)null
+        };
+        if (!format.HasValue)
+        {
+            return MeetingAssistantOperationResult.Fail(
+                "Supported audio formats are M4A, WAV, and MP3.");
+        }
+
+        if (!File.Exists(source))
+        {
+            return MeetingAssistantOperationResult.Fail("The selected audio file no longer exists.");
+        }
+
+        var recordingId = Guid.NewGuid();
+        var layout = _storage.CreateLayout(meetingId, recordingId);
+        var managedName = $"imported-original{extension}";
+        var managedPath = Path.Combine(layout.AbsoluteFolder, managedName);
+        try
+        {
+            _sourceStorage.CopyFileAtomic(source, managedPath);
+            using var reader = new AudioFileReader(managedPath);
+            if (reader.TotalTime <= TimeSpan.Zero)
+            {
+                throw new InvalidDataException("The imported audio has no playable duration.");
+            }
+
+            var timestamp = now ?? DateTimeOffset.UtcNow;
+            var bytes = new FileInfo(managedPath).Length;
+            var recording = new MeetingRecording
+            {
+                Id = recordingId,
+                MeetId = meetingId,
+                SourceKind = MeetingRecordingSourceKind.Imported,
+                State = MeetingRecordingState.Recorded,
+                RecordingFormat = format.Value,
+                RecordingFolderRelativePath = layout.RelativeFolder,
+                MixedAudioFile = managedName,
+                OriginalFileName = Path.GetFileName(source),
+                ManagedFileName = managedName,
+                ImportedAtUtc = timestamp,
+                ImportedFileBytes = bytes,
+                SystemAudioHealth = AudioTrackHealth.Unavailable,
+                MicrophoneHealth = AudioTrackHealth.Unavailable,
+                Tracks =
+                {
+                    new MeetingRecordingTrackArtifact
+                    {
+                        Kind = MeetingRecordingTrackKind.Mixed,
+                        FileName = managedName,
+                        Container = extension.TrimStart('.').ToUpperInvariant(),
+                        Codec = format.Value switch
+                        {
+                            MeetingRecordingFormat.AacM4a => "AAC",
+                            MeetingRecordingFormat.Mp3 => "MP3",
+                            _ => "PCM"
+                        },
+                        SampleRate = reader.WaveFormat.SampleRate,
+                        ChannelCount = reader.WaveFormat.Channels,
+                        DurationSeconds = reader.TotalTime.TotalSeconds,
+                        Bytes = bytes,
+                        HasAudioFrames = true,
+                        FinalizationState = MeetingRecordingFinalizationState.Finalized,
+                        ValidationState = MeetingRecordingValidationState.Valid
+                    }
+                },
+                CreatedAtUtc = timestamp,
+                UpdatedAtUtc = timestamp
+            };
+            _state.MeetingRecordings.Add(recording);
+            Persist(recording);
+            return new MeetingAssistantOperationResult(true, RecordingId: recording.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   InvalidDataException or InvalidOperationException or
+                                   NotSupportedException or
+                                   System.Runtime.InteropServices.COMException)
+        {
+            if (Directory.Exists(layout.AbsoluteFolder))
+            {
+                Directory.Delete(layout.AbsoluteFolder, recursive: true);
+            }
+
+            return MeetingAssistantOperationResult.Fail(SafeMessage(ex));
+        }
+    }
+
+    public MeetingAssistantOperationResult ImportTranscript(
+        Guid meetingId,
+        string sourcePath,
+        string? sourceLabel = null)
+    {
+        try
+        {
+            var transcript = _transcriptService.Import(meetingId, sourcePath, sourceLabel);
+            PersistStateAndNotify();
+            return new MeetingAssistantOperationResult(
+                true,
+                MeetingId: meetingId,
+                AnalysisId: transcript.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   InvalidDataException or NotSupportedException)
+        {
+            return MeetingAssistantOperationResult.Fail(SafeMessage(ex));
+        }
+    }
+
+    public bool SetImportedAudioRange(Guid recordingId, double? fromSeconds, double? untilSeconds)
+    {
+        var recording = new MeetingRecordingService(_state).Find(recordingId);
+        var duration = recording?.Tracks.FirstOrDefault(track =>
+            track.Kind == MeetingRecordingTrackKind.Mixed)?.DurationSeconds ?? 0;
+        if (recording is null || recording.SourceKind != MeetingRecordingSourceKind.Imported ||
+            fromSeconds is < 0 || untilSeconds is <= 0 ||
+            fromSeconds is double from && untilSeconds is double until && until <= from ||
+            fromSeconds is double start && start >= duration ||
+            untilSeconds is double end && end > duration + 0.01)
+        {
+            return false;
+        }
+
+        recording.ProcessFromSeconds = fromSeconds;
+        recording.ProcessUntilSeconds = untilSeconds;
+        recording.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        Persist(recording);
+        return true;
+    }
+
+    public bool SetActiveTranscript(Guid meetingId, Guid transcriptId)
+    {
+        if (!_transcriptService.SetActive(meetingId, transcriptId))
+        {
+            return false;
+        }
+
+        PersistStateAndNotify();
+        return true;
+    }
+
+    public bool DeleteTranscript(Guid transcriptId)
+    {
+        if (!_transcriptService.Delete(transcriptId))
+        {
+            return false;
+        }
+
+        PersistStateAndNotify();
+        return true;
+    }
+
+    public bool OpenTranscriptArtifact(Guid transcriptId, string artifact)
+    {
+        var transcript = _state.MeetingTranscripts.FirstOrDefault(item => item.Id == transcriptId);
+        if (transcript is null)
+        {
+            return false;
+        }
+
+        var fileName = artifact switch
+        {
+            "original" => transcript.OriginalArtifactFile,
+            "normalized" => transcript.NormalizedArtifactFile,
+            "markdown" => transcript.MarkdownArtifactFile,
+            _ => string.Empty
+        };
+        if (fileName.Length == 0)
+        {
+            return false;
+        }
+
+        var path = _sourceStorage.ResolveTranscriptFile(transcript, fileName);
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        return true;
+    }
+
+    public MeetingScreenshot RegisterScreenshot(
+        Guid meetingId,
+        Guid? recordingId,
+        string capturedPngPath,
+        int width,
+        int height,
+        MeetingScreenshotSourceKind sourceKind,
+        string sourceLabel,
+        DateTimeOffset capturedAtUtc)
+    {
+        if (!_state.Meetings.Any(meeting => meeting.Id == meetingId) ||
+            recordingId is Guid ownerRecordingId && !_state.MeetingRecordings.Any(recording =>
+                recording.Id == ownerRecordingId && recording.MeetId == meetingId))
+        {
+            throw new InvalidDataException("MEET or active recording is invalid.");
+        }
+
+        var screenshot = new MeetingScreenshot
+        {
+            MeetId = meetingId,
+            RecordingId = recordingId,
+            CapturedAtUtc = capturedAtUtc,
+            Width = width,
+            Height = height,
+            SourceKind = sourceKind,
+            SourceLabel = sourceLabel.Trim()
+        };
+        var destination = _sourceStorage.CreateScreenshotPath(meetingId, screenshot.Id);
+        _sourceStorage.CopyFileAtomic(capturedPngPath, destination);
+        screenshot.StorageFolderRelativePath =
+            $"meetings/{meetingId:N}/screenshots";
+        screenshot.FileName = Path.GetFileName(destination);
+        screenshot.Bytes = new FileInfo(destination).Length;
+        var recording = recordingId is Guid id
+            ? _state.MeetingRecordings.First(item => item.Id == id)
+            : null;
+        if (recording?.StartedAtUtc is DateTimeOffset started)
+        {
+            screenshot.OffsetFromRecordingStartSeconds = Math.Max(
+                0,
+                (capturedAtUtc - started).TotalSeconds);
+        }
+
+        _state.MeetingScreenshots.Add(screenshot);
+        PersistStateAndNotify();
+        return screenshot;
+    }
+
+    public bool OpenScreenshot(Guid screenshotId)
+    {
+        var screenshot = _state.MeetingScreenshots.FirstOrDefault(item => item.Id == screenshotId);
+        if (screenshot is null)
+        {
+            return false;
+        }
+
+        var path = _sourceStorage.ResolveScreenshotFile(screenshot);
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        return true;
+    }
+
+    public bool DeleteScreenshot(Guid screenshotId)
+    {
+        var screenshot = _state.MeetingScreenshots.FirstOrDefault(item => item.Id == screenshotId);
+        if (screenshot is null)
+        {
+            return false;
+        }
+
+        _sourceStorage.DeleteScreenshotFile(screenshot);
+        _state.MeetingScreenshots.Remove(screenshot);
+        PersistStateAndNotify();
+        return true;
     }
 
     public MeetingAssistantOperationResult ApplyProposedActions(
@@ -699,7 +1177,8 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
     public bool SetRecordingFormat(MeetingRecordingFormat format)
     {
-        if (!Enum.IsDefined(format) || _recorder.Status.RecordingId is not null)
+        if (format is not (MeetingRecordingFormat.AacM4a or MeetingRecordingFormat.Wav) ||
+            _recorder.Status.RecordingId is not null)
         {
             return false;
         }
@@ -783,7 +1262,8 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     {
         var service = new MeetingRecordingService(_state);
         var recording = service.Find(recordingId);
-        if (recording is null || recording.IsActive || _processing.ContainsKey(recordingId))
+        if (recording is null || recording.IsActive || _processing.Values.Any(operation =>
+                operation.RecordingId == recordingId))
         {
             return false;
         }
@@ -798,10 +1278,21 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         return true;
     }
 
-    public bool CancelProcessing(Guid recordingId)
+    public bool CancelProcessing(Guid targetId)
     {
-        return _processing.TryGetValue(recordingId, out var cancellation) &&
-               TryCancel(cancellation);
+        var match = _processing.FirstOrDefault(pair =>
+            pair.Key == targetId ||
+            pair.Value.RecordingId == targetId ||
+            pair.Value.TranscriptId == targetId);
+        if (match.Value is null || !TryCancel(match.Value.Cancellation))
+        {
+            return false;
+        }
+
+        match.Value.Stage = "Cancelling";
+        match.Value.CancellationRequested = true;
+        _stateChanged();
+        return true;
     }
 
     public bool OpenRecordingFolder(Guid recordingId)
@@ -838,7 +1329,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     {
         foreach (var operation in _processing.Values)
         {
-            TryCancel(operation);
+            TryCancel(operation.Cancellation);
         }
 
         if (_recorder.Status.RecordingId is Guid activeRecordingId)
@@ -854,7 +1345,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     {
         foreach (var operation in _processing.Values)
         {
-            TryCancel(operation);
+            TryCancel(operation.Cancellation);
         }
 
         await _recorder.DisposeAsync();
@@ -1047,7 +1538,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         return _storage.ResolveFile(recording, validMixedTracks[0].FileName);
     }
 
-    private void ClearPreviousTranscriptionArtifacts(
+    private static void ClearPreviousTranscriptionChunks(
         MeetingRecording recording,
         string folder)
     {
@@ -1064,14 +1555,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             }
         }
 
-        var layout = LayoutFor(recording);
-        File.Delete(layout.TranscriptRawPath);
-        File.Delete(layout.TranscriptPath);
-        File.Delete(layout.TranscriptMarkdownPath);
         recording.TranscriptionChunkFiles.Clear();
-        recording.TranscriptRawFile = string.Empty;
-        recording.TranscriptFile = string.Empty;
-        recording.TranscriptMarkdownFile = string.Empty;
     }
 
     private async Task ReportTranscriptionInputsAsync(
@@ -1185,6 +1669,165 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     private string? ResolveOptional(MeetingRecording recording, string fileName) =>
         string.IsNullOrWhiteSpace(fileName) ? null : _storage.ResolveFile(recording, fileName);
 
+    private MeetingTranscript? ResolveTranscriptForRecording(MeetingRecording recording)
+    {
+        if (recording.MeetId is Guid meetId)
+        {
+            var activeId = _state.Meetings.FirstOrDefault(meeting => meeting.Id == meetId)
+                ?.ActiveTranscriptId;
+            var active = activeId is Guid activeTranscriptId
+                ? _state.MeetingTranscripts.FirstOrDefault(transcript =>
+                    transcript.Id == activeTranscriptId && transcript.MeetId == meetId)
+                : null;
+            if (active is not null)
+            {
+                return active;
+            }
+        }
+
+        var existing = _state.MeetingTranscripts
+            .Where(transcript => transcript.RecordingId == recording.Id)
+            .OrderByDescending(transcript => transcript.CreatedAtUtc)
+            .FirstOrDefault();
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var transcriptPath = ResolveOptional(recording, recording.TranscriptFile);
+        if (transcriptPath is null || !File.Exists(transcriptPath))
+        {
+            return null;
+        }
+
+        var normalized = JsonSerializer.Deserialize<NormalizedTranscript>(
+            File.ReadAllText(transcriptPath),
+            _jsonOptions);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        var id = _state.MeetingTranscripts.Any(transcript => transcript.Id == recording.Id)
+            ? Guid.NewGuid()
+            : recording.Id;
+        var revisionId = normalized.RevisionId == Guid.Empty ? Guid.NewGuid() : normalized.RevisionId;
+        normalized.TranscriptId = id;
+        normalized.RevisionId = revisionId;
+        normalized.HasTimestamps = normalized.HasTimestamps || normalized.Segments.Count > 0;
+        TranscriptSpeakerMapping.EnsureStableSpeakers(normalized);
+        _storage.WriteJsonAtomic(transcriptPath, normalized);
+        var transcript = new MeetingTranscript
+        {
+            Id = id,
+            MeetId = recording.MeetId,
+            RecordingId = recording.Id,
+            Origin = MeetingTranscriptOrigin.Generated,
+            Format = MeetingTranscriptFormat.NormalizedJson,
+            Provider = normalized.Provider,
+            Model = normalized.Model,
+            SourceLabel = "TaskOverlay",
+            StorageFolderRelativePath = recording.RecordingFolderRelativePath,
+            OriginalArtifactFile = recording.TranscriptRawFile.Length > 0
+                ? recording.TranscriptRawFile
+                : recording.TranscriptFile,
+            NormalizedArtifactFile = recording.TranscriptFile,
+            MarkdownArtifactFile = recording.TranscriptMarkdownFile,
+            HasTimestamps = normalized.HasTimestamps,
+            HasSpeakerLabels = normalized.Speakers.Count > 0,
+            RevisionId = revisionId,
+            Speakers = normalized.Speakers.Select(CloneSpeaker).ToList(),
+            CreatedAtUtc = normalized.GeneratedAtUtc,
+            UpdatedAtUtc = normalized.GeneratedAtUtc
+        };
+        _state.MeetingTranscripts.Add(transcript);
+        if (recording.MeetId is Guid ownerId)
+        {
+            var meeting = _state.Meetings.FirstOrDefault(item => item.Id == ownerId);
+            if (meeting is not null)
+            {
+                meeting.ActiveTranscriptId ??= transcript.Id;
+            }
+        }
+
+        PersistStateAndNotify();
+        return transcript;
+    }
+
+    private void RepairManagedTranscriptArtifacts()
+    {
+        var stateChanged = false;
+        foreach (var metadata in _state.MeetingTranscripts)
+        {
+            try
+            {
+                var path = _sourceStorage.ResolveTranscriptFile(
+                    metadata,
+                    metadata.NormalizedArtifactFile);
+                if (!File.Exists(path))
+                {
+                    continue;
+                }
+
+                var normalized = JsonSerializer.Deserialize<NormalizedTranscript>(
+                    File.ReadAllText(path),
+                    _jsonOptions);
+                if (normalized is null)
+                {
+                    continue;
+                }
+
+                var artifactChanged = normalized.TranscriptId != metadata.Id ||
+                                      normalized.RevisionId != metadata.RevisionId ||
+                                      normalized.Segments.Any(segment =>
+                                          !string.IsNullOrWhiteSpace(segment.Speaker) &&
+                                          string.IsNullOrWhiteSpace(segment.SpeakerId));
+                normalized.TranscriptId = metadata.Id;
+                normalized.RevisionId = metadata.RevisionId;
+                normalized.HasTimestamps = normalized.HasTimestamps ||
+                                           normalized.Segments.Any(segment =>
+                                               segment.StartSeconds > 0 || segment.EndSeconds > 0);
+                artifactChanged |= TranscriptSpeakerMapping.EnsureStableSpeakers(normalized);
+                foreach (var speaker in normalized.Speakers)
+                {
+                    if (metadata.Speakers.Any(existing => string.Equals(
+                            existing.SpeakerId,
+                            speaker.SpeakerId,
+                            StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    metadata.Speakers.Add(CloneSpeaker(speaker));
+                    stateChanged = true;
+                }
+
+                if (metadata.HasTimestamps != normalized.HasTimestamps ||
+                    metadata.HasSpeakerLabels != metadata.Speakers.Count > 0)
+                {
+                    metadata.HasTimestamps = normalized.HasTimestamps;
+                    metadata.HasSpeakerLabels = metadata.Speakers.Count > 0;
+                    stateChanged = true;
+                }
+
+                if (artifactChanged && metadata.MarkdownArtifactFile.Length > 0)
+                {
+                    _sourceStorage.WriteTranscript(metadata, normalized);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                       InvalidDataException or JsonException)
+            {
+                Report($"MEET transcript repair skipped: transcriptId={metadata.Id:N}.", ex);
+            }
+        }
+
+        if (stateChanged)
+        {
+            _persistState();
+        }
+    }
+
     private static MeetingRecordingTrackArtifact CloneTrack(
         MeetingRecordingTrackArtifact track) => new()
     {
@@ -1207,25 +1850,115 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
     private void RewriteAnalysisFile(MeetingAnalysis analysis)
     {
-        var recording = new MeetingRecordingService(_state).Find(analysis.RecordingId);
+        var recording = analysis.RecordingId is Guid recordingId
+            ? new MeetingRecordingService(_state).Find(recordingId)
+            : null;
         if (recording is null)
         {
+            var transcript = analysis.TranscriptId is Guid transcriptId
+                ? _state.MeetingTranscripts.FirstOrDefault(item => item.Id == transcriptId)
+                : null;
+            if (transcript is null)
+            {
+                return;
+            }
+
+            var folder = _sourceStorage.ResolveFolder(transcript.StorageFolderRelativePath);
+            _sourceStorage.WriteJsonAtomic(
+                Path.Combine(folder, $"analysis-{analysis.Id:N}.json"),
+                new { analysis });
             return;
         }
 
         _storage.WriteJsonAtomic(LayoutFor(recording).AnalysisPath, new { analysis });
     }
 
+    private void UpdateProcessingStage(Guid operationId, string stage)
+    {
+        if (_processing.TryGetValue(operationId, out var operation))
+        {
+            operation.Stage = stage;
+            _stateChanged();
+        }
+    }
+
     private void CompleteProcessing(Guid recordingId)
     {
-        if (_processing.TryRemove(recordingId, out var cancellation))
+        if (_processing.TryRemove(recordingId, out var operation))
         {
-            cancellation.Dispose();
+            operation.Cancellation.Dispose();
+            _stateChanged();
         }
+    }
+
+    private sealed class ProcessingOperation
+    {
+        private ProcessingOperation(
+            Guid id,
+            string kind,
+            string stage,
+            Guid? meetingId,
+            Guid? recordingId,
+            Guid? transcriptId,
+            CancellationToken cancellationToken)
+        {
+            Id = id;
+            Kind = kind;
+            Stage = stage;
+            MeetingId = meetingId;
+            RecordingId = recordingId;
+            TranscriptId = transcriptId;
+            StartedAtUtc = DateTimeOffset.UtcNow;
+            Cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        }
+
+        public Guid Id { get; }
+        public string Kind { get; }
+        public string Stage { get; set; }
+        public Guid? MeetingId { get; }
+        public Guid? RecordingId { get; }
+        public Guid? TranscriptId { get; }
+        public DateTimeOffset StartedAtUtc { get; }
+        public bool CancellationRequested { get; set; }
+        public CancellationTokenSource Cancellation { get; }
+
+        public static ProcessingOperation ForTranscription(
+            MeetingRecording recording,
+            CancellationToken cancellationToken) => new(
+                recording.Id,
+                "Transcription",
+                "PreparingAudio",
+                recording.MeetId,
+                recording.Id,
+                null,
+                cancellationToken);
+
+        public static ProcessingOperation ForAnalysis(
+            MeetingTranscript transcript,
+            CancellationToken cancellationToken) => new(
+                transcript.Id,
+                "Analysis",
+                "Analyzing",
+                transcript.MeetId,
+                transcript.RecordingId,
+                transcript.Id,
+                cancellationToken);
+
+        public WorkspaceMeetingOperationSnapshot ToSnapshot() => new(
+            Id.ToString("N"),
+            Kind,
+            Stage,
+            MeetingId?.ToString("N"),
+            RecordingId?.ToString("N"),
+            TranscriptId?.ToString("N"),
+            StartedAtUtc,
+            CancellationRequested);
     }
 
     private static NormalizedTranscript ComposeTranscript(
         Guid recordingId,
+        Guid transcriptId,
+        Guid transcriptRevisionId,
         string provider,
         string model,
         IReadOnlyList<TranscriptionProviderResponse> responses)
@@ -1240,12 +1973,15 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 StartSeconds = Math.Max(0, segment.StartSeconds),
                 EndSeconds = Math.Max(segment.StartSeconds, segment.EndSeconds),
                 Text = segment.Text.Trim(),
+                SpeakerId = segment.SpeakerId,
                 Speaker = NullIfEmpty(segment.Speaker)
             })
             .Where(segment => segment.Text.Length > 0)
             .ToList();
         return new NormalizedTranscript
         {
+            TranscriptId = transcriptId,
+            RevisionId = transcriptRevisionId,
             RecordingId = recordingId,
             Provider = provider,
             Model = model,
@@ -1256,6 +1992,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 responses.Select(response => response.Text.Trim())
                     .Where(text => text.Length > 0)),
             Segments = segments,
+            HasTimestamps = segments.Count > 0,
             GeneratedAtUtc = DateTimeOffset.UtcNow
         };
     }
@@ -1281,27 +2018,15 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     }
 
     private static string BuildTranscriptMarkdown(NormalizedTranscript transcript)
+        => MeetingTranscriptService.BuildMarkdown(transcript, transcript.Speakers);
+
+    private static TranscriptSpeaker CloneSpeaker(TranscriptSpeaker speaker) => new()
     {
-        var builder = new StringBuilder();
-        builder.AppendLine("# Transcript");
-        builder.AppendLine();
-        foreach (var segment in transcript.Segments)
-        {
-            var timestamp = TimeSpan.FromSeconds(segment.StartSeconds)
-                .ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
-            var speaker = string.IsNullOrWhiteSpace(segment.Speaker)
-                ? string.Empty
-                : $" **{segment.Speaker}:**";
-            builder.AppendLine($"- `{timestamp}`{speaker} {segment.Text}");
-        }
-
-        if (transcript.Segments.Count == 0)
-        {
-            builder.AppendLine(transcript.Text);
-        }
-
-        return builder.ToString();
-    }
+        SpeakerId = speaker.SpeakerId,
+        OriginalLabel = speaker.OriginalLabel,
+        DisplayName = speaker.DisplayName,
+        IsCurrentUser = speaker.IsCurrentUser
+    };
 
     private static bool OpenFolder(string path)
     {

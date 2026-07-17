@@ -5,16 +5,17 @@ the backlog into a full release plan.
 
 ## Immediate
 
-1. Manually verify schema-2 planned-work -> schema-3 `TaskWorkSession`
+1. Complete and manually validate the current MEET Sources/Review PR.
+2. Manually verify schema-2 planned-work -> schema-3 `TaskWorkSession`
    migration against the user's real work-computer state and artifact; the
    development environment had no copy of that state.
-2. Planning Pool filters: Active / Unscheduled / Today / All (the real
+3. Planning Pool filters: Active / Unscheduled / Today / All (the real
    per-task scheduling indicators are implemented).
-3. Task Details work-session history and total-duration summary.
-4. Working hours / evening deadline presets.
-5. Calendar visual links for deadline/reminder markers.
-6. FUCKUP marker MVP.
-7. Global Ctrl+Z later, as architecture-level work - not a quick add-on.
+4. Task Details work-session history and total-duration summary.
+5. Working hours / evening deadline presets.
+6. Calendar visual links for deadline/reminder markers.
+7. FUCKUP marker MVP.
+8. Global Ctrl+Z later, as architecture-level work - not a quick add-on.
 
 The MEET Assistant foundation implements the first bounded ProposedActions
 review/apply path. Future AI work must keep the same rule: raw input ->
@@ -88,12 +89,27 @@ never a direct mutation without explicit user confirmation (see DECISIONS
 8. Structured meeting analysis - connected optional OpenAI provider implemented.
 9. Suggested actions review/apply selected - foundation implemented; no
    automatic mutations.
-10. Dedicated connected MEET modal - implemented for create/edit, recording,
-    transcript, analysis, ProposedActions, and Context; TASK Details remains in
-    the right sidebar and modal close does not stop recording.
-11. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
-    loss, device recovery, retention, transcript editing/search, ContextHUB
-    promotion, and additional/local providers.
+10. Dedicated connected MEET modal - implemented as Details / Sources / Review;
+    TASK Details remains in the right sidebar. New MEETs receive an immediate
+    persisted stable ID and generated title; Details uses ordered patch
+    autosave through transactional `WorkspaceCommandDispatcher` mutations and
+    has no Save/Revert buttons. Pending edits flush before Close or recording,
+    and modal close does not stop an active recording. Equivalent rollback for
+    asynchronous Meeting Assistant operations remains follow-up work.
+11. Managed M4A/WAV/MP3 import, non-destructive processing ranges, TXT/MD/SRT/
+    VTT transcript versions, explicit active transcript, revision-bound stale
+    analysis, and manual timestamped screenshots - implemented.
+12. Shared authoritative long-running operation feedback is implemented for
+    transcription and analysis: immediate duplicate-click protection,
+    indeterminate stage/elapsed feedback across Sources and Review, and
+    cancellation/failure reconciliation without persisted fake runtime state.
+    User cancellation is neutral, restores Ready, and retains prior durable
+    sources/analysis; transcript cards provide large-target accessible
+    selection, and range saving only configures the next transcription.
+13. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
+    loss, device recovery, retention, transcript search/editor actions,
+    ContextHUB promotion, Meeting Brief, user speaker identification,
+    OCR/multimodal review, and additional/local providers.
 
 Recurrence, calendar sync, live transcription, and external meeting-platform
 APIs remain intentionally later work.
@@ -159,6 +175,34 @@ APIs remain intentionally later work.
 6. MEET recording/transcription/analysis foundation is implemented with
    explicit ProposedActions review; transcript promotion into ContextHUB and
    broader capture interpretation remain later work and must never auto-create.
+7. Unified source/capture foundation and Context Inbox:
+   - preserve immutable raw source artifacts and provenance;
+   - normalize/transcribe/process into derived artifacts;
+   - track processing states such as Captured, Needs transcription, Ready for
+     analysis, Needs review, Accepted, Rejected, and Failed;
+   - support backfill analysis and re-analysis of existing notes/context, MEET
+     recordings, imported audio/transcripts, screenshots, Telegram messages,
+     phone-originated recordings, call recordings, shared files, and user
+     recollections.
+8. Reliable processing, retries, analyzer versions, and backfill analysis.
+9. Person / Project / Workstream / Topic attributed knowledge:
+   - Person identity is global;
+   - speaker identity is transcript-local until linked to a Person;
+   - MEET project is only a default hint;
+   - one source may produce multiple ContextItems across scopes;
+   - preserve chronology, contradictions, superseded information, and exact
+     source references.
+10. Review and acceptance of structured context candidates:
+    Accept, Edit, Split, Merge, Change scope, Change topic, or Reject before
+    durable context is created.
+11. Context Assistant with grounded search and source references:
+    text questions first, voice later; answers cite ContextItems, meetings,
+    transcript timestamps, screenshots, source documents, recordings, or
+    recollections.
+12. Meeting Brief and later meeting-time assistance:
+    Meeting Brief, Meeting Overlay, and Live Meeting Copilot should reuse the
+    same context-query/review boundaries rather than invent a separate memory
+    path.
 
 ## Telegram Capture
 
@@ -177,8 +221,19 @@ APIs remain intentionally later work.
    (token/network/other), with last poll/success/captured times, the last
    processed update id, and a redacted error summary; a "Check now" button
    and an "Open ContextHUB" shortcut are available. No new capture behavior.
-5. Later: voice, transcription, AI interpretation and LLM-proposed actions
-   with review-before-apply, automatic task/MEET creation, Context Pack
+5. Telegram voice/audio/image/document ingestion:
+   accept voice messages, audio files, screenshots/images, documents, forwarded
+   materials, and text; preserve the original artifact; transcribe or visually
+   analyze when appropriate; split into candidates; route through Context
+   Inbox.
+6. Specialized phone/mobile capture and call-recording import improvements:
+   one-tap personal voice capture, shared voice messages/files, screenshots,
+   imported system call recordings, imported Telegram/WhatsApp materials, and
+   immediate post-call recollection when actual call recording is unavailable.
+   Ambient speakerphone recording is not an acceptable fallback for the user's
+   Bluetooth-headset phone-call setup.
+7. Later: AI interpretation and LLM-proposed actions with review-before-apply,
+   automatic task/MEET creation only when explicitly enabled, and Context Pack
    workflows.
 
 ## Workstreams
@@ -194,3 +249,10 @@ APIs remain intentionally later work.
 3. Server-mediated offline-first sync.
 4. Mobile companion later.
 5. No P2P/CRDT first.
+
+## Deferred Platform Expansion
+
+- Do not add cross-platform product development to the active roadmap.
+- Web/PWA, macOS, multi-user backend, and commercial distribution remain
+  explicitly deferred possibilities after the Windows product is mature and
+  proves useful beyond its owner.

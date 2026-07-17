@@ -8,11 +8,19 @@ item.
 
 - TaskOverlay is memory-support, attention-support, and work-recovery software,
   not just a task list.
+- TaskOverlay is a personal Windows-first working-memory system. It should
+  provide a practical interface to the user's external working memory, not just
+  a place to store tasks or context snippets.
 - WPF v2 is the active product.
 - Go v1 is legacy.
 - Workspace is the main management surface.
 - Overlay is the attention layer, not the full task manager.
 - Tree is the master structure.
+- Cross-platform distribution, Web/PWA, macOS support, multi-user accounts, and
+  commercial infrastructure are deferred until the Windows product is mature
+  and proves useful beyond its owner.
+- Telegram/mobile capture is important as an ingestion path into the Windows
+  app. It is not currently a general cross-platform TaskOverlay client.
 - Repo docs are the source of truth for backlog/decisions/roadmap; chat memory
   alone is not.
 
@@ -42,6 +50,11 @@ item.
 - `localStorage` must not be used for production persistence.
 - No mock-only production controls.
 - Backups are backup, not sync.
+- Raw source artifacts should be preserved immutably with provenance. Derived
+  analysis should be versioned, reviewable, retryable, and re-creatable.
+- Existing notes, context, MEET transcripts, recordings, Telegram messages, and
+  other captured material should support later backfill analysis and
+  re-analysis.
 
 ## Overlay And Attention
 
@@ -55,6 +68,24 @@ item.
 - MEET is persisted in `AppState` with project, title, notes, start time,
   duration, location, link, and an optional linked task. Its default duration
   is 30 minutes.
+- New MEET flows create a real persisted draft immediately. Generated titles
+  are stored and explicitly distinguished from user-authored titles so the
+  first user input replaces the fallback naturally and recording can start
+  before any title edit.
+- MEET Details uses one ordered patch-autosave queue: text changes are
+  debounced, discrete controls persist immediately, and pending edits flush
+  before Close and recording. Save/Revert buttons are not part of this flow.
+- Commands dispatched through `WorkspaceCommandDispatcher` are transactional
+  at the `AppState`/save boundary. If persistence throws, authoritative memory
+  is restored to the pre-command durable state. A failure after disk
+  persistence in a dependent refresh or snapshot send is a separate warning
+  and does not roll back the saved change. Meeting Assistant's asynchronous
+  import/transcription/analysis/recording operations are outside this guarantee
+  until their persistence boundaries receive equivalent hardening.
+- A state file or restore candidate with a schema newer than the running build
+  supports must be rejected before migration, repair, backup fallback, or any
+  write. Startup must identify both versions and the untouched state path, then
+  require a newer TaskOverlay build.
 - Handle is a functional surface, not branding.
 - Handle anchor is the source of truth and must not be derived from panel
   position.
@@ -137,9 +168,53 @@ item.
   backups do not copy audio or transcript files. The optional OpenAI API key
   is protected separately with Windows DPAPI and is never stored in
   `state.json` or logs.
+- The MEET workspace uses exactly three top-level tabs: Details, Sources, and
+  Review. Sources owns recordings, managed imports, transcript versions, and
+  manual screenshots; Review combines the explicitly active transcript with
+  analysis and visual references. Transcript, Analysis, and Context are not
+  separate top-level tabs.
+- Imported audio and transcripts are copied into deterministic MEET-relative
+  managed storage. `state.json` stores provenance and safe relative metadata,
+  never the original external absolute path. Audio processing ranges are
+  non-destructive and never alter the managed original.
+- A MEET can retain multiple generated/imported transcript versions and points
+  to one active transcript. Analysis records both transcript ID and revision
+  ID, and a revision mismatch is surfaced as stale analysis that is re-run only
+  by an explicit user action.
+- Speaker identity is separate from presentation: normalized segments reference
+  stable `SpeakerId` values, while transcript-level mappings store
+  `OriginalLabel`, `DisplayName`, and `IsCurrentUser`. Renaming or merging
+  speakers must not rewrite original imported/provider artifacts. Global
+  speaker editing UI is intentionally deferred.
+- Screenshots are explicit user-selected Window/Display captures, stored as
+  managed PNG artifacts with UTC time and active-recording offset when one is
+  available. There is no silent/periodic capture, video, OCR, or multimodal AI
+  processing in this slice.
 - Transcription and structured meeting analysis use provider interfaces.
   ProposedActions never mutate state directly: the user reviews and selects
   actions, and apply routes through existing TaskOverlay domain services.
+- Long-running transcription and analysis expose one transient coordinator
+  operation through the Workspace snapshot. React may add an immediate
+  optimistic lock for first-click feedback, but reconciles it with that
+  authoritative runtime operation; transient work is never persisted as
+  running across process restart. Duplicate protection remains at both UI and
+  coordinator boundaries.
+- Provider progress is indeterminate unless the provider supplies real
+  progress. TaskOverlay may show reliable stages and elapsed time, but never a
+  fabricated percentage.
+- Explicit user cancellation is a neutral runtime outcome, not a provider
+  failure. It returns the recording to Ready, clears cancellation-generated
+  errors, and preserves original audio, transcript versions, and the previous
+  successful analysis. Late provider results remain ineligible for persistence.
+- Calendar drag and resize completion suppresses click-to-open for both task
+  and MEET blocks; ordinary pointer clicks and keyboard activation still open
+  Details.
+- Inactive transcript cards are large accessible selection targets with
+  radio/option semantics. Their Analyze/Open/Delete controls never implicitly
+  change the active transcript.
+- Saving an imported-audio transcription range stores metadata for the next
+  transcription. It does not process audio and never changes the managed
+  original.
 - Recurrence, calendar sync, live transcription, direct meeting-platform APIs,
   and automatic action application remain later features.
 - No embedded ChatGPT window inside the app.
@@ -200,13 +275,40 @@ item.
   confirmation. AI must never mutate tasks/MEET/context directly. The MEET
   Assistant implements the first bounded ProposedActions review/apply path;
   future AI features must reuse the same explicit-review boundary.
+- Future unified capture should introduce a `SourceArtifact` / Context Inbox
+  layer over existing notes/context, MEET recordings, imported audio,
+  transcripts, screenshots, Telegram captures, phone-originated recordings,
+  system call recordings, phone screenshots/shared files, and post-call user
+  recollections. This layer is future work and must not bypass the current
+  connected AppState/bridge path.
+- Context Inbox processing states should distinguish Captured, Needs
+  transcription, Ready for analysis, Needs review, Accepted, Rejected, and
+  Failed.
+- Durable context creation is review-first by default. AI may suggest people,
+  projects, workstreams, topics, item types, contradictions, and superseded
+  items, but the user must be able to Accept, Edit, Split, Merge, Change scope,
+  Change topic, or Reject before durable context is created.
+- Future attributed knowledge separates Person, Project, Workstream, Topic,
+  ContextItem, and Source reference. Person identity is global; speaker
+  identity is transcript-local until linked to a global Person; speaker
+  attribution is not the same as context scope.
+- A MEET project is only a default hint and does not determine the scope of
+  every statement. One source may produce multiple ContextItems across
+  projects, workstreams, and topics.
+- Context scope must support Project, multiple projects, workspace/general,
+  personal, and unassigned / needs scope review.
+- Do not silently overwrite older information. Preserve chronology,
+  corrections, changing positions, contradictions, and exact source references.
+- User recollection is a valid source type, but must not be represented as an
+  exact quote or direct recording of another person.
 - Context Pack is a read-only export generated from stored TaskOverlay data;
   deprecated/superseded items are excluded by default. Not shipped in the
   foundation PR (expanded export shipped later - see the Context Pack entry
   below).
 - Modal-based creation remains appropriate for large editors. MEET now uses one
-  dedicated responsive Workspace modal because recording, transcript,
-  analysis, Context, and scheduling no longer fit the narrow Details column.
+  dedicated responsive Workspace modal with Details / Sources / Review because
+  recording, transcript, analysis, Context, and scheduling no longer fit the
+  narrow Details column.
   TASK Details intentionally remains in the right sidebar. Closing the MEET
   modal never owns or stops the process-level recording/finalization runtime.
 - Task Details Context block (done): a compact, Task-only card in Task
@@ -332,6 +434,21 @@ item.
 - Plain text and command captures create raw capture / SourceDocument drafts
   for user review. Voice, transcription, AI interpretation, and automatic
   final task/MEET creation are later work.
+- Telegram ingestion should later accept voice messages, audio files, text,
+  screenshots/images, documents, and forwarded materials. The original artifact
+  must be preserved, transcribed or visually analyzed when appropriate, split
+  into candidates, and sent through Context Inbox.
+- Phone-originated capture should later include one-tap personal voice capture,
+  shared voice messages/files, screenshots, imported system call recordings,
+  imported Telegram/WhatsApp materials, and immediate post-call user
+  recollection when an actual call recording is unavailable.
+- The user's normal phone-call setup uses a Bluetooth headset. Ambient
+  speakerphone recording is not an acceptable fallback.
+- Do not promise reliable third-party Telegram or WhatsApp call recording on
+  stock Android. Prefer native/system call recording where supported,
+  high-quality Telegram/WhatsApp capture through the Windows recording path,
+  importing externally created recordings, or post-call recollection as a
+  clearly labeled fallback source.
 - PR 3 (done) adds status/diagnostics, not new capture behavior: a volatile,
   non-secret `TelegramCaptureDiagnostics` snapshot in `TaskOverlay.Core`
   reports one of `NotConfigured` / `Disabled` / `Running` /
@@ -356,6 +473,28 @@ item.
 - Full sync/mobile/cloud comes later.
 - Server-mediated offline-first sync is preferred.
 - P2P/CRDT is not the first sync architecture.
+- Web/PWA, macOS, multi-user backend, and commercial distribution are
+  explicitly deferred possibilities after product maturity and external
+  usefulness are validated. They are not active roadmap work.
+
+## Context Assistant
+
+- Context Assistant is the future primary conversational interface to
+  ContextHUB outside meetings.
+- It should support text questions first and voice input later.
+- Search must support combinations of Person, Project, Workstream, Topic,
+  MEET, transcript, ContextItem, source document, date, and status.
+- Answers must be grounded in retrieved context and include navigable source
+  references to ContextItems, meetings, transcript timestamps, screenshots,
+  source documents, recordings, or recollections.
+- The assistant must surface contradictions and say when confirmed information
+  is unavailable.
+- Chat messages and model answers are not themselves trusted source material.
+  They may create proposed facts, risks, questions, decisions, or tasks only
+  through explicit review.
+- The same future context-query service should later power Workspace Context
+  Chat, voice question input, Overlay Quick Ask, Meeting Brief, Meeting
+  Overlay, and Live Meeting Copilot.
 
 ## Process
 

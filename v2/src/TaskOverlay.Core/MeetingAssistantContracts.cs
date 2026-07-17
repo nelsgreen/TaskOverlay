@@ -66,7 +66,9 @@ public sealed record MeetingAudioProcessingRequest(
     long MaximumChunkBytes = 20L * 1024L * 1024L,
     string? ExistingMixedAudioPath = null,
     MeetingRecordingFormat RecordingFormat = MeetingRecordingFormat.Wav,
-    int MixedAudioBitrate = 96_000);
+    int MixedAudioBitrate = 96_000,
+    double? ProcessFromSeconds = null,
+    double? ProcessUntilSeconds = null);
 
 public sealed record MeetingAudioProcessingResult(
     string MixedAudioPath,
@@ -103,7 +105,9 @@ public interface ITranscriptionProvider
 }
 
 public sealed record MeetingAnalysisProviderRequest(
-    Guid RecordingId,
+    Guid? RecordingId,
+    Guid TranscriptId,
+    Guid TranscriptRevisionId,
     Guid? MeetId,
     Guid ProjectId,
     string MeetingTitle,

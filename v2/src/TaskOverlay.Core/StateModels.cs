@@ -7,7 +7,7 @@ namespace TaskOverlay.Core;
 
 public sealed class AppState
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public List<TaskItem> Tasks { get; set; } = new();
@@ -18,6 +18,8 @@ public sealed class AppState
     public List<SourceDocument> ContextSources { get; set; } = new();
     public List<ContextItem> ContextItems { get; set; } = new();
     public List<MeetingRecording> MeetingRecordings { get; set; } = new();
+    public List<MeetingTranscript> MeetingTranscripts { get; set; } = new();
+    public List<MeetingScreenshot> MeetingScreenshots { get; set; } = new();
     public List<MeetingAnalysis> MeetingAnalyses { get; set; } = new();
     public OverlaySettings OverlaySettings { get; set; } = new();
     public WindowPlacement WindowPlacement { get; set; } = new();
@@ -101,12 +103,14 @@ public sealed class MeetingItem
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
     public string Title { get; set; } = string.Empty;
+    public bool TitleIsGenerated { get; set; }
     public string Notes { get; set; } = string.Empty;
     public DateTimeOffset StartsAtUtc { get; set; }
     public int DurationMinutes { get; set; } = DefaultDurationMinutes;
     public string Location { get; set; } = string.Empty;
     public string Link { get; set; } = string.Empty;
     public Guid? LinkedTaskId { get; set; }
+    public Guid? ActiveTranscriptId { get; set; }
     public MeetingRecordingPolicy RecordingPolicy { get; set; } =
         MeetingRecordingPolicy.Inherit;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;

@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FileAudio,
   FolderOpen,
+  Info,
   Mic,
   Play,
   Sparkles,
@@ -20,6 +21,7 @@ import {
 import type {
   MeetItem,
   MeetingAnalysisSnapshot,
+  MeetingOperationSnapshot,
   MeetingProposedActionOverride,
   MeetingProposedActionSnapshot,
   MeetingRecordingPolicy,
@@ -37,18 +39,26 @@ interface Props {
   projects: Project[]
   recordings: MeetingRecordingSnapshot[]
   analyses: MeetingAnalysisSnapshot[]
+  operations: MeetingOperationSnapshot[]
   unclassifiedRecordings: MeetingRecordingSnapshot[]
   activeRecording: MeetingRecordingSnapshot | null
   activeRecordingOwnerTitle?: string
   readOnly: boolean
   commandError?: string | null
+  commandNotice?: string | null
   onClearError?: () => void
+  onClearNotice?: () => void
   onCommand: (command: WorkspaceMeetingAssistantCommand) => boolean
+  defaultRecordingPolicy?: Exclude<MeetingRecordingPolicy, "Inherit">
+  onRecordingPolicyChange?: (policy: MeetingRecordingPolicy) => void
+  onBeforeRecordingStart?: () => Promise<boolean>
+  showAnalysis?: boolean
+  showTranscript?: boolean
 }
 
 const statusOptions: Status[] = ["TODO", "FOCUS", "WAIT", "DONE"]
 const policyOptions: { value: MeetingRecordingPolicy; label: string }[] = [
-  { value: "Inherit", label: "Inherit" },
+  { value: "Inherit", label: "Use app default" },
   { value: "Manual", label: "Manual" },
   { value: "AutoRecord", label: "Auto-record" },
 ]
@@ -58,13 +68,21 @@ export function MeetingAssistantSection({
   projects,
   recordings,
   analyses,
+  operations,
   unclassifiedRecordings,
   activeRecording,
   activeRecordingOwnerTitle,
   readOnly,
   commandError,
+  commandNotice,
   onClearError,
+  onClearNotice,
   onCommand,
+  defaultRecordingPolicy = "Manual",
+  onRecordingPolicyChange,
+  onBeforeRecordingStart,
+  showAnalysis = true,
+  showTranscript = true,
 }: Props) {
   const meetingRecordings = useMemo(
     () => recordings
@@ -83,6 +101,8 @@ export function MeetingAssistantSection({
     .filter((analysis) => analysis.recordingId === selectedRecording?.id)
     .sort((left, right) => right.updatedAtUtc.localeCompare(left.updatedAtUtc))[0]
     ?? null
+  const selectedOperation = operations.find((operation) =>
+    operation.recordingId === selectedRecording?.id)
 
   const latestRecordingId = meetingRecordings[0]?.id ?? null
   const availableRecordingIds = useMemo(
@@ -127,13 +147,19 @@ export function MeetingAssistantSection({
     onClearError?.()
     return onCommand(command)
   }
+  const startRecording = async () => {
+    if (onBeforeRecordingStart && !await onBeforeRecordingStart()) return
+    if (send({ type: "startMeetingRecording", meetingId: meet.id })) {
+      setPendingRecordingAction("start")
+    }
+  }
 
   const recordingControls = deriveMeetingRecordingControlState(
     meet.id,
     activeRecording,
     pendingRecordingAction,
   )
-  const isProcessing = selectedRecording?.state === "Processing"
+  const isProcessing = Boolean(selectedOperation) || selectedRecording?.state === "Processing"
     || selectedRecording?.state === "Transcribing"
     || selectedRecording?.state === "Analyzing"
 
@@ -160,6 +186,18 @@ export function MeetingAssistantSection({
         </div>
       )}
 
+      {commandNotice && (
+        <div className="flex items-start gap-2 rounded-md border border-status-meet/30 bg-status-meet/10 p-2 text-[11px] text-foreground" role="status">
+          <Info className="mt-0.5 size-3.5 shrink-0 text-status-meet" aria-hidden="true" />
+          <span className="min-w-0 flex-1">{commandNotice}</span>
+          {onClearNotice && (
+            <button type="button" onClick={onClearNotice} aria-label="Dismiss notice" className="text-muted-foreground hover:text-foreground">
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
       <div>
         <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Recording policy
@@ -169,12 +207,8 @@ export function MeetingAssistantSection({
             <button
               type="button"
               key={option.value}
-              disabled={readOnly}
-              onClick={() => send({
-                type: "setMeetingRecordingPolicy",
-                meetingId: meet.id,
-                policy: option.value,
-              })}
+              disabled={readOnly || !onRecordingPolicyChange}
+              onClick={() => onRecordingPolicyChange?.(option.value)}
               className={cn(
                 "rounded-md border px-2 py-1 text-[10px] font-medium",
                 (meet.recordingPolicy ?? "Inherit") === option.value
@@ -182,10 +216,15 @@ export function MeetingAssistantSection({
                   : "border-border text-muted-foreground hover:bg-accent",
               )}
             >
-              {option.label}
+              {option.value === "Inherit"
+                ? `${option.label} (${defaultRecordingPolicy === "AutoRecord" ? "Auto-record" : "Manual"})`
+                : option.label}
             </button>
           ))}
         </div>
+        <p className="mt-1.5 text-[10px] text-muted-foreground">
+          Use app default inherits the current global Settings preference.
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -202,11 +241,7 @@ export function MeetingAssistantSection({
             icon={Play}
             primary
             disabled={readOnly}
-            onClick={() => {
-              if (send({ type: "startMeetingRecording", meetingId: meet.id })) {
-                setPendingRecordingAction("start")
-              }
-            }}
+            onClick={() => void startRecording()}
           />
         )}
         {recordingControls.mode === "starting" && (
@@ -301,17 +336,17 @@ export function MeetingAssistantSection({
               recording={selectedRecording}
               isRuntimeActive={selectedRecording.id === activeRecording?.id}
               isProcessing={isProcessing}
+              operation={selectedOperation}
               readOnly={readOnly}
               send={send}
-              onStartAnother={recordingControls.mode === "start" ? () => {
-                if (send({ type: "startMeetingRecording", meetingId: meet.id })) {
-                  setPendingRecordingAction("start")
-                }
-              } : undefined}
+              showTranscript={showTranscript}
+              onStartAnother={recordingControls.mode === "start"
+                ? () => void startRecording()
+                : undefined}
             />
           )}
 
-          {selectedAnalysis && (
+          {showAnalysis && selectedAnalysis && (
             <AnalysisReview
               analysis={selectedAnalysis}
               projects={projects}
@@ -396,17 +431,32 @@ function RecordingCard({
   recording,
   isRuntimeActive,
   isProcessing,
+  operation,
   readOnly,
   send,
   onStartAnother,
+  showTranscript,
 }: {
   recording: MeetingRecordingSnapshot
   isRuntimeActive: boolean
   isProcessing: boolean
+  operation?: MeetingOperationSnapshot
   readOnly: boolean
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
   onStartAnother?: () => void
+  showTranscript: boolean
 }) {
+  const [rangeFrom, setRangeFrom] = useState(
+    recording.processFromSeconds == null ? "" : String(recording.processFromSeconds),
+  )
+  const [rangeUntil, setRangeUntil] = useState(
+    recording.processUntilSeconds == null ? "" : String(recording.processUntilSeconds),
+  )
+  useEffect(() => {
+    setRangeFrom(recording.processFromSeconds == null ? "" : String(recording.processFromSeconds))
+    setRangeUntil(recording.processUntilSeconds == null ? "" : String(recording.processUntilSeconds))
+  }, [recording.id, recording.processFromSeconds, recording.processUntilSeconds])
+
   const canTranscribe = !recording.keepLocalOnly
     && recording.hasMixedAudio
     && ["Recorded", "TranscriptReady", "Ready", "Failed"].includes(recording.state)
@@ -427,7 +477,7 @@ function RecordingCard({
             recording.state === "Failed" ? "bg-destructive" : "bg-status-meet",
         )} />
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground">
-          {recording.state === "Stopping" ? "Finalizing recording..." : recording.state}
+          {formatRecordingStateLabel(recording)}
           {recording.plannedEndPassed ? " - planned end passed" : ""}
         </span>
         <span className="text-[10px] text-muted-foreground">{formatRecordingTimestamp(recording)}</span>
@@ -451,7 +501,83 @@ function RecordingCard({
         {recording.recordingFormat === "Wav" && (
           <p className="text-amber-300">Lossless WAV recordings use substantially more disk space.</p>
         )}
+        {recording.sourceKind === "Imported" && (
+          <p className="break-words">
+            Origin: <strong className="text-foreground">Imported</strong>
+            {recording.originalFileName ? ` - ${recording.originalFileName}` : ""}
+          </p>
+        )}
       </div>
+
+      {recording.sourceKind === "Imported" && (
+        <div className="space-y-2 rounded border border-border/70 bg-card/30 p-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Transcription range
+            </span>
+            <button
+              type="button"
+              disabled={readOnly || isProcessing}
+              onClick={() => {
+                setRangeFrom("")
+                setRangeUntil("")
+                send({
+                  type: "setImportedAudioRange",
+                  recordingId: recording.id,
+                  fromSeconds: null,
+                  untilSeconds: null,
+                })
+              }}
+              className="text-[10px] font-medium text-status-meet disabled:opacity-40"
+            >
+              Use full recording
+            </button>
+          </div>
+          <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
+            <input
+              type="number"
+              min={0}
+              step="0.1"
+              value={rangeFrom}
+              onChange={(event) => setRangeFrom(event.target.value)}
+              placeholder="From"
+              className="h-7 min-w-0 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+            />
+            <input
+              type="number"
+              min={0}
+              max={recording.durationSeconds || undefined}
+              step="0.1"
+              value={rangeUntil}
+              onChange={(event) => setRangeUntil(event.target.value)}
+              placeholder="Until"
+              className="h-7 min-w-0 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+            />
+            <button
+              type="button"
+              disabled={readOnly || isProcessing}
+              onClick={() => {
+                const from = rangeFrom.trim() ? Number(rangeFrom) : null
+                const until = rangeUntil.trim() ? Number(rangeUntil) : null
+                if ((from !== null && !Number.isFinite(from)) ||
+                    (until !== null && !Number.isFinite(until))) return
+                send({
+                  type: "setImportedAudioRange",
+                  recordingId: recording.id,
+                  fromSeconds: from,
+                  untilSeconds: until,
+                })
+              }}
+              className="h-7 rounded border border-border px-2 text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
+            >
+              Save range
+            </button>
+          </div>
+          <p className="text-[9px] text-muted-foreground">
+            The original is unchanged. This range is used the next time you transcribe.
+          </p>
+        </div>
+      )}
 
       {transcriptionSource && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded border border-status-meet/25 bg-status-meet/5 px-2 py-1.5 text-[10px] text-muted-foreground">
@@ -471,6 +597,8 @@ function RecordingCard({
           {recording.lastError}
         </p>
       )}
+
+      {operation && <RecordingOperationStatus operation={operation} />}
 
       {technicalErrors.length > 0 && (
         <details className="min-w-0 rounded border border-border/70 bg-card/30 p-2">
@@ -509,10 +637,13 @@ function RecordingCard({
         ) : (
           <>
             <ActionButton
-              label={recording.hasTranscript ? "Retry transcription" : "Transcribe now"}
+              label={operation?.kind === "Transcription"
+                ? operation.stage === "PreparingAudio" ? "Preparing audio..." : "Transcribing..."
+                : recording.hasTranscript ? "Retry transcription" : "Transcribe now"}
               icon={FileAudio}
               primary
               disabled={readOnly || !canTranscribe}
+              busy={operation?.kind === "Transcription"}
               onClick={() => {
                 if (window.confirm(
                   "The mixed recording will be uploaded to the configured transcription provider. Continue?",
@@ -526,9 +657,12 @@ function RecordingCard({
               }}
             />
             <ActionButton
-              label={recording.hasAnalysis ? "Retry analysis" : "Analyze"}
+              label={operation?.kind === "Analysis"
+                ? operation.stage === "StartingAnalysis" ? "Starting analysis..." : "Analyzing..."
+                : recording.hasAnalysis ? "Retry analysis" : "Analyze"}
               icon={Sparkles}
               disabled={readOnly || !canAnalyze}
+              busy={operation?.kind === "Analysis"}
               onClick={() => send({ type: "analyzeMeetingRecording", recordingId: recording.id })}
             />
           </>
@@ -584,7 +718,7 @@ function RecordingCard({
         </p>
       )}
 
-      {recording.transcriptText && (
+      {showTranscript && recording.transcriptText && (
         <details className="rounded-md border border-border p-2">
           <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Transcript
@@ -598,7 +732,7 @@ function RecordingCard({
   )
 }
 
-function AnalysisReview({
+export function AnalysisReview({
   analysis,
   projects,
   readOnly,
@@ -839,6 +973,35 @@ function TrackHealth({
   )
 }
 
+function RecordingOperationStatus({ operation }: { operation: MeetingOperationSnapshot }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [operation.id])
+  const elapsed = formatElapsed(operation.startedAtUtc, now)
+  const label = operation.stage === "StartingTranscription" ? "Starting transcription..."
+    : operation.stage === "PreparingAudio" ? "Preparing audio..."
+    : operation.stage === "Transcribing" ? "Transcribing..."
+    : operation.stage === "StartingAnalysis" ? "Starting analysis..."
+    : operation.stage === "Cancelling" ? "Cancelling..."
+    : "Analyzing transcript..."
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      className="space-y-1.5 rounded border border-status-meet/30 bg-status-meet/10 p-2 text-[10px]"
+    >
+      <div className="flex items-center gap-2 font-medium text-status-meet">
+        <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
+        <span>{label}</span>
+        <span className="ml-auto font-mono" aria-hidden="true">{elapsed}</span>
+      </div>
+    </div>
+  )
+}
+
 function ActionButton({
   label,
   icon: Icon,
@@ -846,6 +1009,7 @@ function ActionButton({
   disabled = false,
   primary = false,
   danger = false,
+  busy = false,
 }: {
   label: string
   icon: LucideIcon
@@ -853,11 +1017,13 @@ function ActionButton({
   disabled?: boolean
   primary?: boolean
   danger?: boolean
+  busy?: boolean
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
+      aria-busy={busy}
       onClick={onClick}
       className={cn(
         "flex h-7 items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
@@ -866,7 +1032,9 @@ function ActionButton({
         !primary && !danger && "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
       )}
     >
-      <Icon className="size-3" />
+      {busy
+        ? <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
+        : <Icon className="size-3" />}
       {label}
     </button>
   )
@@ -902,7 +1070,21 @@ function formatTrackHealth(health: MeetingRecordingSnapshot["systemAudioHealth"]
 }
 
 function formatRecordingFormat(format: MeetingRecordingSnapshot["recordingFormat"]): string {
-  return format === "Wav" ? "WAV" : "AAC/M4A"
+  if (format === "Wav") return "WAV"
+  if (format === "Mp3") return "MP3"
+  return "AAC/M4A"
+}
+
+function formatRecordingStateLabel(recording: MeetingRecordingSnapshot): string {
+  if (recording.state === "Stopping") return "Finalizing recording..."
+  if (recording.state === "TranscriptReady") return "Transcription completed"
+  if (recording.state === "Failed") {
+    if (recording.lastError.toLowerCase().includes("cancel")) {
+      return recording.hasTranscript ? "Analysis cancelled" : "Transcription cancelled"
+    }
+    return recording.hasTranscript ? "Analysis failed - Retry" : "Transcription failed - Retry"
+  }
+  return recording.state
 }
 
 function formatDuration(seconds: number): string {
