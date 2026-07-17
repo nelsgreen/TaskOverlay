@@ -92,6 +92,8 @@ interface MeetContextBlockProps {
   onCommand: (command: WorkspaceContextHubCommand) => boolean
   onOpenContextHub: () => void
   locked: boolean
+  /** MEET Details keeps Context open by default; Task Details never sets this. */
+  defaultOpenWhenEmpty?: boolean
 }
 
 export function MeetContextBlock({
@@ -105,6 +107,7 @@ export function MeetContextBlock({
   onCommand,
   onOpenContextHub,
   locked,
+  defaultOpenWhenEmpty = false,
 }: MeetContextBlockProps) {
   return (
     <RecordContextBlock
@@ -120,6 +123,7 @@ export function MeetContextBlock({
       onUnlinkItem={(itemId) => onCommand({ type: "unlinkContextItemFromMeeting", itemId, meetingId: meet.id })}
       onOpenContextHub={onOpenContextHub}
       locked={locked}
+      defaultOpenWhenEmpty={defaultOpenWhenEmpty}
       contextPack={{
         subtitle: `MEET: ${meet.title || "(untitled)"}`,
         buildMarkdown: () =>
@@ -153,6 +157,12 @@ interface RecordContextBlockProps {
   onOpenContextHub: () => void
   locked: boolean
   contextPack: ContextPackAction
+  /**
+   * When true, the card opens by default even with nothing linked (MEET Details
+   * keeps Context visible). Task Details omits this prop, so its collapse-when-
+   * empty default is unchanged.
+   */
+  defaultOpenWhenEmpty?: boolean
 }
 
 function RecordContextBlock({
@@ -169,6 +179,7 @@ function RecordContextBlock({
   onOpenContextHub,
   locked,
   contextPack,
+  defaultOpenWhenEmpty = false,
 }: RecordContextBlockProps) {
   const [modalOpen, setModalOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -188,7 +199,7 @@ function RecordContextBlock({
     [contextItems, getLinkedItemIds, ownerId],
   )
   const totalLinked = linkedSources.length + linkedItems.length
-  const open = manualOpen ?? totalLinked > 0
+  const open = manualOpen ?? (totalLinked > 0 || defaultOpenWhenEmpty)
 
   useEffect(() => {
     setManualOpen(null)

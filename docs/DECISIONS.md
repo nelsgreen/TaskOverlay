@@ -173,6 +173,27 @@ item.
   manual screenshots; Review combines the explicitly active transcript with
   analysis and visual references. Transcript, Analysis, and Context are not
   separate top-level tabs.
+- The MEET visual migration ships as three bounded phases: (1) shell + Details,
+  (2) Sources, (3) Review. Phase 1 is implemented in draft PR #68, but it is
+  not accepted or complete: manual Windows artifact QA failed. The rejected
+  default was the near-fullscreen `1600x1000 / viewport minus 16px` direction,
+  which created excessive empty space, undersized content, and an
+  application-inside-another-application feel. Exact replacement geometry and
+  layout remain pending a bounded visual-rescue iteration; no replacement
+  dimensions or column ratios are approved here. Preserve the useful technical
+  foundation already implemented: shared Header / Tabs / Content / Footer
+  shell, stable geometry across tabs, accessible three-tab structure, one
+  autosave indicator, existing PR #67 connected behavior, and MEET-specific
+  Context behavior. Phase 2 Sources and Phase 3 Review must not start until
+  the Phase 1 shell is visually accepted. The permanent "calendar-like item"
+  explanatory sentence remains removed, and Task Details is unchanged.
+- The MEET contrast/typography foundation is scoped to a `.meet-shell` class so
+  it never restyles Task, Calendar, ContextHUB, Settings, or Overlay. Inside
+  that scope the existing semantic tokens are overridden toward softer charcoal
+  surfaces, clearly visible neutral borders, near-white foreground, and
+  readable metadata (>=11px on the MEET surface); violet stays restrained
+  (MEET semantics and a subtle selected tint), the active tab uses a near-white
+  underline, and red is reserved for destructive actions and genuine failures.
 - Imported audio and transcripts are copied into deterministic MEET-relative
   managed storage. `state.json` stores provenance and safe relative metadata,
   never the original external absolute path. Audio processing ranges are

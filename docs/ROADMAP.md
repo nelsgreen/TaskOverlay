@@ -106,7 +106,18 @@ never a direct mutation without explicit user confirmation (see DECISIONS
     User cancellation is neutral, restores Ready, and retains prior durable
     sources/analysis; transcript cards provide large-target accessible
     selection, and range saving only configures the next transcription.
-13. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
+13. MEET visual migration - three bounded phases. Phase 1 (shell + Details) is
+    implemented in draft PR #68, but is not accepted or complete: manual
+    Windows artifact QA failed. The near-fullscreen `1600x1000 / viewport minus
+    16px` default direction is rejected because it created excessive empty
+    space and undersized content. Exact replacement geometry and layout remain
+    pending a bounded visual-rescue iteration. Preserve the useful foundation:
+    shared Header/Tabs/Content/Footer shell, stable geometry across tabs,
+    accessible three-tab structure, one autosave indicator, existing PR #67
+    connected behavior, and MEET-specific Context behavior. Phase 2 Sources and
+    Phase 3 Review must not start until Phase 1 is visually accepted; their
+    current production content remains in the shell for now.
+14. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
     loss, device recovery, retention, transcript search/editor actions,
     ContextHUB promotion, Meeting Brief, user speaker identification,
     OCR/multimodal review, and additional/local providers.

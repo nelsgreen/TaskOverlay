@@ -164,6 +164,49 @@
   --now-marker: oklch(0.72 0.10 195);
 }
 
+/*
+ * MEET visual foundation (phase 1 — shell + Details).
+ * These overrides are scoped to `.meet-shell` (the MEET modal only) and never
+ * touch Task, Calendar, ContextHUB, Settings, or Overlay screens. They resolve
+ * the low-contrast complaints on the user's work monitor: softer charcoal
+ * surfaces, clearly visible neutral borders, near-white foreground, readable
+ * metadata, and a restrained violet accent. Existing semantic utilities used
+ * inside the modal (bg-sidebar, border-border, text-muted-foreground,
+ * text-status-meet, …) inherit these values automatically, so Sources and
+ * Review gain the same legibility without a content redesign.
+ */
+.meet-shell {
+  /* Layered surfaces — softer charcoal instead of near-black */
+  --background: oklch(0.172 0.004 260); /* inset: inputs, tab strip */
+  --sidebar: oklch(0.208 0.004 260);    /* modal body */
+  --card: oklch(0.25 0.005 260);        /* header / footer / cards */
+  --popover: oklch(0.25 0.005 260);
+  --muted: oklch(0.25 0.004 260);
+  --secondary: oklch(0.28 0.004 260);
+  --secondary-foreground: oklch(0.965 0.004 260);
+  --accent: oklch(0.30 0.015 296);      /* hover — faint violet tint */
+  --accent-foreground: oklch(0.965 0.004 260);
+
+  /* Text — near-white primary, readable neutral metadata */
+  --foreground: oklch(0.965 0.004 260);
+  --card-foreground: oklch(0.965 0.004 260);
+  --popover-foreground: oklch(0.965 0.004 260);
+  --sidebar-foreground: oklch(0.965 0.004 260);
+  --muted-foreground: oklch(0.75 0.006 260);
+
+  /* Borders — clearly visible neutral gray (global is 7%, invisible here) */
+  --border: oklch(1 0 0 / 14%);
+  --sidebar-border: oklch(1 0 0 / 14%);
+  --input: oklch(1 0 0 / 18%);
+
+  /* Focus + selection — restrained violet, near-white active boundary */
+  --ring: oklch(0.82 0.06 296);
+  --sidebar-ring: oklch(0.82 0.06 296);
+  --meet-border-strong: oklch(1 0 0 / 24%);
+  --meet-active: oklch(0.95 0.004 260);       /* near-white active underline */
+  --meet-selected: oklch(0.65 0.16 296 / 16%); /* subtle violet selected tint */
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
     color-scheme: dark;
