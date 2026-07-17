@@ -149,7 +149,7 @@ test("visual foundation is MEET-scoped, not global", () => {
   assert.match(component, /className="meet-shell /)
   assert.match(globals, /\.meet-shell\s*\{/)
   // The scope raises border + metadata contrast without touching :root/.dark.
-  assert.match(globals, /\.meet-shell[\s\S]*--border:\s*oklch\(1 0 0 \/ 14%\)/)
+  assert.match(globals, /\.meet-shell[\s\S]*--border:\s*oklch\(1 0 0 \/ 16%\)/)
   assert.match(globals, /\.meet-shell[\s\S]*--muted-foreground:/)
 })
 

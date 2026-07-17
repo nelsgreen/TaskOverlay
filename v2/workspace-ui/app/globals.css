@@ -176,11 +176,20 @@
  * Review gain the same legibility without a content redesign.
  */
 .meet-shell {
-  /* Layered surfaces — softer charcoal instead of near-black */
-  --background: oklch(0.172 0.004 260); /* inset: inputs, tab strip */
-  --sidebar: oklch(0.208 0.004 260);    /* modal body */
-  --card: oklch(0.25 0.005 260);        /* header / footer / cards */
-  --popover: oklch(0.25 0.005 260);
+  /*
+   * Layered charcoal hierarchy (visual-QA correction): the surface levels must
+   * separate by luminance before borders or accents are involved —
+   *   shell chrome (header/tabs/footer)  0.19
+   *   content columns (work surface)     0.215  (--meet-content)
+   *   sections / cards                   0.245
+   *   selected transcript                0.30   (--meet-selected-surface)
+   * with inputs as darker 0.16 insets so they stay distinct from their card.
+   */
+  --background: oklch(0.16 0.004 260);  /* inset: inputs, tab strip */
+  --sidebar: oklch(0.19 0.004 260);     /* shell chrome: header / footer */
+  --meet-content: oklch(0.215 0.004 260); /* content columns */
+  --card: oklch(0.245 0.005 260);       /* sections / cards */
+  --popover: oklch(0.245 0.005 260);
   --muted: oklch(0.25 0.004 260);
   --secondary: oklch(0.28 0.004 260);
   --secondary-foreground: oklch(0.965 0.004 260);
@@ -195,16 +204,17 @@
   --muted-foreground: oklch(0.75 0.006 260);
 
   /* Borders — clearly visible neutral gray (global is 7%, invisible here) */
-  --border: oklch(1 0 0 / 14%);
-  --sidebar-border: oklch(1 0 0 / 14%);
-  --input: oklch(1 0 0 / 18%);
+  --border: oklch(1 0 0 / 16%);
+  --sidebar-border: oklch(1 0 0 / 16%);
+  --input: oklch(1 0 0 / 20%);
 
-  /* Focus + selection — restrained violet, near-white active boundary */
+  /* Focus + selection — restrained violet, light-neutral selected boundary */
   --ring: oklch(0.82 0.06 296);
   --sidebar-ring: oklch(0.82 0.06 296);
-  --meet-border-strong: oklch(1 0 0 / 24%);
+  --meet-border-strong: oklch(1 0 0 / 32%);
   --meet-active: oklch(0.95 0.004 260);       /* near-white active underline */
   --meet-selected: oklch(0.65 0.16 296 / 16%); /* subtle violet selected tint */
+  --meet-selected-surface: oklch(0.30 0.005 260); /* active transcript card */
 }
 
 @media (prefers-color-scheme: dark) {

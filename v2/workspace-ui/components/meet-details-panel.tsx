@@ -40,6 +40,7 @@ import {
   meetTabPanelId,
   nextMeetTab,
 } from "@/lib/meet-shell"
+import { isValidMeetingLinkUrl } from "@/lib/meeting-link"
 import { MeetContextBlock } from "./task-context-block"
 import { MeetingReviewWorkspace, MeetingSourcesWorkspace } from "./meet-sources-review"
 
@@ -433,7 +434,7 @@ export function MeetDetailsModal({
           role="tabpanel"
           id={meetTabPanelId(activeTab)}
           aria-labelledby={meetTabButtonId(activeTab)}
-          className="flex min-h-0 flex-1 flex-col"
+          className="flex min-h-0 flex-1 flex-col bg-[var(--meet-content)]"
         >
           {isDetails && (
             <fieldset
@@ -591,18 +592,36 @@ export function MeetDetailsModal({
                       <ExternalLink className="size-3" />
                       Link
                     </label>
-                    <input
-                      id="meet-link-input"
-                      tabIndex={3}
-                      value={draft.link ?? ""}
-                      placeholder="meet.example.com/…"
-                      onChange={(e) => updateDraft(
-                        { link: e.target.value || undefined },
-                        ["link"],
-                        "debounced",
+                    <div className="flex items-stretch gap-1.5">
+                      <input
+                        id="meet-link-input"
+                        tabIndex={3}
+                        value={draft.link ?? ""}
+                        placeholder="meet.example.com/…"
+                        onChange={(e) => updateDraft(
+                          { link: e.target.value || undefined },
+                          ["link"],
+                          "debounced",
+                        )}
+                        className={cn(inputClass, "min-w-0 flex-1")}
+                      />
+                      {isValidMeetingLinkUrl(draft.link) && onMeetingAssistantCommand && (
+                        <button
+                          type="button"
+                          aria-label="Open call link"
+                          title="Open call link"
+                          onClick={() => sendMeetingAssistantCommand({ type: "openMeetingLink", meetingId: draft.id })}
+                          className="flex shrink-0 items-center justify-center rounded-md border border-border px-2.5 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <ExternalLink className="size-4" />
+                        </button>
                       )}
-                      className={inputClass}
-                    />
+                    </div>
+                    {draft.link?.trim() && !isValidMeetingLinkUrl(draft.link) && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Not a link the OS can open (needs http:// or https://).
+                      </p>
+                    )}
                   </div>
                   {/* Compact linked task: select + inline Open action, no duplicated card */}
                   <div>

@@ -86,103 +86,109 @@ export function MeetingSourcesWorkspace({
   const send = (command: WorkspaceMeetingAssistantCommand) => onCommand?.(command) ?? false
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]">
-      <div className="mx-auto max-w-[1120px] space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">MEET sources</h3>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              Record locally or add durable managed copies. Imports never depend on the original external path.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+    // Two columns, mirroring the Details layout: recording/audio owns the left
+    // (wider) column, transcripts + screenshots own the right column. Each
+    // column scrolls independently so there is exactly one scroll region per
+    // side and the shell never grows to fit content. The selected tab already
+    // says "Sources" — no extra page heading or explanatory prose.
+    <div className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+        {/* LEFT: Recording and audio sources */}
+        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto border-b border-border p-4 [scrollbar-gutter:stable] lg:border-b-0 lg:border-r">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">Recording &amp; audio</h4>
             <SourceAction
               label="Import audio"
               icon={FileAudio}
               disabled={sourceActionsDisabled}
               onClick={() => send({ type: "importMeetingAudio", meetingId: meet.id })}
             />
-            <SourceAction
-              label="Import transcript"
-              icon={Upload}
-              disabled={sourceActionsDisabled}
-              onClick={() => send({ type: "importMeetingTranscript", meetingId: meet.id })}
-            />
-            <SourceAction
-              label="Capture screenshot"
-              icon={Camera}
-              disabled={sourceActionsDisabled}
-              onClick={() => send({ type: "captureMeetingScreenshot", meetingId: meet.id })}
-            />
           </div>
+          {onCommand && (
+            <MeetingAssistantSection
+              meet={meet}
+              projects={projects}
+              recordings={recordings}
+              analyses={analyses}
+              operations={operations}
+              unclassifiedRecordings={recordings.filter((recording) => !recording.meetingId)}
+              activeRecording={activeRecording}
+              activeRecordingOwnerTitle={activeRecordingOwnerTitle}
+              readOnly={readOnly}
+              commandError={commandError}
+              commandNotice={commandNotice}
+              onClearError={onClearError}
+              onClearNotice={onClearNotice}
+              onCommand={onCommand}
+              defaultRecordingPolicy={defaultRecordingPolicy}
+              onRecordingPolicyChange={onRecordingPolicyChange}
+              onBeforeRecordingStart={onBeforeRecordingStart}
+              showAnalysis={false}
+              showTranscript={false}
+            />
+          )}
         </div>
 
-        {onCommand && (
-          <MeetingAssistantSection
-            meet={meet}
-            projects={projects}
-            recordings={recordings}
-            analyses={analyses}
-            operations={operations}
-            unclassifiedRecordings={recordings.filter((recording) => !recording.meetingId)}
-            activeRecording={activeRecording}
-            activeRecordingOwnerTitle={activeRecordingOwnerTitle}
-            readOnly={readOnly}
-            commandError={commandError}
-            commandNotice={commandNotice}
-            onClearError={onClearError}
-            onClearNotice={onClearNotice}
-            onCommand={onCommand}
-            defaultRecordingPolicy={defaultRecordingPolicy}
-            onRecordingPolicyChange={onRecordingPolicyChange}
-            onBeforeRecordingStart={onBeforeRecordingStart}
-            showAnalysis={false}
-            showTranscript={false}
-          />
-        )}
-
-        <section className="space-y-2 rounded-lg border border-border bg-card/40 p-3" role="radiogroup" aria-label="Transcript versions">
-          <div className="flex items-center gap-2">
-            <FileText className="size-4 text-status-meet" />
-            <h3 className="text-[11px] font-bold uppercase tracking-widest text-foreground">Transcripts</h3>
-            <span className="ml-auto text-[10px] text-muted-foreground">{meetTranscripts.length}</span>
-          </div>
-          {meetTranscripts.length === 0 ? (
-            <EmptySource text="No generated or imported transcripts yet." />
-          ) : meetTranscripts.map((transcript) => (
-            <TranscriptSourceCard
-              key={transcript.id}
-              meet={meet}
-              transcript={transcript}
-              readOnly={readOnly}
-              send={send}
-              operations={operations}
-            />
-          ))}
-        </section>
-
-        <section className="space-y-2 rounded-lg border border-border bg-card/40 p-3">
-          <div className="flex items-center gap-2">
-            <ImageIcon className="size-4 text-status-meet" />
-            <h3 className="text-[11px] font-bold uppercase tracking-widest text-foreground">Screenshots</h3>
-            <span className="ml-auto text-[10px] text-muted-foreground">{meetScreenshots.length}</span>
-          </div>
-          {meetScreenshots.length === 0 ? (
-            <EmptySource text="No manual screenshots captured for this MEET." />
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {meetScreenshots.map((screenshot) => (
-                <ScreenshotCard
-                  key={screenshot.id}
-                  screenshot={screenshot}
-                  readOnly={readOnly}
-                  send={send}
-                />
-              ))}
+        {/* RIGHT: Transcripts and visual sources */}
+        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4 [scrollbar-gutter:stable]">
+          <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">
+            Transcripts &amp; screenshots
+          </h4>
+          <section className="space-y-2 rounded-lg border border-border bg-card p-3" role="radiogroup" aria-label="Transcript versions">
+            <div className="flex items-center gap-2">
+              <FileText className="size-4 text-status-meet" />
+              <h3 className="text-[11px] font-semibold text-foreground">Transcripts</h3>
+              <span className="text-[10px] text-muted-foreground">{meetTranscripts.length}</span>
+              <SourceAction
+                label="Import transcript"
+                icon={Upload}
+                disabled={sourceActionsDisabled}
+                onClick={() => send({ type: "importMeetingTranscript", meetingId: meet.id })}
+                className="ml-auto"
+              />
             </div>
-          )}
-        </section>
-      </div>
+            {meetTranscripts.length === 0 ? (
+              <EmptySource text="No generated or imported transcripts yet." />
+            ) : meetTranscripts.map((transcript) => (
+              <TranscriptSourceCard
+                key={transcript.id}
+                meet={meet}
+                transcript={transcript}
+                readOnly={readOnly}
+                send={send}
+                operations={operations}
+              />
+            ))}
+          </section>
+
+          <section className="space-y-2 rounded-lg border border-border bg-card p-3">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="size-4 text-status-meet" />
+              <h3 className="text-[11px] font-semibold text-foreground">Screenshots</h3>
+              <span className="text-[10px] text-muted-foreground">{meetScreenshots.length}</span>
+              <SourceAction
+                label="Capture screenshot"
+                icon={Camera}
+                disabled={sourceActionsDisabled}
+                onClick={() => send({ type: "captureMeetingScreenshot", meetingId: meet.id })}
+                className="ml-auto"
+              />
+            </div>
+            {meetScreenshots.length === 0 ? (
+              <EmptySource text="No manual screenshots captured for this MEET." />
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {meetScreenshots.map((screenshot) => (
+                  <ScreenshotCard
+                    key={screenshot.id}
+                    screenshot={screenshot}
+                    readOnly={readOnly}
+                    send={send}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
     </div>
   )
 }
@@ -223,9 +229,12 @@ export function MeetingReviewWorkspace({
   const send = (command: WorkspaceMeetingAssistantCommand) => onCommand?.(command) ?? false
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]">
-      <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
-        <section className="flex min-h-[360px] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card/40">
+    // Two columns, each with exactly one scroll region — mirrors the Details
+    // layout so the shell never needs a page-level scroll on top of a nested
+    // one, and geometry stays fixed instead of chasing the viewport.
+    <div className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
+      <div className="flex min-h-0 flex-col border-b border-border p-4 lg:border-b-0 lg:border-r">
+        <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2.5">
             <FileText className="size-4 text-status-meet" />
             <div className="min-w-0 flex-1">
@@ -263,7 +272,7 @@ export function MeetingReviewWorkspace({
               </>
             )}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-3 [scrollbar-gutter:stable] lg:max-h-[calc(100vh-14rem)]">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 [scrollbar-gutter:stable]">
             {activeTranscript ? (
               <TranscriptContent transcript={activeTranscript} screenshots={meetScreenshots} send={send} />
             ) : (
@@ -271,9 +280,10 @@ export function MeetingReviewWorkspace({
             )}
           </div>
         </section>
+      </div>
 
-        <div className="min-w-0 space-y-3">
-          <section className="space-y-2 rounded-lg border border-border bg-card/40 p-3">
+      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4 [scrollbar-gutter:stable]">
+          <section className="space-y-2 rounded-lg border border-border bg-card p-3">
             {commandNotice && !analysisOperation && (
               <NeutralNotice message={commandNotice} onDismiss={onClearNotice} />
             )}
@@ -334,6 +344,7 @@ export function MeetingReviewWorkspace({
                 )}
                 <AnalysisReview
                   analysis={selectedAnalysis}
+                  meet={meet}
                   projects={projects}
                   readOnly={readOnly}
                   send={send}
@@ -348,7 +359,7 @@ export function MeetingReviewWorkspace({
             )}
           </section>
 
-          <section className="space-y-2 rounded-lg border border-border bg-card/40 p-3">
+          <section className="space-y-2 rounded-lg border border-border bg-card p-3">
             <div className="flex items-center gap-2">
               <ImageIcon className="size-4 text-status-meet" />
               <h3 className="text-[11px] font-bold uppercase tracking-widest text-foreground">Visual references</h3>
@@ -379,7 +390,6 @@ export function MeetingReviewWorkspace({
               No proposed ContextHUB updates. Future candidates will require explicit review here.
             </p>
           </section>
-        </div>
       </div>
     </div>
   )
@@ -410,6 +420,10 @@ function TranscriptSourceCard({
     })
   }
   return (
+    // Whole-card selection with identical geometry in both states: the active
+    // treatment is a lighter neutral surface + stronger light-neutral border,
+    // and the header keeps a reserved slot for the Active label so nothing
+    // moves when the selection changes.
     <div
       role="radio"
       aria-checked={transcript.isActive}
@@ -421,9 +435,11 @@ function TranscriptSourceCard({
         activate()
       }}
       className={cn(
-      "space-y-2 rounded-md border bg-background/50 p-2.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-status-meet/50",
-      transcript.isActive ? "border-status-meet/50" : "border-border",
-      !readOnly && !transcript.isActive && "cursor-pointer hover:border-status-meet/40 hover:bg-status-meet/5",
+      "space-y-2 rounded-md border p-2.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-status-meet/50",
+      transcript.isActive
+        ? "border-[var(--meet-border-strong)] bg-[var(--meet-selected-surface)]"
+        : "border-border bg-card",
+      !readOnly && !transcript.isActive && "cursor-pointer hover:border-[var(--meet-border-strong)] hover:bg-secondary",
     )}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className={cn(
@@ -437,11 +453,15 @@ function TranscriptSourceCard({
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
           {transcript.originalFileName || transcript.sourceLabel || "Transcript"}
         </span>
-        {transcript.isActive && (
-          <span className="flex items-center gap-1 text-[9px] font-semibold uppercase text-status-meet">
-            <Check className="size-3" /> Active
-          </span>
-        )}
+        <span
+          className={cn(
+            "flex shrink-0 items-center gap-1 text-[10px] font-semibold text-foreground",
+            !transcript.isActive && "invisible",
+          )}
+          aria-hidden={!transcript.isActive}
+        >
+          <Check className="size-3 text-status-meet" /> Active
+        </span>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
         <span>{transcript.format}</span>
@@ -460,14 +480,6 @@ function TranscriptSourceCard({
         </details>
       )}
       <div className="flex flex-wrap gap-1.5">
-        {!transcript.isActive && (
-          <SourceAction
-            label="Set active"
-            icon={Check}
-            disabled={readOnly}
-            onClick={activate}
-          />
-        )}
         <SourceAction
           label={analysisOperation ? "Analyzing..." : "Analyze"}
           icon={Sparkles}
@@ -721,6 +733,7 @@ function SourceAction({
   disabled = false,
   danger = false,
   busy = false,
+  className,
 }: {
   label: string
   icon: typeof Upload
@@ -728,6 +741,7 @@ function SourceAction({
   disabled?: boolean
   danger?: boolean
   busy?: boolean
+  className?: string
 }) {
   return (
     <button
@@ -740,10 +754,11 @@ function SourceAction({
       }}
       onKeyDown={(event) => event.stopPropagation()}
       className={cn(
-        "flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+        "flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
         danger
           ? "border-destructive/40 text-destructive hover:bg-destructive/10"
           : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+        className,
       )}
     >
       {busy
