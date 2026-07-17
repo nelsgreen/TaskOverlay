@@ -23,10 +23,14 @@ public sealed record MeetingAssistantOperationResult(
     Guid? MeetingId = null,
     Guid? AnalysisId = null,
     IReadOnlyList<Guid>? CreatedTaskIds = null,
-    IReadOnlyList<Guid>? CreatedContextItemIds = null)
+    IReadOnlyList<Guid>? CreatedContextItemIds = null,
+    bool Cancelled = false)
 {
     public static MeetingAssistantOperationResult Fail(string error) =>
         new(false, error);
+
+    public static MeetingAssistantOperationResult Cancel(string message, Guid? recordingId = null) =>
+        new(false, message, RecordingId: recordingId, Cancelled: true);
 }
 
 public sealed class MeetingAssistantCoordinator : IAsyncDisposable
@@ -472,7 +476,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 microphonePath,
                 mixedPath,
                 token);
-            ClearPreviousTranscriptionArtifacts(recording, folder);
+            ClearPreviousTranscriptionChunks(recording, folder);
             Persist(recording);
             var mixedBitrate = recording.Tracks.FirstOrDefault(track =>
                 track.Kind == MeetingRecordingTrackKind.Mixed)?.Bitrate ?? 96_000;
@@ -638,9 +642,11 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            service.MarkFailed(recordingId, "Transcription was cancelled. Original audio was kept.");
+            service.MarkReadyAfterCancellation(recordingId);
             Persist(recording);
-            return MeetingAssistantOperationResult.Fail(recording.LastError);
+            return MeetingAssistantOperationResult.Cancel(
+                "Transcription cancelled. Original audio was kept.",
+                recordingId);
         }
         catch (Exception ex) when (
             ex is IOException or
@@ -785,13 +791,13 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         {
             if (recording is not null)
             {
-                recordingService.MarkFailed(
-                    recording.Id,
-                    "Analysis was cancelled. Transcript and audio were kept.");
+                recordingService.MarkReadyAfterCancellation(recording.Id);
                 Persist(recording);
             }
 
-            return MeetingAssistantOperationResult.Fail("Analysis was cancelled.");
+            return MeetingAssistantOperationResult.Cancel(
+                "Analysis cancelled. Previous analysis was kept.",
+                recording?.Id);
         }
         catch (Exception ex) when (
             ex is IOException or
@@ -1532,7 +1538,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         return _storage.ResolveFile(recording, validMixedTracks[0].FileName);
     }
 
-    private void ClearPreviousTranscriptionArtifacts(
+    private static void ClearPreviousTranscriptionChunks(
         MeetingRecording recording,
         string folder)
     {
@@ -1549,14 +1555,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             }
         }
 
-        var layout = LayoutFor(recording);
-        File.Delete(layout.TranscriptRawPath);
-        File.Delete(layout.TranscriptPath);
-        File.Delete(layout.TranscriptMarkdownPath);
         recording.TranscriptionChunkFiles.Clear();
-        recording.TranscriptRawFile = string.Empty;
-        recording.TranscriptFile = string.Empty;
-        recording.TranscriptMarkdownFile = string.Empty;
     }
 
     private async Task ReportTranscriptionInputsAsync(

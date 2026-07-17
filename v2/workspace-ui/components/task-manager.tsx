@@ -1883,10 +1883,12 @@ export function TaskManager() {
           activeRecording={activeMeetingRecording}
           activeRecordingOwnerTitle={activeMeetingRecordingOwnerTitle}
           meetingAssistantError={meetingOperationController.error ?? bridge.error}
+          meetingAssistantNotice={meetingOperationController.notice}
           onClearMeetingAssistantError={() => {
             meetingOperationController.clearError()
             bridge.clearError()
           }}
+          onClearMeetingAssistantNotice={meetingOperationController.clearNotice}
           defaultRecordingPolicy={bridge.data?.defaultMeetingRecordingPolicy ?? "Manual"}
           onMeetingAssistantCommand={connected
             ? meetingOperationController.send

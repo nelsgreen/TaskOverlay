@@ -616,7 +616,13 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
     private static WorkspaceCommandResult ToCommandResult(
         string commandId,
         MeetingAssistantOperationResult result) =>
-        result.Success
+        result.Cancelled
+            ? WorkspaceCommandResult.Succeeded(commandId) with
+            {
+                OutcomeCode = "cancelled",
+                OutcomeMessage = result.Error
+            }
+            : result.Success
             ? WorkspaceCommandResult.Succeeded(
                 commandId,
                 createdMeetingId: result.MeetingId?.ToString("N"))

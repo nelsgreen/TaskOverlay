@@ -11,6 +11,7 @@ import {
   FileAudio,
   FileText,
   Image as ImageIcon,
+  Info,
   LoaderCircle,
   Sparkles,
   Trash2,
@@ -48,7 +49,9 @@ interface SharedProps {
   activeRecordingOwnerTitle?: string
   readOnly: boolean
   commandError?: string | null
+  commandNotice?: string | null
   onClearError?: () => void
+  onClearNotice?: () => void
   onCommand?: (command: WorkspaceMeetingAssistantCommand) => boolean
   defaultRecordingPolicy?: Exclude<MeetingRecordingPolicy, "Inherit">
   onRecordingPolicyChange?: (policy: MeetingRecordingPolicy) => void
@@ -67,7 +70,9 @@ export function MeetingSourcesWorkspace({
   activeRecordingOwnerTitle,
   readOnly,
   commandError,
+  commandNotice,
   onClearError,
+  onClearNotice,
   onCommand,
   defaultRecordingPolicy = "Manual",
   onRecordingPolicyChange,
@@ -124,7 +129,9 @@ export function MeetingSourcesWorkspace({
             activeRecordingOwnerTitle={activeRecordingOwnerTitle}
             readOnly={readOnly}
             commandError={commandError}
+            commandNotice={commandNotice}
             onClearError={onClearError}
+            onClearNotice={onClearNotice}
             onCommand={onCommand}
             defaultRecordingPolicy={defaultRecordingPolicy}
             onRecordingPolicyChange={onRecordingPolicyChange}
@@ -134,7 +141,7 @@ export function MeetingSourcesWorkspace({
           />
         )}
 
-        <section className="space-y-2 rounded-lg border border-border bg-card/40 p-3">
+        <section className="space-y-2 rounded-lg border border-border bg-card/40 p-3" role="radiogroup" aria-label="Transcript versions">
           <div className="flex items-center gap-2">
             <FileText className="size-4 text-status-meet" />
             <h3 className="text-[11px] font-bold uppercase tracking-widest text-foreground">Transcripts</h3>
@@ -189,7 +196,9 @@ export function MeetingReviewWorkspace({
   operations,
   readOnly,
   commandError,
+  commandNotice,
   onClearError,
+  onClearNotice,
   onCommand,
 }: SharedProps) {
   const activeTranscript = selectActiveMeetingTranscript(
@@ -265,6 +274,9 @@ export function MeetingReviewWorkspace({
 
         <div className="min-w-0 space-y-3">
           <section className="space-y-2 rounded-lg border border-border bg-card/40 p-3">
+            {commandNotice && !analysisOperation && (
+              <NeutralNotice message={commandNotice} onDismiss={onClearNotice} />
+            )}
             {(commandError || hasCurrentFailure) && !analysisOperation && (
               <div className="flex items-start gap-2 rounded border border-destructive/30 bg-destructive/10 p-2 text-[10px] text-destructive">
                 <span className="min-w-0 flex-1">
@@ -389,10 +401,29 @@ function TranscriptSourceCard({
   const analysisOperation = operations.find((operation) => operation.kind === "Analysis" &&
     (operation.transcriptId === transcript.id ||
      (transcript.recordingId && operation.recordingId === transcript.recordingId)))
+  const activate = () => {
+    if (readOnly || transcript.isActive) return
+    send({
+      type: "setActiveMeetingTranscript",
+      meetingId: meet.id,
+      transcriptId: transcript.id,
+    })
+  }
   return (
-    <div className={cn(
-      "space-y-2 rounded-md border bg-background/50 p-2.5",
+    <div
+      role="radio"
+      aria-checked={transcript.isActive}
+      tabIndex={0}
+      onClick={activate}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return
+        event.preventDefault()
+        activate()
+      }}
+      className={cn(
+      "space-y-2 rounded-md border bg-background/50 p-2.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-status-meet/50",
       transcript.isActive ? "border-status-meet/50" : "border-border",
+      !readOnly && !transcript.isActive && "cursor-pointer hover:border-status-meet/40 hover:bg-status-meet/5",
     )}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className={cn(
@@ -434,11 +465,7 @@ function TranscriptSourceCard({
             label="Set active"
             icon={Check}
             disabled={readOnly}
-            onClick={() => send({
-              type: "setActiveMeetingTranscript",
-              meetingId: meet.id,
-              transcriptId: transcript.id,
-            })}
+            onClick={activate}
           />
         )}
         <SourceAction
@@ -490,6 +517,20 @@ function TranscriptSourceCard({
           }}
         />
       </div>
+    </div>
+  )
+}
+
+function NeutralNotice({ message, onDismiss }: { message: string; onDismiss?: () => void }) {
+  return (
+    <div className="flex items-start gap-2 rounded border border-status-meet/30 bg-status-meet/10 p-2 text-[10px] text-foreground" role="status">
+      <Info className="mt-0.5 size-3 shrink-0 text-status-meet" aria-hidden="true" />
+      <span className="min-w-0 flex-1">{message}</span>
+      {onDismiss && (
+        <button type="button" onClick={onDismiss} aria-label="Dismiss notice" className="text-muted-foreground hover:text-foreground">
+          <X className="size-3" />
+        </button>
+      )}
     </div>
   )
 }
@@ -669,9 +710,6 @@ function OperationStatus({
         </span>
       </div>
       <p className="text-muted-foreground">{message}</p>
-      <div className="h-1 overflow-hidden rounded bg-status-meet/15" aria-hidden="true">
-        <div className="h-full w-1/3 animate-pulse rounded bg-status-meet motion-reduce:animate-none" />
-      </div>
     </div>
   )
 }
@@ -696,7 +734,11 @@ function SourceAction({
       type="button"
       disabled={disabled}
       aria-busy={busy}
-      onClick={onClick}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      onKeyDown={(event) => event.stopPropagation()}
       className={cn(
         "flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
         danger

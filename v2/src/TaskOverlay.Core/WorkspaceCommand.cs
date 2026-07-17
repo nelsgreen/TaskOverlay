@@ -21,7 +21,9 @@ public sealed record WorkspaceCommandResult(
     string? CreatedContextSourceId = null,
     string? CreatedContextItemId = null,
     string? WarningCode = null,
-    string? WarningMessage = null)
+    string? WarningMessage = null,
+    string? OutcomeCode = null,
+    string? OutcomeMessage = null)
 {
     public const int CurrentSchemaVersion = 1;
     public const string CurrentMessageType = "commandResult";

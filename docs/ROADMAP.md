@@ -103,6 +103,9 @@ never a direct mutation without explicit user confirmation (see DECISIONS
     transcription and analysis: immediate duplicate-click protection,
     indeterminate stage/elapsed feedback across Sources and Review, and
     cancellation/failure reconciliation without persisted fake runtime state.
+    User cancellation is neutral, restores Ready, and retains prior durable
+    sources/analysis; transcript cards provide large-target accessible
+    selection, and range saving only configures the next transcription.
 13. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
     loss, device recovery, retention, transcript search/editor actions,
     ContextHUB promotion, Meeting Brief, user speaker identification,

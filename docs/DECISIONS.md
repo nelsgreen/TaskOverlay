@@ -202,6 +202,19 @@ item.
 - Provider progress is indeterminate unless the provider supplies real
   progress. TaskOverlay may show reliable stages and elapsed time, but never a
   fabricated percentage.
+- Explicit user cancellation is a neutral runtime outcome, not a provider
+  failure. It returns the recording to Ready, clears cancellation-generated
+  errors, and preserves original audio, transcript versions, and the previous
+  successful analysis. Late provider results remain ineligible for persistence.
+- Calendar drag and resize completion suppresses click-to-open for both task
+  and MEET blocks; ordinary pointer clicks and keyboard activation still open
+  Details.
+- Inactive transcript cards are large accessible selection targets with
+  radio/option semantics. Their Analyze/Open/Delete controls never implicitly
+  change the active transcript.
+- Saving an imported-audio transcription range stores metadata for the next
+  transcription. It does not process audio and never changes the managed
+  original.
 - Recurrence, calendar sync, live transcription, direct meeting-platform APIs,
   and automatic action application remain later features.
 - No embedded ChatGPT window inside the app.

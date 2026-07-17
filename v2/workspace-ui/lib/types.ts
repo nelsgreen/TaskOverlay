@@ -790,6 +790,8 @@ export interface WorkspaceCommandResult {
   errorMessage: string | null
   warningCode?: string | null
   warningMessage?: string | null
+  outcomeCode?: string | null
+  outcomeMessage?: string | null
   createdTaskId?: string | null
   createdSectionId?: string | null
   createdMeetingId?: string | null

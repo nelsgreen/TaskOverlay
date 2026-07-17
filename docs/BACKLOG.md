@@ -455,7 +455,9 @@ Product direction:
     bare "--";
   - adjacent scheduled blocks have usable resize handles at their shared
     boundary, in both Day and Week, for task/task, MEET/MEET, and task/MEET
-    combinations.
+    combinations;
+  - completed task/MEET drag or resize suppresses click-to-open, while a normal
+    click and keyboard activation still open Details.
 - Duration chips / resize handles:
   - 15/30/45/60/90/120.
 - Gantt-like future planning view.
@@ -545,8 +547,13 @@ Product direction:
     explicit re-run.
   - long-running transcription/analysis has shared authoritative runtime state
     across Sources and Review, immediate duplicate-click protection,
-    indeterminate stage and elapsed-time feedback, and explicit
-    cancellation/failure cleanup. Provider percentages are not fabricated.
+    indeterminate stage and elapsed-time feedback, and distinct neutral
+    cancellation versus failure cleanup. Provider percentages are not
+    fabricated; cancellation restores Ready and preserves prior durable output.
+  - transcript cards support large-target click and keyboard activation while
+    nested Analyze/Open/Delete actions do not change the active transcript;
+  - Save range stores seconds-based metadata for the next transcription and
+    does not process or modify the original audio.
 - Recurrence, calendar sync, direct meeting-platform APIs, and live
   transcription remain later work.
 - Handle next MEET countdown.
@@ -567,7 +574,7 @@ Product direction:
     context;
   - human-readable Proposed Action labels, calibrated-or-hidden confidence,
     inherited project name instead of `MEET project`, simpler Review scrolling,
-    readable 11-12px metadata, and human-readable mm:ss processing ranges;
+    readable 11-12px metadata, and human-readable mm:ss transcription ranges;
   - visual MEET migration remains a separate UI project;
   - user speaker identification and known-speaker samples;
   - AI-proposed ContextItem candidates with explicit review, Meeting Brief,

@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FileAudio,
   FolderOpen,
+  Info,
   Mic,
   Play,
   Sparkles,
@@ -44,7 +45,9 @@ interface Props {
   activeRecordingOwnerTitle?: string
   readOnly: boolean
   commandError?: string | null
+  commandNotice?: string | null
   onClearError?: () => void
+  onClearNotice?: () => void
   onCommand: (command: WorkspaceMeetingAssistantCommand) => boolean
   defaultRecordingPolicy?: Exclude<MeetingRecordingPolicy, "Inherit">
   onRecordingPolicyChange?: (policy: MeetingRecordingPolicy) => void
@@ -71,7 +74,9 @@ export function MeetingAssistantSection({
   activeRecordingOwnerTitle,
   readOnly,
   commandError,
+  commandNotice,
   onClearError,
+  onClearNotice,
   onCommand,
   defaultRecordingPolicy = "Manual",
   onRecordingPolicyChange,
@@ -178,6 +183,18 @@ export function MeetingAssistantSection({
           <button type="button" onClick={onClearError} aria-label="Dismiss error">
             <X className="size-3.5" />
           </button>
+        </div>
+      )}
+
+      {commandNotice && (
+        <div className="flex items-start gap-2 rounded-md border border-status-meet/30 bg-status-meet/10 p-2 text-[11px] text-foreground" role="status">
+          <Info className="mt-0.5 size-3.5 shrink-0 text-status-meet" aria-hidden="true" />
+          <span className="min-w-0 flex-1">{commandNotice}</span>
+          {onClearNotice && (
+            <button type="button" onClick={onClearNotice} aria-label="Dismiss notice" className="text-muted-foreground hover:text-foreground">
+              <X className="size-3.5" />
+            </button>
+          )}
         </div>
       )}
 
@@ -496,7 +513,7 @@ function RecordingCard({
         <div className="space-y-2 rounded border border-border/70 bg-card/30 p-2">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Processing range (seconds)
+              Transcription range
             </span>
             <button
               type="button"
@@ -553,11 +570,11 @@ function RecordingCard({
               }}
               className="h-7 rounded border border-border px-2 text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
             >
-              Apply
+              Save range
             </button>
           </div>
           <p className="text-[9px] text-muted-foreground">
-            The managed original remains unchanged. Only transcription input is ranged.
+            The original is unchanged. This range is used the next time you transcribe.
           </p>
         </div>
       )}
@@ -980,9 +997,6 @@ function RecordingOperationStatus({ operation }: { operation: MeetingOperationSn
         <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
         <span>{label}</span>
         <span className="ml-auto font-mono" aria-hidden="true">{elapsed}</span>
-      </div>
-      <div className="h-1 overflow-hidden rounded bg-status-meet/15" aria-hidden="true">
-        <div className="h-full w-1/3 animate-pulse rounded bg-status-meet motion-reduce:animate-none" />
       </div>
     </div>
   )

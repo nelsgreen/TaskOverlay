@@ -71,7 +71,9 @@ interface Props {
   activeRecording?: MeetingRecordingSnapshot | null
   activeRecordingOwnerTitle?: string
   meetingAssistantError?: string | null
+  meetingAssistantNotice?: string | null
   onClearMeetingAssistantError?: () => void
+  onClearMeetingAssistantNotice?: () => void
   onMeetingAssistantCommand?: (command: WorkspaceMeetingAssistantCommand) => boolean
   defaultRecordingPolicy?: Exclude<MeetingRecordingPolicy, "Inherit">
 }
@@ -154,7 +156,9 @@ export function MeetDetailsModal({
   activeRecording = null,
   activeRecordingOwnerTitle,
   meetingAssistantError = null,
+  meetingAssistantNotice = null,
   onClearMeetingAssistantError,
+  onClearMeetingAssistantNotice,
   onMeetingAssistantCommand,
   defaultRecordingPolicy = "Manual",
 }: Props) {
@@ -653,7 +657,9 @@ export function MeetDetailsModal({
           activeRecordingOwnerTitle={activeRecordingOwnerTitle}
           readOnly={readOnly}
           commandError={meetingAssistantError}
+          commandNotice={meetingAssistantNotice}
           onClearError={onClearMeetingAssistantError}
+          onClearNotice={onClearMeetingAssistantNotice}
           onCommand={onMeetingAssistantCommand ? sendMeetingAssistantCommand : undefined}
           defaultRecordingPolicy={defaultRecordingPolicy}
           onRecordingPolicyChange={(policy) => updateDraft(
@@ -678,7 +684,9 @@ export function MeetDetailsModal({
           activeRecordingOwnerTitle={activeRecordingOwnerTitle}
           readOnly={readOnly}
           commandError={meetingAssistantError}
+          commandNotice={meetingAssistantNotice}
           onClearError={onClearMeetingAssistantError}
+          onClearNotice={onClearMeetingAssistantNotice}
           onCommand={onMeetingAssistantCommand ? sendMeetingAssistantCommand : undefined}
         />
       )}

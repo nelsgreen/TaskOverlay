@@ -67,6 +67,7 @@ export function useMeetingOperationController(
 ) {
   const [optimistic, setOptimistic] = useState<MeetingOperationSnapshot[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const operationsRef = useRef<MeetingOperationSnapshot[]>([])
   const operations = useMemo(
     () => mergeMeetingOperations(authoritative, optimistic),
@@ -87,7 +88,11 @@ export function useMeetingOperationController(
     const target = commandTarget(command)
     if (!target) {
       void sendTracked(command).then((result) => {
-        if (!result.success) setError(result.errorMessage ?? "Meeting Assistant command failed.")
+        if (!result.success) {
+          setError(result.errorMessage ?? "Meeting Assistant command failed.")
+        } else if (command.type === "setImportedAudioRange") {
+          setNotice("Range saved for the next transcription.")
+        }
       })
       return true
     }
@@ -111,6 +116,7 @@ export function useMeetingOperationController(
       cancellationRequested: false,
     }
     setError(null)
+    setNotice(null)
     operationsRef.current = [...operationsRef.current, candidate]
     setOptimistic((current) => [...current, candidate])
 
@@ -121,10 +127,21 @@ export function useMeetingOperationController(
       }
       operationsRef.current = operationsRef.current.filter((item) => item.id !== operationId)
       setOptimistic((current) => current.filter((item) => item.id !== operationId))
-      if (!result.success) setError(result.errorMessage ?? "Meeting Assistant operation failed.")
+      if (result.outcomeCode === "cancelled") {
+        setNotice(result.outcomeMessage ?? "Operation cancelled.")
+      } else if (!result.success) {
+        setError(result.errorMessage ?? "Meeting Assistant operation failed.")
+      }
     })
     return true
   }, [recordings, requestSnapshot, sendTracked, transcripts])
 
-  return { operations, send, error, clearError: () => setError(null) }
+  return {
+    operations,
+    send,
+    error,
+    notice,
+    clearError: () => setError(null),
+    clearNotice: () => setNotice(null),
+  }
 }

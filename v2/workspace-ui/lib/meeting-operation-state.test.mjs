@@ -77,5 +77,35 @@ test("connected controls expose immediate busy, cancellation, live status, and r
 test("operation UI is indeterminate and never displays a fabricated percentage", () => {
   const sources = fs.readFileSync(new URL("../components/meet-sources-review.tsx", import.meta.url), "utf8")
   const assistant = fs.readFileSync(new URL("../components/meeting-assistant-section.tsx", import.meta.url), "utf8")
-  assert.doesNotMatch(`${sources}\n${assistant}`, /progressPercent|% complete|aria-valuenow/)
+  assert.doesNotMatch(`${sources}\n${assistant}`, /progressPercent|% complete|aria-valuenow|w-1\/3/)
+  assert.match(`${sources}\n${assistant}`, /animate-spin/)
+  assert.match(`${sources}\n${assistant}`, /formatElapsed|Math\.floor\(seconds \/ 60\)/)
+})
+
+test("cancelled operations use one neutral notice instead of the error channel", () => {
+  const controller = fs.readFileSync(new URL("./meeting-operation-state.ts", import.meta.url), "utf8")
+  const sources = fs.readFileSync(new URL("../components/meet-sources-review.tsx", import.meta.url), "utf8")
+  const assistant = fs.readFileSync(new URL("../components/meeting-assistant-section.tsx", import.meta.url), "utf8")
+  assert.match(controller, /result\.outcomeCode === "cancelled"/)
+  assert.match(controller, /setNotice\(result\.outcomeMessage/)
+  assert.match(sources, /NeutralNotice/)
+  assert.match(assistant, /commandNotice/)
+})
+
+test("transcript cards have large-target accessible selection without action bubbling", () => {
+  const sources = fs.readFileSync(new URL("../components/meet-sources-review.tsx", import.meta.url), "utf8")
+  assert.match(sources, /role="radiogroup"/)
+  assert.match(sources, /role="radio"/)
+  assert.match(sources, /aria-checked=\{transcript\.isActive\}/)
+  assert.match(sources, /event\.key !== "Enter" && event\.key !== " "/)
+  assert.match(sources, /event\.stopPropagation\(\)[\s\S]{0,80}onClick\(\)/)
+})
+
+test("range copy explains metadata-only behavior", () => {
+  const assistant = fs.readFileSync(new URL("../components/meeting-assistant-section.tsx", import.meta.url), "utf8")
+  const controller = fs.readFileSync(new URL("./meeting-operation-state.ts", import.meta.url), "utf8")
+  assert.match(assistant, /Transcription range/)
+  assert.match(assistant, /Save range/)
+  assert.match(assistant, /The original is unchanged\. This range is used the next time you transcribe\./)
+  assert.match(controller, /Range saved for the next transcription\./)
 })

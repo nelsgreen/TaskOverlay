@@ -50,12 +50,14 @@ internal static class Program
             ("transcription multipart configures diarization models", TranscriptionMultipartConfiguresDiarizationModels),
             ("transcription targets selected recording and snapshot", TranscriptionTargetsSelectedRecordingAndSnapshot),
             ("transcription publishes indeterminate runtime stage", TranscriptionPublishesIndeterminateRuntimeStage),
-            ("transcription retry clears stale artifacts", TranscriptionRetryClearsStaleArtifacts),
+            ("transcription retry preserves published transcript", TranscriptionRetryPreservesPublishedTranscript),
             ("compact transcription rejects missing mixed track", CompactTranscriptionRejectsMissingMixedTrack),
             ("oversized compact chunks derive from mixed track", OversizedCompactChunksDeriveFromMixedTrack),
             ("imported audio is managed and range bounded", ImportedAudioIsManagedAndRangeBounded),
             ("meeting source commands persist and refresh", MeetingSourceCommandsPersistAndRefresh),
             ("meeting analysis runtime state is shared and cancellable", MeetingAnalysisRuntimeStateIsSharedAndCancellable),
+            ("transcription cancellation is neutral and preserves sources", TranscriptionCancellationIsNeutralAndPreservesSources),
+            ("analysis cancellation preserves previous success", AnalysisCancellationPreservesPreviousSuccess),
             ("recording format setting is local and defaults compact", RecordingFormatSettingIsLocalAndDefaultsCompact),
             ("legacy WAV migration and interrupted recovery are idempotent", LegacyWavMigrationAndInterruptedRecoveryAreIdempotent)
         };
@@ -1193,7 +1195,7 @@ internal static class Program
             "Workspace snapshot must load transcript text from the matching recording folder and ID.");
     }
 
-    private static async Task TranscriptionRetryClearsStaleArtifacts()
+    private static async Task TranscriptionRetryPreservesPublishedTranscript()
     {
         await using var fixture = new TranscriptionFixture();
         var recording = fixture.AddRecordedWav("retry-recording", 440);
@@ -1208,12 +1210,12 @@ internal static class Program
         WriteWaveTone(Path.Combine(folder, "mixed.wav"), 880);
         fixture.Provider.BeforeTranscribe = () =>
         {
-            Assert(recording.TranscriptFile.Length == 0 &&
-                   recording.TranscriptRawFile.Length == 0 &&
-                   recording.TranscriptMarkdownFile.Length == 0 &&
+            Assert(recording.TranscriptFile == "transcript.json" &&
+                   recording.TranscriptRawFile.Length > 0 &&
+                   recording.TranscriptMarkdownFile.Length > 0 &&
                    !File.Exists(staleChunk) &&
-                   !File.Exists(Path.Combine(folder, "transcript.json")),
-                "Retry must clear stale chunks and transcript references before provider upload.");
+                   File.Exists(Path.Combine(folder, "transcript.json")),
+                "Retry must clear stale temporary chunks without removing the last published transcript.");
         };
 
         var retry = await fixture.SendAsync(recording.Id);
@@ -1591,7 +1593,8 @@ internal static class Program
                 new { transcriptId = transcript.Id.ToString("N") });
             Assert(cancel.Success, cancel.ErrorMessage ?? "Transcript cancellation failed.");
             var cancelled = await running;
-            Assert(!cancelled.Success &&
+            Assert(cancelled.Success &&
+                   cancelled.OutcomeCode == "cancelled" &&
                    fixture.Coordinator.ProcessingOperations.Count == 0 &&
                    fixture.State.MeetingTranscripts.Single().Id == transcript.Id,
                 "Cancellation must clear runtime state while preserving the imported transcript.");
@@ -1600,6 +1603,75 @@ internal static class Program
         {
             DeleteTemporaryDirectory(importDirectory);
         }
+    }
+
+    private static async Task TranscriptionCancellationIsNeutralAndPreservesSources()
+    {
+        await using var fixture = new TranscriptionFixture();
+        var recording = fixture.AddRecordedWav("original", 440);
+        var originalPath = fixture.Storage.ResolveFile(recording, recording.MixedAudioFile);
+        var first = await fixture.SendCommandAsync(
+            "transcribeMeetingRecording",
+            new { recordingId = recording.Id.ToString("N"), acceptUploadDisclosure = true });
+        Assert(first.Success, first.ErrorMessage ?? "Initial transcription failed.");
+        var transcript = fixture.State.MeetingTranscripts.Single();
+        var transcriptPath = fixture.State.MeetingTranscripts.Single().NormalizedArtifactFile;
+
+        fixture.Provider.BeforeTranscribe = () => fixture.Coordinator.CancelProcessing(recording.Id);
+        var cancelled = await fixture.SendCommandAsync(
+            "transcribeMeetingRecording",
+            new { recordingId = recording.Id.ToString("N"), acceptUploadDisclosure = true });
+
+        Assert(cancelled.Success && cancelled.OutcomeCode == "cancelled" &&
+               cancelled.OutcomeMessage == "Transcription cancelled. Original audio was kept.",
+            "Connected cancellation must be an explicit neutral command outcome.");
+        Assert(recording.State == MeetingRecordingState.Ready && recording.LastError.Length == 0,
+            "Cancelled transcription must return the recording to Ready without LastError.");
+        Assert(File.Exists(originalPath) && fixture.State.MeetingTranscripts.Count == 1 &&
+               fixture.State.MeetingTranscripts.Single().Id == transcript.Id &&
+               fixture.State.MeetingTranscripts.Single().NormalizedArtifactFile == transcriptPath,
+            "Late provider success after cancellation must not replace the transcript or remove original audio.");
+        var saved = fixture.Store.Load().MeetingRecordings.Single(item => item.Id == recording.Id);
+        Assert(saved.State == MeetingRecordingState.Ready && saved.LastError.Length == 0,
+            "Neutral cancellation state must persist without becoming Failed after restart.");
+    }
+
+    private static async Task AnalysisCancellationPreservesPreviousSuccess()
+    {
+        var provider = new SuccessfulThenBlockingAnalysisProvider();
+        await using var fixture = new TranscriptionFixture(analysisProvider: provider);
+        var recording = fixture.AddRecordedWav("analysis", 550);
+        var transcribe = await fixture.SendCommandAsync(
+            "transcribeMeetingRecording",
+            new { recordingId = recording.Id.ToString("N"), acceptUploadDisclosure = true });
+        Assert(transcribe.Success, transcribe.ErrorMessage ?? "Transcription failed.");
+        var transcript = fixture.State.MeetingTranscripts.Single();
+        var first = await fixture.SendCommandAsync(
+            "analyzeMeetingTranscript",
+            new { transcriptId = transcript.Id.ToString("N") });
+        Assert(first.Success && fixture.State.MeetingAnalyses.Count == 1,
+            first.ErrorMessage ?? "Initial analysis failed.");
+        var previousAnalysisId = fixture.State.MeetingAnalyses.Single().Id;
+
+        var running = fixture.SendCommandAsync(
+            "analyzeMeetingTranscript",
+            new { transcriptId = transcript.Id.ToString("N") });
+        await provider.SecondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var cancel = await fixture.SendCommandAsync(
+            "cancelMeetingProcessing",
+            new { transcriptId = transcript.Id.ToString("N") });
+        Assert(cancel.Success, cancel.ErrorMessage ?? "Analysis cancellation request failed.");
+        var cancelled = await running;
+
+        Assert(cancelled.Success && cancelled.OutcomeCode == "cancelled" &&
+               cancelled.OutcomeMessage == "Analysis cancelled. Previous analysis was kept.",
+            "Cancelled re-analysis must return a neutral outcome.");
+        Assert(recording.State == MeetingRecordingState.Ready && recording.LastError.Length == 0,
+            "Cancelled analysis must return the recording to Ready without LastError.");
+        Assert(fixture.State.MeetingAnalyses.Count == 1 &&
+               fixture.State.MeetingAnalyses.Single().Id == previousAnalysisId &&
+               fixture.State.MeetingAnalyses.All(item => item.State != MeetingAnalysisState.Failed),
+            "Cancellation must preserve the previous successful analysis and never create a Failed analysis.");
     }
 
     private static Task RecordingFormatSettingIsLocalAndDefaultsCompact()
@@ -2090,6 +2162,43 @@ internal static class Program
             Started.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("Unreachable blocking provider completion.");
+        }
+    }
+
+    private sealed class SuccessfulThenBlockingAnalysisProvider : IMeetingAnalysisProvider
+    {
+        private int _requestCount;
+
+        public string Name => "successful-then-blocking-analysis";
+        public TaskCompletionSource SecondStarted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<MeetingAnalysisProviderResponse> AnalyzeAsync(
+            MeetingAnalysisProviderRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            _requestCount++;
+            if (_requestCount > 1)
+            {
+                SecondStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var analysis = new MeetingAnalysis
+            {
+                RecordingId = request.RecordingId,
+                TranscriptId = request.TranscriptId,
+                TranscriptRevisionId = request.TranscriptRevisionId,
+                MeetId = request.MeetId,
+                State = MeetingAnalysisState.ReadyForReview,
+                Provider = Name,
+                Model = request.Model,
+                Summary = "Durable previous analysis",
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            return new MeetingAnalysisProviderResponse("{}", analysis);
         }
     }
 
