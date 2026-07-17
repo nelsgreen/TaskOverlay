@@ -174,26 +174,19 @@ item.
   analysis and visual references. Transcript, Analysis, and Context are not
   separate top-level tabs.
 - The MEET visual migration ships as three bounded phases: (1) shell + Details,
-  (2) Sources, (3) Review. Phase 1 is implemented in draft PR #68; manual
-  Windows artifact QA is pending, so it is not marked done. It migrates the
-  modal shell and Details tab to the approved V0 direction without changing any
-  connected behavior: an adaptive near-fullscreen shell
-  (`min(1600px, calc(100vw - 16px))` by `min(1000px, calc(100dvh - 16px))`) that
-  uses almost all of a work-laptop viewport, stops growing at ~1600x1000 on
-  large monitors, and stays identical across every tab (height is viewport-
-  derived, never content-derived); a Header / Tabs / fixed content region /
-  Footer structure; full-width accessible `role="tablist"` tabs; one stable
-  footer holding the single autosave status plus Close (Delete meeting stays
-  Details-only); and a compact Details whose editable column is wider than
-  Context (`minmax(0,1.65fr)` / `minmax(320px,0.85fr)`, ~66/34) with a
-  Title+Project row, one Schedule card, a compact Location+Link+Linked-task row,
-  and Notes filling the remaining height. The linked task uses a select plus an
-  inline Open action instead of a duplicated task card. Context in MEET Details
-  is open by default (via a MEET-only `defaultOpenWhenEmpty` flag on the shared
-  `RecordContextBlock`; Task Details is unchanged), and the permanent
-  "calendar-like item" explanatory sentence was removed. Sources and Review keep
-  their current content in this phase (they only inherit the larger shell) and
-  are migrated in phases 2 and 3.
+  (2) Sources, (3) Review. Phase 1 is implemented in draft PR #68, but it is
+  not accepted or complete: manual Windows artifact QA failed. The rejected
+  default was the near-fullscreen `1600x1000 / viewport minus 16px` direction,
+  which created excessive empty space, undersized content, and an
+  application-inside-another-application feel. Exact replacement geometry and
+  layout remain pending a bounded visual-rescue iteration; no replacement
+  dimensions or column ratios are approved here. Preserve the useful technical
+  foundation already implemented: shared Header / Tabs / Content / Footer
+  shell, stable geometry across tabs, accessible three-tab structure, one
+  autosave indicator, existing PR #67 connected behavior, and MEET-specific
+  Context behavior. Phase 2 Sources and Phase 3 Review must not start until
+  the Phase 1 shell is visually accepted. The permanent "calendar-like item"
+  explanatory sentence remains removed, and Task Details is unchanged.
 - The MEET contrast/typography foundation is scoped to a `.meet-shell` class so
   it never restyles Task, Calendar, ContextHUB, Settings, or Overlay. Inside
   that scope the existing semantic tokens are overridden toward softer charcoal

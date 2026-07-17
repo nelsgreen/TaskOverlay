@@ -159,6 +159,15 @@ Product direction:
 
 ## Tree And Details
 
+- Compact Task Inspector and Full Task Details (analysis/design): keep the
+  current right-side inspector for quick status, Reminder, Deadline, Steps,
+  short Notes, and compact Context. Investigate a separate Full Task Details
+  modal for long Notes, larger Context, deeper Steps, Sources/history, and
+  richer editing. `Open task` from a MEET should eventually open the task as
+  the primary object rather than leaving the user mainly in Calendar with a
+  narrow sidebar. Fix responsive layout for Context actions and linked records
+  in the narrow inspector. Quick Add and simple task creation remain light.
+
 - Tree Active-only = all non-DONE tasks:
   - TODO, FOCUS, and WAIT visible;
   - DONE hidden.
@@ -305,6 +314,10 @@ Product direction:
   - color;
   - add;
   - archive projects.
+- Safe project deletion:
+  - require an explicit choice for tasks, MEETs, and context in the deleted
+    project: move to another project, archive, or cancel;
+  - prefer archive over destructive deletion where practical.
 - Create project flow:
   - set name/color;
   - allow moving existing tasks into it.
@@ -346,6 +359,12 @@ Product direction:
   - hard max about 45%;
   - subtle splitter;
   - persist width.
+- Workspace window placement persistence (future WPF task): remember width,
+  height, position, maximized state, and monitor where practical; restore the
+  last useful geometry safely inside the current monitor work area after
+  displays change or disconnect; preserve a safe minimum layout so the right
+  inspector remains available. Store this as machine-local window settings,
+  not shared task/project state.
 - Open Workspace on app startup after backup checks:
   - open once;
   - likely configurable.
@@ -369,6 +388,14 @@ Product direction:
   - start/end;
   - working days;
   - timezone display;
+- Calendar legibility and schedule range:
+  - retain violet as the MEET entity signal and add a project-color marker in
+    All Projects view; exact treatment remains to be designed;
+  - keep task and MEET titles visible in short blocks, including 45-minute
+    blocks, hiding secondary metadata first;
+  - allow scrolling beyond 18:00, potentially through the full day; working
+    hours guide planning but are not a hard visibility boundary;
+  - different schedules by weekday remain later work.
   - later lunch/break and Friday schedule;
   - defaults Mon-Fri 09:00-18:00.
 - Deadline:
@@ -555,36 +582,31 @@ Product direction:
   - Save range stores seconds-based metadata for the next transcription and
     does not process or modify the original audio.
 - MEET visual migration (three bounded phases):
-  - Phase 1 (shell + Details) - implemented in draft PR #68; manual Windows
-    artifact QA is pending, so it is not marked done. The MEET modal is an
-    adaptive near-fullscreen workspace: `min(1600px, calc(100vw - 16px))` by
-    `min(1000px, calc(100dvh - 16px))`, using almost all of a work-laptop
-    viewport, stopping at ~1600x1000 on large monitors, and staying identical
-    across Details / Sources / Review (height viewport-derived, never
-    content-derived). Structure is Header / Tabs / fixed content region /
-    Footer; a full-width, keyboard-accessible `role="tablist"` tab row with a
-    near-white active underline and subtle violet selected tint; one stable
-    footer with a single autosave status (Saving / Saved / Save failed . Retry)
-    and Close, with Delete meeting scoped to Details; the header shows the real
-    MEET title and a `Project . date . start` line (no generic "MEET details"
-    label when a title exists). Details is compact with a wider editable column
-    than Context (`minmax(0,1.65fr)` / `minmax(320px,0.85fr)`, ~66/34):
-    Title+Project row, one Schedule card replacing the two large date/time
-    cards, a compact Location+Link+Linked-task row (linked task is a select
-    plus an inline Open action, not a duplicated card), and Notes filling the
-    remaining height. Context in MEET Details is open by default via a MEET-only
-    `defaultOpenWhenEmpty` flag on the shared `RecordContextBlock` (Task Details
-    is unchanged), and the permanent "calendar-like item" sentence was removed.
-    The contrast/typography foundation is scoped to `.meet-shell` (softer
-    charcoal surfaces, visible neutral borders, near-white text, >=11px
-    metadata) and does not restyle other Workspace screens. Every PR #67
-    connected behavior is preserved (persisted draft, generated title, autosave,
-    flush-before-close/recording, untouched-draft cleanup, recording policy,
-    operation feedback, ContextHUB link/navigation).
+  - Phase 1 (shell + Details) - implemented in draft PR #68, but not accepted
+    or complete: manual Windows artifact QA failed. The rejected default was
+    the near-fullscreen `1600x1000 / viewport minus 16px` direction; it created
+    excessive empty space, undersized content, and a shell that felt like an
+    application inside another application. Exact replacement geometry and
+    layout remain pending a bounded visual-rescue iteration. Preserve the
+    useful foundation already implemented: shared Header / Tabs / Content /
+    Footer shell, stable geometry across tabs, accessible three-tab structure,
+    one autosave indicator, existing PR #67 connected behavior, and
+    MEET-specific Context behavior. Do not start Phase 2 Sources or Phase 3
+    Review until the Phase 1 shell is visually accepted.
   - Phase 2 (Sources content redesign) - pending; Sources keeps its current
     production content inside the new shell for now.
+    Sources follow-ups: rename `Open meeting link` to clearer language such as
+    `Join call`; show it only for valid HTTP/HTTPS links and surface invalid
+    links near the Link field; clarify `Keep local only` as preventing cloud
+    transcription/upload while retaining existing transcripts and analyses;
+    move Context Pack toward an overflow/advanced action.
   - Phase 3 (Review content redesign) - pending; Review keeps its current
     production content inside the new shell for now.
+- MEET keyboard editing flow: primary Tab order should be Title -> Location ->
+  Link -> Notes, with Shift+Tab reversing it. Project, schedule, duration,
+  linked task, and actions remain keyboard-accessible without interrupting the
+  primary text-entry sequence; consider Ctrl+Tab for Details / Sources / Review
+  later.
 - Recurrence, calendar sync, direct meeting-platform APIs, and live
   transcription remain later work.
 - Handle next MEET countdown.

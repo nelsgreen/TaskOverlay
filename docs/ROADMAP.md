@@ -107,18 +107,16 @@ never a direct mutation without explicit user confirmation (see DECISIONS
     sources/analysis; transcript cards provide large-target accessible
     selection, and range saving only configures the next transcription.
 13. MEET visual migration - three bounded phases. Phase 1 (shell + Details) is
-    implemented in draft PR #68; manual Windows artifact QA is pending, so it is
-    not yet marked done. It uses an adaptive near-fullscreen shell
-    (min(1600px, 100vw-16px) by min(1000px, 100dvh-16px)) that stays identical
-    across Details / Sources / Review, a Header/Tabs/content/Footer structure,
-    full-width accessible tabs, one stable footer with a single autosave status,
-    a compact Details with a wider editable column than Context (~66/34) and a
-    default-open MEET Context, and a `.meet-shell`-scoped contrast/typography
-    foundation (softer charcoal, visible borders, near-white text, >=11px
-    metadata) that does not touch other Workspace screens. All PR #67 connected
-    behavior is preserved. Phase 2 (Sources content) and phase 3 (Review
-    content) remain pending; they keep their current content inside the new
-    shell for now.
+    implemented in draft PR #68, but is not accepted or complete: manual
+    Windows artifact QA failed. The near-fullscreen `1600x1000 / viewport minus
+    16px` default direction is rejected because it created excessive empty
+    space and undersized content. Exact replacement geometry and layout remain
+    pending a bounded visual-rescue iteration. Preserve the useful foundation:
+    shared Header/Tabs/Content/Footer shell, stable geometry across tabs,
+    accessible three-tab structure, one autosave indicator, existing PR #67
+    connected behavior, and MEET-specific Context behavior. Phase 2 Sources and
+    Phase 3 Review must not start until Phase 1 is visually accepted; their
+    current production content remains in the shell for now.
 14. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
     loss, device recovery, retention, transcript search/editor actions,
     ContextHUB promotion, Meeting Brief, user speaker identification,
