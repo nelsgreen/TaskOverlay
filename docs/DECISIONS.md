@@ -174,16 +174,26 @@ item.
   analysis and visual references. Transcript, Analysis, and Context are not
   separate top-level tabs.
 - The MEET visual migration ships as three bounded phases: (1) shell + Details,
-  (2) Sources, (3) Review. Phase 1 (done) migrates the modal shell and Details
-  tab to the approved V0 direction without changing any connected behavior:
-  fixed viewport-clamped geometry (~1180x720) that is identical on every tab,
-  a Header / Tabs / fixed content region / Footer structure, full-width
-  accessible `role="tablist"` tabs, one stable footer holding the single
-  autosave status plus Close (Delete meeting stays Details-only), and a compact
-  two-column Details (Title+Project row, one Schedule card, Location+Link side
-  by side, Notes filling remaining height, Context in the equal right column).
-  Sources and Review keep their current content in this phase and are migrated
-  in phases 2 and 3.
+  (2) Sources, (3) Review. Phase 1 is implemented in draft PR #68; manual
+  Windows artifact QA is pending, so it is not marked done. It migrates the
+  modal shell and Details tab to the approved V0 direction without changing any
+  connected behavior: an adaptive near-fullscreen shell
+  (`min(1600px, calc(100vw - 16px))` by `min(1000px, calc(100dvh - 16px))`) that
+  uses almost all of a work-laptop viewport, stops growing at ~1600x1000 on
+  large monitors, and stays identical across every tab (height is viewport-
+  derived, never content-derived); a Header / Tabs / fixed content region /
+  Footer structure; full-width accessible `role="tablist"` tabs; one stable
+  footer holding the single autosave status plus Close (Delete meeting stays
+  Details-only); and a compact Details whose editable column is wider than
+  Context (`minmax(0,1.65fr)` / `minmax(320px,0.85fr)`, ~66/34) with a
+  Title+Project row, one Schedule card, a compact Location+Link+Linked-task row,
+  and Notes filling the remaining height. The linked task uses a select plus an
+  inline Open action instead of a duplicated task card. Context in MEET Details
+  is open by default (via a MEET-only `defaultOpenWhenEmpty` flag on the shared
+  `RecordContextBlock`; Task Details is unchanged), and the permanent
+  "calendar-like item" explanatory sentence was removed. Sources and Review keep
+  their current content in this phase (they only inherit the larger shell) and
+  are migrated in phases 2 and 3.
 - The MEET contrast/typography foundation is scoped to a `.meet-shell` class so
   it never restyles Task, Calendar, ContextHUB, Settings, or Overlay. Inside
   that scope the existing semantic tokens are overridden toward softer charcoal

@@ -555,19 +555,28 @@ Product direction:
   - Save range stores seconds-based metadata for the next transcription and
     does not process or modify the original audio.
 - MEET visual migration (three bounded phases):
-  - Phase 1 (shell + Details) - done: the modal has fixed viewport-clamped
-    geometry (~1180x720) that stays identical across Details / Sources /
-    Review; a Header / Tabs / fixed content region / Footer structure; a
-    full-width, keyboard-accessible `role="tablist"` tab row with a near-white
-    active underline and subtle violet selected tint; one stable footer with a
-    single autosave status (Saving / Saved / Save failed . Retry) and Close,
-    with Delete meeting scoped to Details; the header shows the real MEET title
-    and a `Project . date . start` line (no generic "MEET details" label when a
-    title exists); and a compact two-column Details (Title+Project row, one
-    Schedule card replacing the two large date/time cards, Location+Link side
-    by side, Notes filling remaining height, Context in an equal-height right
-    column). The contrast/typography foundation is scoped to `.meet-shell`
-    (softer charcoal surfaces, visible neutral borders, near-white text, >=11px
+  - Phase 1 (shell + Details) - implemented in draft PR #68; manual Windows
+    artifact QA is pending, so it is not marked done. The MEET modal is an
+    adaptive near-fullscreen workspace: `min(1600px, calc(100vw - 16px))` by
+    `min(1000px, calc(100dvh - 16px))`, using almost all of a work-laptop
+    viewport, stopping at ~1600x1000 on large monitors, and staying identical
+    across Details / Sources / Review (height viewport-derived, never
+    content-derived). Structure is Header / Tabs / fixed content region /
+    Footer; a full-width, keyboard-accessible `role="tablist"` tab row with a
+    near-white active underline and subtle violet selected tint; one stable
+    footer with a single autosave status (Saving / Saved / Save failed . Retry)
+    and Close, with Delete meeting scoped to Details; the header shows the real
+    MEET title and a `Project . date . start` line (no generic "MEET details"
+    label when a title exists). Details is compact with a wider editable column
+    than Context (`minmax(0,1.65fr)` / `minmax(320px,0.85fr)`, ~66/34):
+    Title+Project row, one Schedule card replacing the two large date/time
+    cards, a compact Location+Link+Linked-task row (linked task is a select
+    plus an inline Open action, not a duplicated card), and Notes filling the
+    remaining height. Context in MEET Details is open by default via a MEET-only
+    `defaultOpenWhenEmpty` flag on the shared `RecordContextBlock` (Task Details
+    is unchanged), and the permanent "calendar-like item" sentence was removed.
+    The contrast/typography foundation is scoped to `.meet-shell` (softer
+    charcoal surfaces, visible neutral borders, near-white text, >=11px
     metadata) and does not restyle other Workspace screens. Every PR #67
     connected behavior is preserved (persisted draft, generated title, autosave,
     flush-before-close/recording, untouched-draft cleanup, recording policy,

@@ -346,14 +346,16 @@ export function MeetDetailsModal({
 
   return (
     // Scrim never closes the modal (backdrop click is a no-op by product decision).
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-2 backdrop-blur-sm">
       {/*
-        Fixed, viewport-clamped geometry (≈1180×720) so the shell keeps a constant
-        size across Details / Sources / Review — height is viewport-derived, never
-        content-derived. `.meet-shell` scopes the improved MEET-only palette.
+        Adaptive near-fullscreen geometry (up to ~1600×1000, otherwise the whole
+        viewport minus a small margin) so the MEET workspace uses almost all of a
+        work laptop's screen and keeps a constant size across Details / Sources /
+        Review — height is viewport-derived, never content-derived. `.meet-shell`
+        scopes the improved MEET-only palette.
       */}
       <div
-        className="meet-shell flex h-[min(720px,calc(100dvh-2rem))] w-[min(1180px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-sidebar text-foreground shadow-2xl shadow-black/60"
+        className="meet-shell flex h-[min(1000px,calc(100dvh-16px))] w-[min(1600px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl border border-border bg-sidebar text-foreground shadow-2xl shadow-black/60"
         role="dialog"
         aria-modal="true"
         aria-labelledby="meet-details-title"
@@ -436,7 +438,7 @@ export function MeetDetailsModal({
           {isDetails && (
             <fieldset
               disabled={readOnly}
-              className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 disabled:opacity-80 lg:grid-cols-2"
+              className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 disabled:opacity-80 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.85fr)]"
             >
               {/* LEFT: MEET fields */}
               <div className="flex min-h-0 flex-col gap-3 overflow-y-auto border-b border-border p-4 [scrollbar-gutter:stable] lg:border-b-0 lg:border-r">
@@ -563,8 +565,8 @@ export function MeetDetailsModal({
                   </div>
                 </div>
 
-                {/* Location + Link side by side */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {/* Location + Link + Linked task in one compact row (stacks when narrow) */}
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                   <div>
                     <label htmlFor="meet-location-input" className={cn(labelClass, "flex items-center gap-1.5")}>
                       <MapPin className="size-3" />
@@ -573,7 +575,7 @@ export function MeetDetailsModal({
                     <input
                       id="meet-location-input"
                       value={draft.location ?? ""}
-                      placeholder="Room 4, Zoom, Google Meet…"
+                      placeholder="Room, Zoom, Meet…"
                       onChange={(e) => updateDraft(
                         { location: e.target.value || undefined },
                         ["location"],
@@ -599,52 +601,49 @@ export function MeetDetailsModal({
                       className={inputClass}
                     />
                   </div>
-                </div>
-
-                {/* Linked task (optional) */}
-                <div>
-                  <label htmlFor="meet-linked-task-select" className={labelClass}>Linked task</label>
-                  <select
-                    id="meet-linked-task-select"
-                    value={draft.linkedTaskId ?? ""}
-                    onChange={(e) => updateDraft(
-                      { linkedTaskId: e.target.value || undefined },
-                      ["linkedTaskId"],
-                      "immediate",
-                    )}
-                    className={cn(inputClass, "appearance-none pr-8")}
-                  >
-                    <option value="">None</option>
-                    {tasks.map((t) => (
-                      <option key={t.id} value={t.id}>{t.title}</option>
-                    ))}
-                  </select>
-                  {linkedTask ? (
-                    <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-card/50 px-2.5 py-1.5">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[12px] font-medium text-foreground">{linkedTask.title}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">
-                          {linkedProject?.name ?? "Unknown project"}
-                        </p>
-                      </div>
-                      {onOpenLinkedTask && (
+                  {/* Compact linked task: select + inline Open action, no duplicated card */}
+                  <div>
+                    <label htmlFor="meet-linked-task-select" className={labelClass}>Linked task</label>
+                    <div className="flex items-stretch gap-1.5">
+                      <select
+                        id="meet-linked-task-select"
+                        value={draft.linkedTaskId ?? ""}
+                        onChange={(e) => updateDraft(
+                          { linkedTaskId: e.target.value || undefined },
+                          ["linkedTaskId"],
+                          "immediate",
+                        )}
+                        className={cn(inputClass, "min-w-0 flex-1 appearance-none pr-8")}
+                      >
+                        <option value="">None</option>
+                        {tasks.map((t) => (
+                          <option key={t.id} value={t.id}>{t.title}</option>
+                        ))}
+                      </select>
+                      {linkedTask && onOpenLinkedTask && (
                         <button
                           type="button"
+                          aria-label="Open linked task"
+                          title="Open task"
                           onClick={async () => {
                             if (await requestClose("navigate")) onOpenLinkedTask(linkedTask.id)
                           }}
-                          className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex shrink-0 items-center justify-center rounded-md border border-border px-2.5 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                         >
-                          <ExternalLink className="size-3" />
-                          Open task
+                          <ExternalLink className="size-4" />
                         </button>
                       )}
                     </div>
-                  ) : hasMissingLinkedTask && (
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      Linked task is no longer available.
-                    </p>
-                  )}
+                    {linkedTask ? (
+                      <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                        {linkedProject?.name ?? "Unknown project"}
+                      </p>
+                    ) : hasMissingLinkedTask ? (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Linked task is no longer available.
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
 
                 {/* Notes / Agenda — fills remaining height */}
@@ -664,8 +663,8 @@ export function MeetDetailsModal({
                 </div>
               </div>
 
-              {/* RIGHT: Context — equal-height column */}
-              <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4 [scrollbar-gutter:stable]">
+              {/* RIGHT: Context — narrower column, open by default for MEET */}
+              <div className="flex min-h-0 flex-col overflow-y-auto p-4 [scrollbar-gutter:stable]">
                 {onContextCommand && onOpenContextHub && (
                   <MeetContextBlock
                     meet={draft}
@@ -680,11 +679,9 @@ export function MeetDetailsModal({
                       if (await requestClose("navigate")) onOpenContextHub()
                     }}
                     locked={readOnly}
+                    defaultOpenWhenEmpty
                   />
                 )}
-                <p className="mt-auto text-[11px] leading-relaxed text-muted-foreground/80 text-pretty">
-                  MEET is a calendar-like item — not a task. It has no TODO / FOCUS / WAIT / DONE status.
-                </p>
               </div>
             </fieldset>
           )}

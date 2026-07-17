@@ -16,15 +16,16 @@ export const MEET_SHELL_TAB_ORDER: readonly MeetShellTab[] = [
 ]
 
 /**
- * Fixed desktop-oriented modal geometry. The rendered element clamps these to
- * the viewport (`min(<px>, calc(100vw|100dvh - margin))`) so the modal keeps a
- * constant size across Details / Sources / Review yet stays safe on small
- * screens. Height is viewport-derived, never content-derived.
+ * Adaptive near-fullscreen MEET workspace geometry. The rendered element clamps
+ * these to the viewport (`min(<px>, calc(100vw|100dvh - margin))`) so the shell
+ * uses almost all of the Workspace viewport on a work laptop, stops growing at
+ * ~1600x1000 on large monitors, and keeps a constant size across Details /
+ * Sources / Review. Height is viewport-derived, never content-derived.
  */
 export const MEET_SHELL_GEOMETRY = {
-  maxWidthPx: 1180,
-  maxHeightPx: 720,
-  viewportMarginRem: 2,
+  maxWidthPx: 1600,
+  maxHeightPx: 1000,
+  viewportMarginPx: 16,
 } as const
 
 export function meetTabButtonId(tab: MeetShellTab): string {

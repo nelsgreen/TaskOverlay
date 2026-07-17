@@ -49,18 +49,65 @@ test("secondary header line drops blank parts and joins with a middot", () => {
   assert.equal(buildMeetSecondaryLine([null, undefined, ""]), "")
 })
 
-test("geometry constants describe a fixed desktop shell", () => {
-  assert.equal(MEET_SHELL_GEOMETRY.maxWidthPx, 1180)
-  assert.equal(MEET_SHELL_GEOMETRY.maxHeightPx, 720)
+test("geometry constants describe an adaptive near-fullscreen shell", () => {
+  assert.equal(MEET_SHELL_GEOMETRY.maxWidthPx, 1600)
+  assert.equal(MEET_SHELL_GEOMETRY.maxHeightPx, 1000)
+  assert.equal(MEET_SHELL_GEOMETRY.viewportMarginPx, 16)
 })
 
-test("modal geometry is fixed and viewport-clamped, not content-derived", () => {
-  // The same width/height clamp must live on the shell box regardless of tab.
-  assert.match(component, /min\(1180px,calc\(100vw-2rem\)\)/)
-  assert.match(component, /min\(720px,calc\(100dvh-2rem\)\)/)
-  // A single shell box carries the geometry.
-  assert.equal(component.match(/w-\[min\(1180px/g)?.length, 1)
-  assert.equal(component.match(/h-\[min\(720px/g)?.length, 1)
+test("modal geometry is adaptive, viewport-clamped, and stable across tabs", () => {
+  // Near-fullscreen clamp, applied once on the shell box independent of the tab.
+  assert.match(component, /min\(1600px,calc\(100vw-16px\)\)/)
+  assert.match(component, /min\(1000px,calc\(100dvh-16px\)\)/)
+  assert.equal(component.match(/w-\[min\(1600px/g)?.length, 1)
+  assert.equal(component.match(/h-\[min\(1000px/g)?.length, 1)
+  // The old fixed 1180x720 target must be fully gone.
+  assert.doesNotMatch(component, /1180px|720px/)
+})
+
+test("Details uses a wider editable column than Context (not 50/50)", () => {
+  assert.match(component, /lg:grid-cols-\[minmax\(0,1\.65fr\)_minmax\(320px,0\.85fr\)\]/)
+  assert.doesNotMatch(component, /lg:grid-cols-2/)
+})
+
+test("compact linked task exposes an inline Open action, not a duplicated card", () => {
+  assert.match(component, /aria-label="Open linked task"/)
+  // Open-task navigation still flushes autosave first via requestClose.
+  assert.match(component, /if \(await requestClose\("navigate"\)\) onOpenLinkedTask/)
+  // The missing-linked-task warning is preserved.
+  assert.match(component, /Linked task is no longer available\./)
+})
+
+test("MEET Details keeps Context open by default without changing Task Details", () => {
+  // MEET Details opts into default-open; the shared block feeds it into `open`.
+  assert.match(component, /defaultOpenWhenEmpty/)
+  const contextBlock = readFileSync(
+    new URL("../components/task-context-block.tsx", import.meta.url),
+    "utf8",
+  )
+  assert.match(contextBlock, /manualOpen \?\? \(totalLinked > 0 \|\| defaultOpenWhenEmpty\)/)
+  assert.match(contextBlock, /defaultOpenWhenEmpty=\{defaultOpenWhenEmpty\}/)
+  assert.match(contextBlock, /defaultOpenWhenEmpty = false/)
+  // The Task wrapper must not pass the flag, so Task keeps collapse-when-empty.
+  const taskWrapper = contextBlock.slice(
+    contextBlock.indexOf("export function TaskContextBlock"),
+    contextBlock.indexOf("interface MeetContextBlockProps"),
+  )
+  assert.equal(taskWrapper.includes("defaultOpenWhenEmpty"), false)
+})
+
+test("the permanent calendar-like-item explanation is removed", () => {
+  assert.equal(component.includes("calendar-like item"), false)
+})
+
+test("Sources and Review keep their existing props and command wiring", () => {
+  assert.match(component, /<MeetingSourcesWorkspace/)
+  assert.match(component, /<MeetingReviewWorkspace/)
+  assert.equal(component.match(/operations=\{meetingOperations\}/g)?.length, 2)
+  assert.equal(
+    component.match(/onCommand=\{onMeetingAssistantCommand \? sendMeetingAssistantCommand : undefined\}/g)?.length,
+    2,
+  )
 })
 
 test("tabs use correct ARIA roles and a single tabpanel", () => {
