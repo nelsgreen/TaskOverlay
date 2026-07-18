@@ -77,6 +77,25 @@ test("Review keeps its existing information architecture: transcript left, assis
   assert.match(reviewBody, /Project context updates/)
 })
 
+test("transcript speaker controls are transcript-level and use the internal discard dialog", () => {
+  assert.match(source, /aria-label="Current user speaker"/)
+  assert.match(source, /aria-label="Merge source speaker"/)
+  assert.match(source, /The source speaker disappears from this revision; the target speaker remains\./)
+  assert.doesNotMatch(source, /Mark as You/)
+  assert.doesNotMatch(source, /window\.confirm\("Discard unsaved transcript edits\?"\)/)
+  assert.match(source, /Discard unsaved transcript edits\?/)
+  assert.match(source, />\s*Keep editing\s*</)
+  assert.match(source, />\s*Discard\s*</)
+})
+
+test("Sources groups immutable transcript revisions and removes duplicate metadata", () => {
+  assert.match(source, /function groupTranscriptLineages/)
+  assert.match(source, /Latest edited revision/)
+  assert.match(source, /Previous revisions \(\{lineage\.previousEdits\.length\}\)/)
+  assert.match(source, /function transcriptMetadata/)
+  assert.match(source, /parts\.join\(" · "\)/)
+})
+
 test("MEET surfaces use a layered charcoal hierarchy instead of black-on-black alphas", () => {
   // Scoped tokens define shell, content-column, card, and selected levels.
   assert.match(globals, /--meet-content:/)

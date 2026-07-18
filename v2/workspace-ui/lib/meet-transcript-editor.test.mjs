@@ -10,8 +10,8 @@ import {
   isSpeakerMergedAway,
   mergeDraftSpeaker,
   renameDraftSpeaker,
+  setDraftCurrentUser,
   setDraftSegmentText,
-  toggleDraftSpeakerAsYou,
   transcriptEditorKeyAction,
   transcriptOriginLabel,
   undoDraftSpeakerMerge,
@@ -63,18 +63,17 @@ test("speaker rename updates every matching draft segment name", () => {
   assert.equal(isDraftDirty(draft), true)
 })
 
-test("Mark as You is exclusive and toggling clears the previous marker", () => {
+test("the transcript-level You selector is exclusive and allows no selection", () => {
   let draft = createTranscriptDraft(snapshotTranscript())
   assert.equal(draft.speakers.find((speaker) => speaker.isCurrentUser)?.speakerId, "speaker-c")
 
-  draft = toggleDraftSpeakerAsYou(draft, "speaker-a")
+  draft = setDraftCurrentUser(draft, "speaker-a")
   assert.deepEqual(
     draft.speakers.filter((speaker) => speaker.isCurrentUser).map((speaker) => speaker.speakerId),
     ["speaker-a"],
   )
 
-  // Toggling the same speaker again leaves zero You markers.
-  draft = toggleDraftSpeakerAsYou(draft, "speaker-a")
+  draft = setDraftCurrentUser(draft, null)
   assert.equal(draft.speakers.some((speaker) => speaker.isCurrentUser), false)
 })
 
@@ -123,7 +122,7 @@ test("save command carries only changed segments and the surviving speakers", ()
   let draft = createTranscriptDraft(snapshotTranscript())
   draft = setDraftSegmentText(draft, 1, "Edited second point ")
   draft = renameDraftSpeaker(draft, "speaker-a", "Alexandra")
-  draft = toggleDraftSpeakerAsYou(draft, "speaker-a")
+  draft = setDraftCurrentUser(draft, "speaker-a")
   draft = mergeDraftSpeaker(draft, "speaker-b", "speaker-a")
 
   const command = buildSaveRevisionCommand(draft)

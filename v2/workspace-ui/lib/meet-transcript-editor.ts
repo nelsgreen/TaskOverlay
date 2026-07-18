@@ -89,20 +89,27 @@ export function renameDraftSpeaker(
   }
 }
 
-/** Marks the speaker as You; marking again clears it. At most one You marker survives. */
-export function toggleDraftSpeakerAsYou(
+/**
+ * Selects the current user for the transcript, or clears the selection. At
+ * most one speaker can be the current user; this changes only draft metadata.
+ */
+export function setDraftCurrentUser(
   draft: TranscriptDraft,
-  speakerId: string,
+  speakerId: string | null,
 ): TranscriptDraft {
-  const target = draft.speakers.find((speaker) => speaker.speakerId === speakerId)
-  const nextValue = !(target?.isCurrentUser ?? false)
   return {
     ...draft,
     speakers: draft.speakers.map((speaker) => ({
       ...speaker,
-      isCurrentUser: speaker.speakerId === speakerId ? nextValue : false,
+      isCurrentUser: speakerId !== null && speaker.speakerId === speakerId,
     })),
   }
+}
+
+/** @deprecated Prefer the transcript-level current-user selector. */
+export function toggleDraftSpeakerAsYou(draft: TranscriptDraft, speakerId: string): TranscriptDraft {
+  const target = draft.speakers.find((speaker) => speaker.speakerId === speakerId)
+  return setDraftCurrentUser(draft, target?.isCurrentUser ? null : speakerId)
 }
 
 export function isSpeakerMergedAway(draft: TranscriptDraft, speakerId: string): boolean {

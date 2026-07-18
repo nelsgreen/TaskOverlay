@@ -47,8 +47,8 @@ import {
   isSpeakerMergedAway,
   mergeDraftSpeaker,
   renameDraftSpeaker,
+  setDraftCurrentUser,
   setDraftSegmentText,
-  toggleDraftSpeakerAsYou,
   transcriptEditorKeyAction,
   transcriptOriginLabel,
   undoDraftSpeakerMerge,
@@ -61,8 +61,8 @@ import { AnalysisReview, MeetingAssistantSection } from "./meeting-assistant-sec
 /** Registered with the MEET modal so close/tab-switch/Escape can protect a dirty draft. */
 export interface TranscriptEditGuard {
   isEditing: boolean
-  /** Confirms discard when dirty; returns true when the editor exited (or was already closed). */
-  requestExit: () => boolean
+  /** Opens the internal discard dialog when dirty; runs onDiscard after a discard. */
+  requestExit: (onDiscard?: () => void) => boolean
 }
 
 interface SharedProps {
@@ -115,6 +115,7 @@ export function MeetingSourcesWorkspace({
   const meetTranscripts = transcripts
     .filter((transcript) => transcript.meetingId === meet.id)
     .sort((left, right) => right.createdAtUtc.localeCompare(left.createdAtUtc))
+  const transcriptLineages = groupTranscriptLineages(meetTranscripts)
   const meetScreenshots = sortMeetingScreenshots(meet.id, screenshots)
   const sourceActionsDisabled = readOnly || !onCommand
   const send = (command: WorkspaceMeetingAssistantCommand) => onCommand?.(command) ?? false
@@ -182,11 +183,11 @@ export function MeetingSourcesWorkspace({
             </div>
             {meetTranscripts.length === 0 ? (
               <EmptySource text="No generated or imported transcripts yet." />
-            ) : meetTranscripts.map((transcript) => (
-              <TranscriptSourceCard
-                key={transcript.id}
+            ) : transcriptLineages.map((lineage) => (
+              <TranscriptLineage
+                key={lineage.original.id}
                 meet={meet}
-                transcript={transcript}
+                lineage={lineage}
                 readOnly={readOnly}
                 send={send}
                 operations={operations}
@@ -273,26 +274,51 @@ export function MeetingReviewWorkspace({
   const [draft, setDraft] = useState<TranscriptDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false)
   const draftRef = useRef(draft)
   draftRef.current = draft
   const savingRef = useRef(saving)
   savingRef.current = saving
   const confirmOpenRef = useRef(false)
+  const pendingDiscardActionRef = useRef<(() => void) | null>(null)
 
-  const requestExit = useCallback((): boolean => {
+  const closeEditor = useCallback(() => {
+    setDraft(null)
+    setSaveError(null)
+  }, [])
+
+  const requestExit = useCallback((onDiscard?: () => void): boolean => {
     const current = draftRef.current
-    if (!current) return true
+    if (!current) {
+      onDiscard?.()
+      return true
+    }
     if (savingRef.current) return false
     if (isDraftDirty(current)) {
       confirmOpenRef.current = true
-      const discard = window.confirm("Discard unsaved transcript edits?")
-      confirmOpenRef.current = false
-      if (!discard) return false
+      pendingDiscardActionRef.current = onDiscard ?? null
+      setDiscardDialogOpen(true)
+      return false
     }
-    setDraft(null)
-    setSaveError(null)
+    closeEditor()
+    onDiscard?.()
     return true
+  }, [closeEditor])
+
+  const keepEditing = useCallback(() => {
+    confirmOpenRef.current = false
+    pendingDiscardActionRef.current = null
+    setDiscardDialogOpen(false)
   }, [])
+
+  const discardEdits = useCallback(() => {
+    const onDiscard = pendingDiscardActionRef.current
+    pendingDiscardActionRef.current = null
+    confirmOpenRef.current = false
+    setDiscardDialogOpen(false)
+    closeEditor()
+    onDiscard?.()
+  }, [closeEditor])
 
   useEffect(() => {
     registerTranscriptEditGuard?.({ isEditing: draft !== null, requestExit })
@@ -332,6 +358,7 @@ export function MeetingReviewWorkspace({
     // Two columns, each with exactly one scroll region — mirrors the Details
     // layout so the shell never needs a page-level scroll on top of a nested
     // one, and geometry stays fixed instead of chasing the viewport.
+    <>
     <div className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
       <div className="flex min-h-0 flex-col border-b border-border p-4 lg:border-b-0 lg:border-r">
         <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
@@ -343,7 +370,7 @@ export function MeetingReviewWorkspace({
               </h3>
               <p className="truncate text-[10px] text-muted-foreground">
                 {activeTranscript
-                  ? `${transcriptOriginLabel(activeTranscript.origin)} - ${activeTranscript.sourceLabel || activeTranscript.provider} - ${new Date(activeTranscript.createdAtUtc).toLocaleDateString([], { day: "numeric", month: "short" })}`
+                  ? transcriptMetadata(activeTranscript)
                   : "Select or create a transcript in Sources"}
               </p>
             </div>
@@ -535,7 +562,121 @@ export function MeetingReviewWorkspace({
           </section>
       </div>
     </div>
+    {discardDialogOpen && (
+      <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 p-4" role="presentation">
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="discard-transcript-title"
+          className="w-full max-w-sm rounded-lg border border-border bg-card p-4 shadow-xl"
+        >
+          <h3 id="discard-transcript-title" className="text-sm font-semibold text-foreground">
+            Discard unsaved transcript edits?
+          </h3>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            Your changes are only in this editor and have not been saved as a revision.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button type="button" onClick={keepEditing} className="rounded border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent">
+              Keep editing
+            </button>
+            <button type="button" onClick={discardEdits} className="rounded border border-destructive/45 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20">
+              Discard
+            </button>
+          </div>
+        </section>
+      </div>
+    )}
+    </>
   )
+}
+
+interface TranscriptLineageGroup {
+  original: MeetingTranscriptSnapshot
+  latest: MeetingTranscriptSnapshot
+  previousEdits: MeetingTranscriptSnapshot[]
+}
+
+function groupTranscriptLineages(transcripts: MeetingTranscriptSnapshot[]): TranscriptLineageGroup[] {
+  const byId = new Map(transcripts.map((transcript) => [transcript.id, transcript]))
+  const rootIdFor = (transcript: MeetingTranscriptSnapshot) => {
+    let current = transcript
+    const visited = new Set<string>()
+    while (current.sourceTranscriptId && !visited.has(current.id)) {
+      visited.add(current.id)
+      const source = byId.get(current.sourceTranscriptId)
+      if (!source) break
+      current = source
+    }
+    return current.id
+  }
+  const grouped = new Map<string, MeetingTranscriptSnapshot[]>()
+  for (const transcript of transcripts) {
+    const rootId = rootIdFor(transcript)
+    grouped.set(rootId, [...(grouped.get(rootId) ?? []), transcript])
+  }
+  return [...grouped.values()].map((lineage) => {
+    const ordered = [...lineage].sort((left, right) => left.createdAtUtc.localeCompare(right.createdAtUtc))
+    const original = ordered.find((transcript) => transcript.sourceTranscriptId === null) ?? ordered[0]
+    const latest = ordered.at(-1) ?? original
+    return {
+      original,
+      latest,
+      previousEdits: ordered.filter((transcript) =>
+        transcript.id !== original.id && transcript.id !== latest.id),
+    }
+  }).sort((left, right) => right.latest.createdAtUtc.localeCompare(left.latest.createdAtUtc))
+}
+
+function TranscriptLineage({
+  meet,
+  lineage,
+  readOnly,
+  send,
+  operations,
+}: {
+  meet: MeetItem
+  lineage: TranscriptLineageGroup
+  readOnly: boolean
+  send: (command: WorkspaceMeetingAssistantCommand) => boolean
+  operations: MeetingOperationSnapshot[]
+}) {
+  const hasEditedLatest = lineage.latest.id !== lineage.original.id
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Original</p>
+      <TranscriptSourceCard meet={meet} transcript={lineage.original} readOnly={readOnly} send={send} operations={operations} />
+      {hasEditedLatest && (
+        <>
+          <p className="pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Latest edited revision</p>
+          <TranscriptSourceCard meet={meet} transcript={lineage.latest} readOnly={readOnly} send={send} operations={operations} />
+        </>
+      )}
+      {lineage.previousEdits.length > 0 && (
+        <details className="rounded border border-border bg-background/35 px-2 py-1.5">
+          <summary className="cursor-pointer text-[10px] font-medium text-muted-foreground hover:text-foreground">
+            Previous revisions ({lineage.previousEdits.length})
+          </summary>
+          <div className="mt-2 space-y-1.5">
+            {[...lineage.previousEdits].reverse().map((transcript) => (
+              <TranscriptSourceCard key={transcript.id} meet={meet} transcript={transcript} readOnly={readOnly} send={send} operations={operations} />
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function transcriptMetadata(transcript: MeetingTranscriptSnapshot): string {
+  const origin = transcriptOriginLabel(transcript.origin)
+  const source = transcript.sourceLabel || transcript.provider
+  const parts = [origin]
+  if (source && source.trim().toLocaleLowerCase() !== origin.toLocaleLowerCase()) {
+    parts.push(source)
+  }
+  parts.push(new Date(transcript.createdAtUtc).toLocaleDateString([], { day: "numeric", month: "short" }))
+  return parts.join(" · ")
 }
 
 function TranscriptSourceCard({
@@ -698,17 +839,17 @@ function TranscriptEditor({
   const speakers = visibleDraftSpeakers(draft)
   const mergedAway = draft.speakers.filter((speaker) =>
     isSpeakerMergedAway(draft, speaker.speakerId))
+  const [mergeSourceId, setMergeSourceId] = useState("")
+  const [mergeTargetId, setMergeTargetId] = useState("")
   const speakerName = (speakerId: string) => {
     const speaker = draft.speakers.find((candidate) => candidate.speakerId === speakerId)
     return speaker ? speaker.displayName.trim() || speaker.originalLabel : speakerId
   }
-  const requestMerge = (fromSpeakerId: string, intoSpeakerId: string) => {
-    confirmOpenRef.current = true
-    const confirmed = window.confirm(
-      `Merge "${speakerName(fromSpeakerId)}" into "${speakerName(intoSpeakerId)}"? ` +
-      "All matching segments in the new revision will use the target speaker.")
-    confirmOpenRef.current = false
-    if (confirmed) onChange(mergeDraftSpeaker(draft, fromSpeakerId, intoSpeakerId))
+  const mergeSpeakers = () => {
+    if (!mergeSourceId || !mergeTargetId || mergeSourceId === mergeTargetId) return
+    onChange(mergeDraftSpeaker(draft, mergeSourceId, mergeTargetId))
+    setMergeSourceId("")
+    setMergeTargetId("")
   }
 
   return (
@@ -740,6 +881,22 @@ function TranscriptEditor({
           <h4 className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
             <Users className="size-3" /> Speakers
           </h4>
+          <label className="block space-y-1">
+            <span className="text-[10px] font-medium text-muted-foreground">You</span>
+            <select
+              value={speakers.find((speaker) => speaker.isCurrentUser)?.speakerId ?? ""}
+              aria-label="Current user speaker"
+              onChange={(event) => onChange(setDraftCurrentUser(draft, event.target.value || null))}
+              className="h-7 w-full rounded border border-input bg-background px-2 text-[11px] text-foreground outline-none focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
+            >
+              <option value="">No speaker selected</option>
+              {speakers.map((speaker) => (
+                <option key={speaker.speakerId} value={speaker.speakerId}>
+                  {speakerName(speaker.speakerId)}
+                </option>
+              ))}
+            </select>
+          </label>
           {speakers.map((speaker) => (
             <div key={speaker.speakerId} className="flex flex-wrap items-center gap-1.5">
               <input
@@ -751,48 +908,49 @@ function TranscriptEditor({
                   onChange(renameDraftSpeaker(draft, speaker.speakerId, event.target.value))}
                 className="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-[11px] text-foreground outline-none focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
               />
-              {speaker.originalLabel &&
-                speaker.displayName.trim() !== speaker.originalLabel && (
-                <span className="max-w-24 truncate text-[9px] text-muted-foreground" title={`Original label: ${speaker.originalLabel}`}>
-                  was {speaker.originalLabel}
+              {speaker.isCurrentUser && (
+                <span className="rounded border border-status-meet/45 bg-status-meet/15 px-2 py-1 text-[10px] font-medium text-status-meet">
+                  You
                 </span>
-              )}
-              <button
-                type="button"
-                aria-pressed={speaker.isCurrentUser}
-                onClick={() => onChange(toggleDraftSpeakerAsYou(draft, speaker.speakerId))}
-                className={cn(
-                  "flex h-7 shrink-0 items-center gap-1 rounded border px-2 text-[10px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                  speaker.isCurrentUser
-                    ? "border-status-meet/45 bg-status-meet/15 text-status-meet"
-                    : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                {speaker.isCurrentUser && <Check className="size-3" />}
-                {speaker.isCurrentUser ? "You" : "Mark as You"}
-              </button>
-              {speakers.length > 1 && (
-                <select
-                  value=""
-                  aria-label={`Merge speaker ${speaker.originalLabel || speaker.speakerId} into`}
-                  onChange={(event) => {
-                    if (event.target.value) requestMerge(speaker.speakerId, event.target.value)
-                    event.target.value = ""
-                  }}
-                  className="h-7 shrink-0 rounded border border-input bg-background px-1.5 text-[10px] text-muted-foreground outline-none focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
-                >
-                  <option value="">Merge into...</option>
-                  {speakers
-                    .filter((target) => target.speakerId !== speaker.speakerId)
-                    .map((target) => (
-                      <option key={target.speakerId} value={target.speakerId}>
-                        {target.displayName.trim() || target.originalLabel}
-                      </option>
-                    ))}
-                </select>
               )}
             </div>
           ))}
+          {speakers.length > 1 && (
+            <div className="space-y-1.5 border-t border-border pt-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <select
+                  value={mergeSourceId}
+                  aria-label="Merge source speaker"
+                  onChange={(event) => setMergeSourceId(event.target.value)}
+                  className="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+                >
+                  <option value="">Source speaker</option>
+                  {speakers.map((speaker) => <option key={speaker.speakerId} value={speaker.speakerId}>{speakerName(speaker.speakerId)}</option>)}
+                </select>
+                <span className="text-[10px] text-muted-foreground">into</span>
+                <select
+                  value={mergeTargetId}
+                  aria-label="Merge target speaker"
+                  onChange={(event) => setMergeTargetId(event.target.value)}
+                  className="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+                >
+                  <option value="">Target speaker</option>
+                  {speakers.filter((speaker) => speaker.speakerId !== mergeSourceId).map((speaker) => <option key={speaker.speakerId} value={speaker.speakerId}>{speakerName(speaker.speakerId)}</option>)}
+                </select>
+                <button
+                  type="button"
+                  disabled={!mergeSourceId || !mergeTargetId || mergeSourceId === mergeTargetId}
+                  onClick={mergeSpeakers}
+                  className="h-7 rounded border border-border px-2 text-[10px] font-medium text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Merge
+                </button>
+              </div>
+              <p className="text-[9px] leading-relaxed text-muted-foreground">
+                The source speaker disappears from this revision; the target speaker remains.
+              </p>
+            </div>
+          )}
           {mergedAway.map((speaker) => (
             <div key={speaker.speakerId} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <span className="min-w-0 truncate">
@@ -865,6 +1023,12 @@ function TranscriptContent({
   screenshots: MeetingScreenshotSnapshot[]
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
 }) {
+  const displaySpeakerName = (segment: MeetingTranscriptSnapshot["segments"][number]) => {
+    const speaker = segment.speakerId
+      ? transcript.speakers.find((candidate) => candidate.speakerId === segment.speakerId)
+      : null
+    return speaker?.isCurrentUser ? "You" : segment.speakerName
+  }
   const inlineScreenshots = screenshots.filter((screenshot) =>
     screenshot.recordingId === transcript.recordingId &&
     screenshot.offsetFromRecordingStartSeconds != null)
@@ -895,8 +1059,8 @@ function TranscriptContent({
             {row.segment.startSeconds == null ? "" : formatOffset(row.segment.startSeconds)}
           </span>
           <p className="min-w-0 whitespace-pre-wrap text-foreground">
-            {row.segment.speakerName && (
-              <strong className="mr-1.5 text-status-meet">{row.segment.speakerName}:</strong>
+            {displaySpeakerName(row.segment) && (
+              <strong className="mr-1.5 text-status-meet">{displaySpeakerName(row.segment)}:</strong>
             )}
             {row.segment.text}
           </p>

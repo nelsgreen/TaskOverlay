@@ -194,19 +194,27 @@ export function MeetDetailsModal({
   // tab switches, and Escape route through it so dirty edits are never lost
   // without the one "Discard unsaved transcript edits?" confirmation.
   const transcriptEditGuardRef = useRef<TranscriptEditGuard | null>(null)
+  const requestCloseAfterDiscardRef = useRef<((reason: MeetModalCloseReason) => Promise<boolean>) | null>(null)
   const registerTranscriptEditGuard = useCallback(
     (guard: TranscriptEditGuard | null) => {
       transcriptEditGuardRef.current = guard
     },
     [],
   )
-  const confirmLeaveTranscriptEditor = useCallback((): boolean => {
+  const confirmLeaveTranscriptEditor = useCallback((onDiscard?: () => void): boolean => {
     const guard = transcriptEditGuardRef.current
-    return !guard?.isEditing || guard.requestExit()
+    if (!guard?.isEditing) {
+      onDiscard?.()
+      return true
+    }
+    return guard.requestExit(onDiscard)
   }, [])
   const switchTab = useCallback((tab: MeetWorkspaceTab) => {
-    if (tab !== "review" && !confirmLeaveTranscriptEditor()) return false
-    setActiveTab(tab)
+    if (tab === "review") {
+      setActiveTab(tab)
+      return true
+    }
+    if (!confirmLeaveTranscriptEditor(() => setActiveTab(tab))) return false
     return true
   }, [confirmLeaveTranscriptEditor])
   const [saveStatus, setSaveStatus] = useState<MeetSaveStatus>("saved")
@@ -260,7 +268,7 @@ export function MeetDetailsModal({
   )
   const requestClose = useCallback(async (reason: MeetModalCloseReason) => {
     if (!shouldCloseMeetModal(reason)) return false
-    if (!confirmLeaveTranscriptEditor()) return false
+    if (!confirmLeaveTranscriptEditor(() => { void requestCloseAfterDiscardRef.current?.(reason) })) return false
     if (!await flushAutosave()) return false
 
     const current = draftRef.current
@@ -295,6 +303,7 @@ export function MeetDetailsModal({
     onClose,
     onDelete,
   ])
+  requestCloseAfterDiscardRef.current = requestClose
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
