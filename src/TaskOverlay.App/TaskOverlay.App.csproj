@@ -9,8 +9,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\taskoverlay.ico</ApplicationIcon>
-    <AssemblyName>TaskOverlay.V2</AssemblyName>
+    <AssemblyName>TaskOverlay</AssemblyName>
     <RootNamespace>TaskOverlay.App</RootNamespace>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,7 +29,7 @@
 
   <ItemGroup>
     <Content Include="..\..\workspace-ui\out\**\*">
-      <Link>WorkspaceWeb\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <Link>resources\WorkspaceWeb\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
@@ -35,7 +39,7 @@
           BeforeTargets="PrepareForBuild"
           Condition="'$(DesignTimeBuild)' != 'true'">
     <Error Condition="!Exists('..\..\workspace-ui\out\index.html')"
-           Text="Workspace static export is missing. Run 'pnpm --dir v2/workspace-ui install --frozen-lockfile' and 'pnpm --dir v2/workspace-ui build' before building WPF v2." />
+           Text="Workspace static export is missing. Run 'pnpm --dir workspace-ui install --frozen-lockfile' and 'pnpm --dir workspace-ui build' before building TaskOverlay." />
   </Target>
 
 </Project>

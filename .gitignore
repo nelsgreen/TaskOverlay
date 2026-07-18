@@ -2,15 +2,18 @@
 /build/dist/
 /build/*.exe
 /build/*.zip
+/artifacts/
 
 # Go
 *.test
 *.out
 /vendor/
 
-# .NET v2
-/v2/**/bin/
-/v2/**/obj/
+# .NET
+/src/**/bin/
+/src/**/obj/
+/tests/**/bin/
+/tests/**/obj/
 
 # Local IDE
 .vscode/

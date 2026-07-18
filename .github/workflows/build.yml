@@ -1,19 +1,16 @@
-name: Build WPF v2
+name: Build TaskOverlay
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 jobs:
-  build-wpf-v2:
+  build-taskoverlay:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -31,57 +28,55 @@ jobs:
         with:
           node-version: '24.x'
           cache: 'pnpm'
-          cache-dependency-path: v2/workspace-ui/pnpm-lock.yaml
+          cache-dependency-path: workspace-ui/pnpm-lock.yaml
 
-      - name: Install Workspace frontend
-        run: pnpm --dir .\v2\workspace-ui install --frozen-lockfile
-
-      - name: Build Workspace static export
+      - name: Install and build Workspace
         env:
           NEXT_TELEMETRY_DISABLED: '1'
-        run: pnpm --dir .\v2\workspace-ui build
+        run: |
+          pnpm --dir .\workspace-ui install --frozen-lockfile
+          pnpm --dir .\workspace-ui build
+          if (-not (Test-Path -LiteralPath '.\workspace-ui\out\index.html')) { throw 'Workspace static export is missing index.html.' }
 
-      - name: Verify Workspace static export
+      - name: Restore and build
+        run: |
+          dotnet restore .\TaskOverlay.sln --configfile .\NuGet.Config
+          dotnet build .\TaskOverlay.sln --configuration Release --no-restore
+
+      - name: Test
+        run: |
+          dotnet run --project .\tests\TaskOverlay.Core.Tests\TaskOverlay.Core.Tests.csproj --configuration Release --no-build
+          dotnet run --project .\tests\TaskOverlay.App.Tests\TaskOverlay.App.Tests.csproj --configuration Release --no-build
+
+      - name: Publish portable package
         shell: pwsh
         run: |
-          if (-not (Test-Path -LiteralPath '.\v2\workspace-ui\out\index.html')) {
-            throw "Workspace static export is missing index.html."
-          }
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'TaskOverlay_Windows_Portable'
+          $packageRoot = Join-Path $artifactRoot 'TaskOverlay'
+          New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
+          dotnet publish .\src\TaskOverlay.App\TaskOverlay.App.csproj --configuration Release --no-build --self-contained false -r win-x64 --output $packageRoot
+          Get-ChildItem -LiteralPath $packageRoot -File -Recurse |
+            Where-Object { $_.Extension -in @('.pdb', '.xml') } |
+            Remove-Item -Force
+          @'
+          TaskOverlay portable
 
-      - name: Restore WPF v2
-        run: dotnet restore .\v2\TaskOverlay.sln --configfile .\v2\NuGet.Config
+          Run TaskOverlay.exe.
+          Windows 10/11 and .NET Desktop Runtime 8 are required.
+          The Microsoft Edge WebView2 Runtime is required for Workspace.
+          No installer is required.
+          Local state remains under %APPDATA%\TaskOverlayV2.
+'@ | Set-Content -LiteralPath (Join-Path $packageRoot 'README.txt') -Encoding utf8
+          $unexpectedRootFiles = Get-ChildItem -LiteralPath $packageRoot -File | Where-Object { $_.Name -notin @('TaskOverlay.exe', 'README.txt') }
+          if ($unexpectedRootFiles) { throw "Unexpected package root files: $($unexpectedRootFiles.Name -join ', ')" }
+          if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'TaskOverlay.exe'))) { throw 'TaskOverlay.exe is missing.' }
+          if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'resources\WorkspaceWeb\index.html'))) { throw 'resources/WorkspaceWeb/index.html is missing.' }
+          if (Test-Path -LiteralPath (Join-Path $packageRoot 'runtimes')) { throw 'runtimes folder must be bundled into the single-file executable.' }
+          if (Get-ChildItem -LiteralPath $packageRoot -File -Recurse | Where-Object { $_.Extension -in @('.pdb', '.xml') }) { throw 'Development PDB or XML files remain in the package.' }
+          Compress-Archive -LiteralPath $packageRoot -DestinationPath (Join-Path $artifactRoot 'TaskOverlay_Windows_Portable.zip') -Force
 
-      - name: Build WPF v2
-        run: dotnet build .\v2\TaskOverlay.sln --configuration Release --no-restore
-
-      - name: Publish WPF v2 framework-dependent
-        shell: pwsh
-        run: |
-          $publishDir = Join-Path $env:RUNNER_TEMP 'TaskOverlayV2_WPF_FrameworkDependent'
-          dotnet publish .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj --configuration Release --no-build --self-contained false --output $publishDir
-
-      - name: Verify WPF v2 artifact contents
-        shell: pwsh
-        run: |
-          $publishDir = Join-Path $env:RUNNER_TEMP 'TaskOverlayV2_WPF_FrameworkDependent'
-          $expectedExe = Join-Path $publishDir 'TaskOverlay.V2.exe'
-          $legacyExe = Get-ChildItem -LiteralPath $publishDir -Filter 'TaskOverlay.exe' -File -Recurse
-
-          if (-not (Test-Path -LiteralPath $expectedExe)) {
-            throw "TaskOverlay.V2.exe is missing from publish output."
-          }
-
-          if ($legacyExe) {
-            throw "TaskOverlay.exe must not be included in the WPF v2 artifact."
-          }
-
-          $workspaceIndex = Join-Path $publishDir 'WorkspaceWeb\index.html'
-          if (-not (Test-Path -LiteralPath $workspaceIndex)) {
-            throw "WorkspaceWeb/index.html is missing from publish output."
-          }
-
-      - name: Upload WPF v2 framework-dependent artifact
+      - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TaskOverlayV2_WPF_FrameworkDependent
-          path: ${{ runner.temp }}\TaskOverlayV2_WPF_FrameworkDependent\
+          name: TaskOverlay_Windows_Portable
+          path: ${{ runner.temp }}\TaskOverlay_Windows_Portable\TaskOverlay_Windows_Portable.zip

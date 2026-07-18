@@ -6,11 +6,10 @@ not commitments for the next PR.
 
 Active product scope:
 
-- WPF v2 is the active product.
-- Go v1 is legacy and should not be changed for v2 work.
-- Correct solution: `v2/TaskOverlay.sln`.
-- Correct executable: `TaskOverlay.V2.exe`.
-- Correct development artifact: `TaskOverlayV2_WPF_FrameworkDependent`.
+- WPF is the sole TaskOverlay product.
+- Correct solution: `TaskOverlay.sln`.
+- Correct executable: `TaskOverlay.exe`.
+- Correct development artifact: `TaskOverlay_Windows_Portable`.
 - Runtime state: `%APPDATA%\TaskOverlayV2\state.json`.
 - Logs: `%APPDATA%\TaskOverlayV2\logs`.
 - `AppState` / `state.json` is the desktop source of truth.
@@ -763,7 +762,7 @@ Product direction:
   - `LinkedTasksField` (linked list + "Link task" button) and
     `LinkedTaskPickerModal` (search + TODO/FOCUS/WAIT/DONE status chips +
     rows showing title, status, and a "Project / Section / Parent task"
-    path) in `v2/workspace-ui/components/linked-task-picker.tsx`;
+    path) in `workspace-ui/components/linked-task-picker.tsx`;
   - the picker only ever lists same-project, not-yet-linked tasks
     (`getEligibleTasks`); cross-project tasks are not shown at all rather
     than shown disabled;

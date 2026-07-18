@@ -1,9 +1,9 @@
-# TaskOverlay v2 WPF prototype
+# TaskOverlay architecture
 
-TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
-`cmd/taskoverlay/` remains the v1 implementation and is not referenced by v2.
+TaskOverlay is a Windows-only WPF application. The retired Go prototype is not
+part of this repository or build.
 
-## Prototype responsibilities
+## Application responsibilities
 
 - `App.xaml.cs` owns process lifetime, the tray icon, and window creation.
 - `TaskOverlay.Core` owns the versioned state model and local JSON persistence.
@@ -21,7 +21,7 @@ TaskOverlay v2 is a Windows-only experiment under `v2/`. The Go application in
 - `SettingsWindow` owns the editable SingleTask/MultipleTasks selection.
 - The manifest requests Per-Monitor V2 DPI awareness.
 
-No v1 migration, subtask editing, editable hotkey bindings, network access, or
+No legacy-product migration, editable hotkey bindings, network access, or
 advanced themes are included.
 
 ## Daily attention MVP

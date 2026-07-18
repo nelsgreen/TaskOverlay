@@ -32,7 +32,7 @@ public sealed class BackupMetadata
 {
     public int FormatVersion { get; set; } = 1;
     public string App { get; set; } = "TaskOverlay";
-    public string Product { get; set; } = "WPF v2";
+    public string Product { get; set; } = "TaskOverlay";
     public string TaskSpace { get; set; } = BackupService.CurrentTaskSpace;
     public string SourceMachine { get; set; } = string.Empty;
     public string StatePath { get; set; } = string.Empty;
