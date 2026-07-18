@@ -31,10 +31,12 @@ public partial class WorkspaceWindow : Window
     private readonly Func<MeetingRecordingPolicy>? _defaultRecordingPolicyLoader;
     private readonly Func<IReadOnlyList<WorkspaceMeetingOperationSnapshot>>?
         _meetingOperationLoader;
+    private readonly MeetingAudioResourceResolver _meetingAudioResolver;
     private bool _initialized;
 
     public WorkspaceWindow(
         AppState state,
+        string stateDirectory,
         Action saveState,
         Action stateChanged,
         Func<string, CancellationToken, Task<WorkspaceCommandResult?>>?
@@ -49,6 +51,7 @@ public partial class WorkspaceWindow : Window
         Func<IReadOnlyList<WorkspaceMeetingOperationSnapshot>>? meetingOperationLoader = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
+        _meetingAudioResolver = new MeetingAudioResourceResolver(_state, stateDirectory);
         _diagnostic = diagnostic;
         _commandDispatcher = new WorkspaceCommandDispatcher(
             _state,
@@ -104,6 +107,9 @@ public partial class WorkspaceWindow : Window
                 WorkspaceHostName,
                 workspaceDirectory,
                 CoreWebView2HostResourceAccessKind.DenyCors);
+            core.AddWebResourceRequestedFilter(
+                $"https://{WorkspaceHostName}{MeetingAudioResourceResolver.ResourcePathPrefix}*",
+                CoreWebView2WebResourceContext.All);
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreDefaultContextMenusEnabled = false;
             core.Settings.IsStatusBarEnabled = false;
@@ -115,6 +121,7 @@ public partial class WorkspaceWindow : Window
             core.NavigationStarting += CoreWebView2_OnNavigationStarting;
             core.NavigationCompleted += CoreWebView2_OnNavigationCompleted;
             core.WebMessageReceived += CoreWebView2_OnWebMessageReceived;
+            core.WebResourceRequested += CoreWebView2_OnWebResourceRequested;
             core.Navigate($"https://{WorkspaceHostName}/index.html");
         }
         catch (WebView2RuntimeNotFoundException)
@@ -221,6 +228,97 @@ public partial class WorkspaceWindow : Window
         TrySendMessage(result);
     }
 
+    private void CoreWebView2_OnWebResourceRequested(
+        object? sender,
+        CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        if (!_meetingAudioResolver.TryResolveRequest(e.Request.Uri, out var resource))
+        {
+            e.Response = CreateAudioResponse(Stream.Null, 404, "Not Found", 0,
+                "text/plain", null);
+            return;
+        }
+
+        try
+        {
+            var rangeHeader = e.Request.Headers.GetHeader("Range");
+            if (!string.IsNullOrWhiteSpace(rangeHeader))
+            {
+                if (!MeetingAudioByteRange.TryParse(
+                        rangeHeader,
+                        resource.Length,
+                        out var range))
+                {
+                    e.Response = WorkspaceWebView.CoreWebView2.Environment
+                        .CreateWebResourceResponse(
+                            Stream.Null,
+                            416,
+                            "Range Not Satisfiable",
+                            $"Content-Range: bytes */{resource.Length}\r\n" +
+                            "Cache-Control: no-store");
+                    return;
+                }
+
+                var file = OpenAudioFile(resource.FilePath);
+                var bounded = new BoundedReadStream(file, range.Start, range.Length);
+                e.Response = CreateAudioResponse(
+                    bounded,
+                    206,
+                    "Partial Content",
+                    range.Length,
+                    resource.ContentType,
+                    $"bytes {range.Start}-{range.End}/{resource.Length}");
+                return;
+            }
+
+            e.Response = CreateAudioResponse(
+                OpenAudioFile(resource.FilePath),
+                200,
+                "OK",
+                resource.Length,
+                resource.ContentType,
+                null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _diagnostic?.Invoke("Workspace audio resource became unavailable.", ex);
+            e.Response = CreateAudioResponse(Stream.Null, 404, "Not Found", 0,
+                "text/plain", null);
+        }
+    }
+
+    private CoreWebView2WebResourceResponse CreateAudioResponse(
+        Stream content,
+        int statusCode,
+        string reason,
+        long contentLength,
+        string contentType,
+        string? contentRange)
+    {
+        var headers = $"Content-Type: {contentType}\r\n" +
+                      $"Content-Length: {contentLength}\r\n" +
+                      "Accept-Ranges: bytes\r\n" +
+                      "Cache-Control: no-store";
+        if (!string.IsNullOrWhiteSpace(contentRange))
+        {
+            headers += $"\r\nContent-Range: {contentRange}";
+        }
+
+        return WorkspaceWebView.CoreWebView2.Environment.CreateWebResourceResponse(
+            content,
+            statusCode,
+            reason,
+            headers);
+    }
+
+    private static FileStream OpenAudioFile(string path) => new(
+        path,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.Read | FileShare.Delete,
+        64 * 1024,
+        FileOptions.SequentialScan);
+
     private static bool IsSnapshotRequest(string json)
     {
         try
@@ -266,7 +364,9 @@ public partial class WorkspaceWindow : Window
             screenshotThumbnailLoader: _screenshotThumbnailLoader,
             defaultMeetingRecordingPolicy: _defaultRecordingPolicyLoader?.Invoke() ??
                                            MeetingRecordingPolicy.Manual,
-            meetingOperations: _meetingOperationLoader?.Invoke());
+            meetingOperations: _meetingOperationLoader?.Invoke(),
+            meetingAudioLoader: _meetingAudioResolver.Describe);
+
         SendMessage(snapshot);
     }
 
@@ -318,6 +418,7 @@ public partial class WorkspaceWindow : Window
             core.NavigationStarting -= CoreWebView2_OnNavigationStarting;
             core.NavigationCompleted -= CoreWebView2_OnNavigationCompleted;
             core.WebMessageReceived -= CoreWebView2_OnWebMessageReceived;
+            core.WebResourceRequested -= CoreWebView2_OnWebResourceRequested;
         }
 
         WorkspaceWebView.Dispose();

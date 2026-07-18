@@ -234,6 +234,18 @@ item.
   one "Discard unsaved transcript edits?" confirmation. Context-aware AI
   transcript cleanup remains the next separate phase and must create a
   reviewable revision, never silently replace text.
+- Transcript playback uses a same-origin WebView2 media endpoint whose URL
+  contains only the linked recording ID. Every request is re-authorized against
+  the explicitly active transcript, finalized valid (or migrated legacy)
+  mixed-track metadata, the
+  exact deterministic managed MEET recording folder, supported M4A/WAV/MP3
+  extensions, and a present non-reparse-point file. The endpoint implements
+  single byte ranges for browser seeking and returns generic unavailable
+  responses for missing or rejected resources. Workspace snapshots contain
+  only `Available` / `Unavailable` / `NotLinked`, the opaque URL, and duration;
+  they never contain audio bytes, base64, or local filesystem paths. Edited
+  revisions reuse their preserved `RecordingId` and segment timings. Playback
+  and auto-scroll state is intentionally ephemeral UI state, not persistence.
 - Screenshots are explicit user-selected Window/Display captures, stored as
   managed PNG artifacts with UTC time and active-recording offset when one is
   available. There is no silent/periodic capture, video, OCR, or multimodal AI

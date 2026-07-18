@@ -306,6 +306,11 @@ export interface MeetingTranscriptSnapshot {
   segments: MeetingTranscriptSegmentSnapshot[]
   speakers: MeetingTranscriptSpeakerSnapshot[]
   warnings: string[]
+  audio: {
+    status: "NotLinked" | "Available" | "Unavailable"
+    url: string | null
+    durationSeconds: number
+  }
   createdAtUtc: string
   updatedAtUtc: string
 }

@@ -129,7 +129,12 @@ never a direct mutation without explicit user confirmation (see DECISIONS
     with explicit re-analysis only. Next phase: context-aware AI transcript
     cleanup and analysis using the MEET project and approved ContextHUB
     context, always as a reviewable revision.
-15. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
+15. Transcript-synchronized local playback - implemented for the explicitly
+    active transcript with timestamp seek/play, segment and speaker tracking,
+    a You label, manual-scroll-aware auto-scroll, and a non-blocking unavailable
+    state. Audio is served by a range-capable, active-recording-only WebView2
+    endpoint; no filesystem path or audio payload enters the snapshot.
+16. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
     loss, device recovery, retention, transcript search, segment
     add/delete/split/merge and timestamp editing, ContextHUB promotion,
     Meeting Brief, cross-MEET speaker identification, OCR/multimodal review,
