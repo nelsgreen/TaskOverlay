@@ -1,8 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
@@ -41,11 +39,8 @@ public sealed class MeetingAudioResourceResolver
 
     private readonly AppState _state;
     private readonly MeetingRecordingStorage _storage;
+    private readonly MeetingTranscriptRecordingLinker _linker;
     private readonly Action<string, Exception?>? _diagnostic;
-    private readonly JsonSerializerOptions _jsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
 
     public MeetingAudioResourceResolver(
         AppState state,
@@ -54,6 +49,7 @@ public sealed class MeetingAudioResourceResolver
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _storage = new MeetingRecordingStorage(stateDirectory);
+        _linker = new MeetingTranscriptRecordingLinker(state, stateDirectory);
         _diagnostic = diagnostic;
     }
 
@@ -64,13 +60,16 @@ public sealed class MeetingAudioResourceResolver
         if (link.RecordingId is not Guid recordingId)
         {
             Report(transcript, link.Reason);
+            var notLinked = link.Reason == MeetingAudioResolutionReason.InactiveTranscript ||
+                            link.Reason == MeetingAudioResolutionReason.NoDeterministicLink &&
+                            transcript.Origin == MeetingTranscriptOrigin.Imported;
             return new WorkspaceTranscriptAudioSnapshot(
-                link.Reason is MeetingAudioResolutionReason.InactiveTranscript or
-                    MeetingAudioResolutionReason.NoDeterministicLink
+                notLinked
                     ? WorkspaceTranscriptAudioSnapshot.NotLinked
                     : WorkspaceTranscriptAudioSnapshot.Unavailable,
                 null,
-                0);
+                0,
+                notLinked ? null : UnavailableReason(link.Reason));
         }
 
         var resolution = ResolveRecording(recordingId, out var resource);
@@ -87,7 +86,8 @@ public sealed class MeetingAudioResourceResolver
             : new WorkspaceTranscriptAudioSnapshot(
                 WorkspaceTranscriptAudioSnapshot.Unavailable,
                 null,
-                0);
+                0,
+                UnavailableReason(resolution));
     }
 
     public bool TryResolveRequest(string requestUri, out MeetingAudioResource resource)
@@ -127,103 +127,20 @@ public sealed class MeetingAudioResourceResolver
                 MeetingAudioResolutionReason.InactiveTranscript);
         }
 
-        if (transcript.RecordingId is Guid explicitRecordingId)
+        var link = _linker.Resolve(transcript);
+        var reason = link.Reason switch
         {
-            if (_state.MeetingRecordings.SingleOrDefault(item =>
-                    item.Id == explicitRecordingId) is { MeetId: Guid ownerMeetingId } &&
-                ownerMeetingId != meetingId)
-            {
-                return new MeetingAudioResolution(
-                    null,
-                    MeetingAudioResolutionReason.DifferentMeeting);
-            }
-
-            return new MeetingAudioResolution(
-                explicitRecordingId,
-                MeetingAudioResolutionReason.Available);
-        }
-
-        var lineage = new List<MeetingTranscript> { transcript };
-        var visited = new HashSet<Guid> { transcript.Id };
-        var current = transcript;
-        while (current.SourceTranscriptId is Guid sourceId && visited.Add(sourceId))
-        {
-            var source = _state.MeetingTranscripts.SingleOrDefault(item =>
-                item.Id == sourceId && item.MeetId == meetingId);
-            if (source is null)
-            {
-                break;
-            }
-
-            lineage.Add(source);
-            if (source.RecordingId is Guid inheritedRecordingId)
-            {
-                if (_state.MeetingRecordings.SingleOrDefault(item =>
-                        item.Id == inheritedRecordingId) is { MeetId: Guid ownerMeetingId } &&
-                    ownerMeetingId != meetingId)
-                {
-                    return new MeetingAudioResolution(
-                        null,
-                        MeetingAudioResolutionReason.DifferentMeeting);
-                }
-
-                return new MeetingAudioResolution(
-                    inheritedRecordingId,
-                    MeetingAudioResolutionReason.Available);
-            }
-
-            current = source;
-        }
-
-        var transcriptIds = lineage.Select(item => item.Id).ToHashSet();
-        var revisionIds = lineage.Select(item => item.RevisionId).ToHashSet();
-        var candidates = new HashSet<Guid>();
-
-        foreach (var analysis in _state.MeetingAnalyses.Where(item =>
-                     (item.MeetId is null || item.MeetId == meetingId) &&
-                     item.RecordingId.HasValue &&
-                     _state.MeetingRecordings.Any(recording =>
-                         recording.Id == item.RecordingId.Value &&
-                         recording.MeetId == meetingId) &&
-                     ((item.TranscriptId.HasValue && transcriptIds.Contains(item.TranscriptId.Value)) ||
-                      (item.TranscriptRevisionId.HasValue && revisionIds.Contains(item.TranscriptRevisionId.Value)))))
-        {
-            candidates.Add(analysis.RecordingId!.Value);
-        }
-
-        foreach (var recording in _state.MeetingRecordings.Where(item =>
-                     item.MeetId == meetingId))
-        {
-            if (lineage.Any(item =>
-                    SameManagedFolder(item.StorageFolderRelativePath, recording.RecordingFolderRelativePath) &&
-                    !string.IsNullOrWhiteSpace(item.NormalizedArtifactFile) &&
-                    string.Equals(item.NormalizedArtifactFile, recording.TranscriptFile,
-                        StringComparison.OrdinalIgnoreCase)))
-            {
-                candidates.Add(recording.Id);
-                continue;
-            }
-
-            if (TryLoadRecordingTranscript(recording, out var persisted) &&
-                ((persisted.TranscriptId != Guid.Empty && transcriptIds.Contains(persisted.TranscriptId)) ||
-                 (persisted.RevisionId != Guid.Empty && revisionIds.Contains(persisted.RevisionId))))
-            {
-                candidates.Add(recording.Id);
-            }
-        }
-
-        return candidates.Count switch
-        {
-            1 => new MeetingAudioResolution(
-                candidates.Single(),
-                MeetingAudioResolutionReason.Available),
-            > 1 => new MeetingAudioResolution(
-                null,
-                MeetingAudioResolutionReason.AmbiguousLink),
-            _ => new MeetingAudioResolution(
-                null,
-                MeetingAudioResolutionReason.NoDeterministicLink)
+            MeetingTranscriptRecordingLinkReason.Linked =>
+                MeetingAudioResolutionReason.Available,
+            MeetingTranscriptRecordingLinkReason.AmbiguousLink =>
+                MeetingAudioResolutionReason.AmbiguousLink,
+            MeetingTranscriptRecordingLinkReason.DifferentMeeting =>
+                MeetingAudioResolutionReason.DifferentMeeting,
+            MeetingTranscriptRecordingLinkReason.RecordingMissing =>
+                MeetingAudioResolutionReason.RecordingMissing,
+            _ => MeetingAudioResolutionReason.NoDeterministicLink
         };
+        return new MeetingAudioResolution(link.RecordingId, reason);
     }
 
     private MeetingAudioResolutionReason ResolveRecording(
@@ -323,61 +240,6 @@ public sealed class MeetingAudioResourceResolver
         }
     }
 
-    private bool TryLoadRecordingTranscript(
-        MeetingRecording recording,
-        out NormalizedTranscript transcript)
-    {
-        transcript = default!;
-        if (string.IsNullOrWhiteSpace(recording.TranscriptFile))
-        {
-            return false;
-        }
-
-        try
-        {
-            if (recording.MeetId is not Guid meetingId ||
-                !string.Equals(
-                    recording.RecordingFolderRelativePath.TrimEnd('/'),
-                    $"meetings/{meetingId:N}/recordings/{recording.Id:N}",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            var path = _storage.ResolveFile(recording, recording.TranscriptFile);
-            var meetingsRoot = Path.GetFullPath(_storage.RootDirectory)
-                .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            if (!path.StartsWith(meetingsRoot, StringComparison.OrdinalIgnoreCase) ||
-                !File.Exists(path) ||
-                ContainsReparsePoint(meetingsRoot, path))
-            {
-                return false;
-            }
-
-            transcript = JsonSerializer.Deserialize<NormalizedTranscript>(
-                             File.ReadAllText(path),
-                             _jsonOptions)!;
-            return transcript is not null;
-        }
-        catch (Exception ex) when (
-            ex is InvalidOperationException or
-            InvalidDataException or
-            IOException or
-            UnauthorizedAccessException or
-            JsonException)
-        {
-            return false;
-        }
-    }
-
-    private static bool SameManagedFolder(string left, string right) =>
-        !string.IsNullOrWhiteSpace(left) &&
-        !string.IsNullOrWhiteSpace(right) &&
-        string.Equals(
-            left.Replace('\\', '/').TrimEnd('/'),
-            right.Replace('\\', '/').TrimEnd('/'),
-            StringComparison.OrdinalIgnoreCase);
-
     private void Report(
         MeetingTranscript transcript,
         MeetingAudioResolutionReason reason) =>
@@ -386,6 +248,26 @@ public sealed class MeetingAudioResourceResolver
             $"meetId={transcript.MeetId?.ToString("N") ?? "none"}; " +
             $"transcriptId={transcript.Id:N}.",
             null);
+
+    private static string UnavailableReason(MeetingAudioResolutionReason reason) =>
+        reason switch
+        {
+            MeetingAudioResolutionReason.NoDeterministicLink =>
+                WorkspaceTranscriptAudioSnapshot.NoRecordingLinked,
+            MeetingAudioResolutionReason.AmbiguousLink =>
+                WorkspaceTranscriptAudioSnapshot.MultipleRecordingsMatch,
+            MeetingAudioResolutionReason.RecordingMissing =>
+                WorkspaceTranscriptAudioSnapshot.RecordingMissing,
+            MeetingAudioResolutionReason.DifferentMeeting =>
+                WorkspaceTranscriptAudioSnapshot.DifferentMeeting,
+            MeetingAudioResolutionReason.MixedTrackUnavailable =>
+                WorkspaceTranscriptAudioSnapshot.MixedTrackUnavailable,
+            MeetingAudioResolutionReason.UnsupportedFormat =>
+                WorkspaceTranscriptAudioSnapshot.UnsupportedAudioFormat,
+            MeetingAudioResolutionReason.ManagedFileUnavailable =>
+                WorkspaceTranscriptAudioSnapshot.ManagedAudioFileMissing,
+            _ => WorkspaceTranscriptAudioSnapshot.ManagedAudioUnavailable
+        };
 
     private static string? ContentTypeFor(string fileName) =>
         Path.GetExtension(fileName).ToLowerInvariant() switch

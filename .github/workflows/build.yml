@@ -67,9 +67,10 @@ jobs:
             'No installer is required.'
             'Local state remains under %APPDATA%\TaskOverlayV2.'
           ) | Set-Content -LiteralPath (Join-Path $packageRoot 'README.txt') -Encoding utf8
-          $unexpectedRootFiles = Get-ChildItem -LiteralPath $packageRoot -File | Where-Object { $_.Name -notin @('TaskOverlay.exe', 'README.txt') }
+          $unexpectedRootFiles = Get-ChildItem -LiteralPath $packageRoot -File | Where-Object { $_.Name -notin @('TaskOverlay.exe', 'README.txt', 'BUILD.txt') }
           if ($unexpectedRootFiles) { throw "Unexpected package root files: $($unexpectedRootFiles.Name -join ', ')" }
           if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'TaskOverlay.exe'))) { throw 'TaskOverlay.exe is missing.' }
+          if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'BUILD.txt'))) { throw 'BUILD.txt is missing.' }
           if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'resources\WorkspaceWeb\index.html'))) { throw 'resources/WorkspaceWeb/index.html is missing.' }
           $workspaceRoot = Join-Path $packageRoot 'resources\WorkspaceWeb'
           if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.next')) {

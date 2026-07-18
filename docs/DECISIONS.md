@@ -27,7 +27,9 @@ item.
 
 - Correct solution: `TaskOverlay.sln`.
 - Correct executable: `TaskOverlay.exe`.
-- Correct development artifact: `TaskOverlay_Windows_Portable`.
+- Correct development artifact: `TaskOverlay_Windows_Portable`. Its package
+  root includes `BUILD.txt` with commit, branch/PR head, CI run (or `local`),
+  and UTC build time so manual QA can identify the running binary.
 - Runtime state: `%APPDATA%\TaskOverlayV2\state.json`.
 - Logs: `%APPDATA%\TaskOverlayV2\logs`.
 - The source tree lives at repository root. User-facing names do not use V2.
@@ -240,6 +242,9 @@ item.
   its explicit `RecordingId`, a linked ancestor in `SourceTranscriptId`
   revision lineage, then a single same-MEET candidate proven by persisted
   recording/transcription metadata; ambiguous candidates stay unavailable.
+  Generated transcripts persist their known recording link directly. State
+  load promotes a single deterministic legacy association into authoritative
+  transcript metadata, and edited revisions persist the resolved association.
   Resource authorization still requires finalized valid (or migrated legacy)
   mixed-track metadata, the
   exact deterministic managed MEET recording folder, supported M4A/WAV/MP3
@@ -247,7 +252,9 @@ item.
   single byte ranges for browser seeking and returns generic unavailable
   responses for missing or rejected resources. Workspace snapshots contain
   only `Available` / `Unavailable` / `NotLinked`, the opaque URL, and duration;
-  they never contain audio bytes, base64, or local filesystem paths. Edited
+  unavailable audio also carries one bounded reason code rendered as safe
+  product text in Review. Snapshots never contain audio bytes, base64, local
+  filesystem paths, exception text, or internal JSON. Edited
   revisions reuse their preserved or inherited recording association and
   segment timings. Playback
   and auto-scroll state is intentionally ephemeral UI state, not persistence.

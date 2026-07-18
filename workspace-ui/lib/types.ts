@@ -310,6 +310,7 @@ export interface MeetingTranscriptSnapshot {
     status: "NotLinked" | "Available" | "Unavailable"
     url: string | null
     durationSeconds: number
+    unavailableReason: string | null
   }
   createdAtUtc: string
   updatedAtUtc: string

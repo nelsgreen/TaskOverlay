@@ -6,6 +6,7 @@ import {
   resolveSegmentIntervals,
   seekTranscriptSegment,
   shouldAutoScrollTranscript,
+  transcriptAudioUnavailableLabel,
   transcriptSpeakerLabel,
 } from "./meet-transcript-audio.ts"
 
@@ -68,4 +69,30 @@ test("missing or unsupported audio never gates transcript usability", () => {
   assert.ok(unavailableState >= 0)
   assert.ok(transcriptContent > unavailableState,
     "TranscriptContent must remain rendered after the optional unavailable-audio state.")
+})
+
+test("safe unavailable reason codes map to useful Review labels", () => {
+  assert.deepEqual([
+    "NoRecordingLinked",
+    "MultipleRecordingsMatch",
+    "RecordingMissing",
+    "DifferentMeeting",
+    "ManagedAudioUnavailable",
+    "ManagedAudioFileMissing",
+    "MixedTrackUnavailable",
+    "UnsupportedAudioFormat",
+  ].map(transcriptAudioUnavailableLabel), [
+    "No recording linked",
+    "Multiple recordings match",
+    "Linked recording is missing",
+    "Linked recording belongs to another MEET",
+    "Managed audio is unavailable",
+    "Managed audio file missing",
+    "Mixed track unavailable",
+    "Unsupported audio format",
+  ])
+  assert.equal(transcriptAudioUnavailableLabel("UnexpectedInternalValue"),
+    "Audio could not be resolved")
+  assert.equal(transcriptAudioUnavailableLabel("C:\\private\\audio.m4a"),
+    "Audio could not be resolved")
 })

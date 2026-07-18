@@ -1865,11 +1865,17 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
                 var artifactChanged = normalized.TranscriptId != metadata.Id ||
                                       normalized.RevisionId != metadata.RevisionId ||
+                                      metadata.RecordingId is Guid recordingId &&
+                                      normalized.RecordingId != recordingId ||
                                       normalized.Segments.Any(segment =>
                                           !string.IsNullOrWhiteSpace(segment.Speaker) &&
                                           string.IsNullOrWhiteSpace(segment.SpeakerId));
                 normalized.TranscriptId = metadata.Id;
                 normalized.RevisionId = metadata.RevisionId;
+                if (metadata.RecordingId is Guid linkedRecordingId)
+                {
+                    normalized.RecordingId = linkedRecordingId;
+                }
                 normalized.HasTimestamps = normalized.HasTimestamps ||
                                            normalized.Segments.Any(segment =>
                                                segment.StartSeconds > 0 || segment.EndSeconds > 0);
@@ -1899,6 +1905,10 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 if (artifactChanged && metadata.MarkdownArtifactFile.Length > 0)
                 {
                     _sourceStorage.WriteTranscript(metadata, normalized);
+                }
+                else if (artifactChanged)
+                {
+                    _sourceStorage.WriteJsonAtomic(path, normalized);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or

@@ -180,11 +180,20 @@ public sealed record WorkspaceMeetingTranscriptSnapshot(
 public sealed record WorkspaceTranscriptAudioSnapshot(
     string Status,
     string? Url,
-    double DurationSeconds)
+    double DurationSeconds,
+    string? UnavailableReason = null)
 {
     public const string NotLinked = "NotLinked";
     public const string Available = "Available";
     public const string Unavailable = "Unavailable";
+    public const string NoRecordingLinked = "NoRecordingLinked";
+    public const string MultipleRecordingsMatch = "MultipleRecordingsMatch";
+    public const string RecordingMissing = "RecordingMissing";
+    public const string DifferentMeeting = "DifferentMeeting";
+    public const string ManagedAudioUnavailable = "ManagedAudioUnavailable";
+    public const string ManagedAudioFileMissing = "ManagedAudioFileMissing";
+    public const string MixedTrackUnavailable = "MixedTrackUnavailable";
+    public const string UnsupportedAudioFormat = "UnsupportedAudioFormat";
 }
 
 public sealed record WorkspaceTranscriptSegmentSnapshot(

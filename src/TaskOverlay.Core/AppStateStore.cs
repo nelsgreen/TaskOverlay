@@ -59,6 +59,8 @@ public sealed class AppStateStore
             StateMigrator.Migrate(state);
             var stateRepaired = StateMigrator.RepairCurrentState(state);
             stateRepaired |= new MeetingRecordingService(state).RecoverInterrupted();
+            stateRepaired |= new MeetingTranscriptRecordingLinker(state, StateDirectory)
+                .RepairMissingLinks() > 0;
             Validate(state);
             if (sourceSchemaVersion != state.SchemaVersion || stateRepaired)
             {

@@ -19,6 +19,22 @@ export interface TranscriptSegmentInterval {
   endSeconds: number
 }
 
+const unavailableAudioLabels: Record<string, string> = {
+  NoRecordingLinked: "No recording linked",
+  MultipleRecordingsMatch: "Multiple recordings match",
+  RecordingMissing: "Linked recording is missing",
+  DifferentMeeting: "Linked recording belongs to another MEET",
+  ManagedAudioUnavailable: "Managed audio is unavailable",
+  ManagedAudioFileMissing: "Managed audio file missing",
+  MixedTrackUnavailable: "Mixed track unavailable",
+  UnsupportedAudioFormat: "Unsupported audio format",
+}
+
+export function transcriptAudioUnavailableLabel(reason: string | null | undefined): string {
+  return reason ? unavailableAudioLabels[reason] ?? "Audio could not be resolved" :
+    "Audio could not be resolved"
+}
+
 export function resolveSegmentIntervals(
   segments: TimedTranscriptSegment[],
   audioDurationSeconds: number,

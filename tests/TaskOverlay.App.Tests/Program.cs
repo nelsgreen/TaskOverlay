@@ -55,6 +55,7 @@ internal static class Program
             ("oversized compact chunks derive from mixed track", OversizedCompactChunksDeriveFromMixedTrack),
             ("imported audio is managed and range bounded", ImportedAudioIsManagedAndRangeBounded),
             ("meeting source commands persist and refresh", MeetingSourceCommandsPersistAndRefresh),
+            ("transcript recording links persist and repair", TranscriptRecordingLinksPersistAndRepair),
             ("active transcript audio resolution is restricted and resilient", ActiveTranscriptAudioResolutionIsRestrictedAndResilient),
             ("meeting audio byte ranges support seeking", MeetingAudioByteRangesSupportSeeking),
             ("transcript revision save command", TranscriptRevisionSaveCommand),
@@ -1191,6 +1192,33 @@ internal static class Program
                recordingB.TranscriptFile == "transcript.json",
             "Transcript metadata must attach only to selected recording B.");
 
+        var generated = fixture.State.MeetingTranscripts.Single();
+        Assert(ReadPersistedTranscriptRecordingId(
+                   fixture.Store.StatePath,
+                   generated.Id) == recordingB.Id,
+            "The authoritative state write must contain the generated transcript RecordingId before any compatibility repair runs.");
+        Assert(fixture.Coordinator.LoadTranscriptContent(generated)?.Transcript?.RecordingId ==
+                   recordingB.Id,
+            "The generated normalized transcript artifact must contain the same recording ID.");
+        var reloaded = fixture.Store.Load();
+        var reloadedTranscript = reloaded.MeetingTranscripts.Single();
+        Assert(generated.RecordingId == recordingB.Id &&
+               generated.MeetId == fixture.Meeting.Id &&
+               reloadedTranscript.RecordingId == recordingB.Id &&
+               reloadedTranscript.MeetId == fixture.Meeting.Id &&
+               reloaded.Meetings.Single(item => item.Id == fixture.Meeting.Id)
+                   .ActiveTranscriptId == reloadedTranscript.Id,
+            "A generated transcript must persist its source recording and MEET through state reload.");
+        var reloadedResolver = new MeetingAudioResourceResolver(
+            reloaded,
+            fixture.StateDirectory);
+        var reloadedSnapshot = WorkspaceSnapshotFactory.Create(
+            reloaded,
+            meetingAudioLoader: reloadedResolver.Describe);
+        Assert(reloadedSnapshot.MeetingTranscripts.Single(item => item.IsActive).Audio.Status ==
+                   WorkspaceTranscriptAudioSnapshot.Available,
+            "A generated transcript must remain playable after an application-style state reload.");
+
         var snapshot = fixture.Snapshot();
         var snapshotA = snapshot.MeetingRecordings.Single(item => item.Id == recordingA.Id.ToString("N"));
         var snapshotB = snapshot.MeetingRecordings.Single(item => item.Id == recordingB.Id.ToString("N"));
@@ -1206,6 +1234,7 @@ internal static class Program
         var first = await fixture.SendAsync(recording.Id);
         Assert(first.Success, first.ErrorMessage ?? "Initial transcription failed.");
         var firstHash = fixture.Provider.Hashes.Single();
+        var firstTranscriptId = fixture.Meeting.ActiveTranscriptId;
 
         var folder = fixture.Storage.ResolveFolder(recording.RecordingFolderRelativePath);
         var staleChunk = Path.Combine(folder, "transcription-999.wav");
@@ -1232,6 +1261,20 @@ internal static class Program
                    item.Id == recording.Id.ToString("N")).TranscriptText ==
                    fixture.Provider.TranscriptFor(recording.Id),
             "Retry must use current mixed bytes and expose only the newly generated transcript.");
+        var retryState = fixture.Store.Load();
+        Assert(retryState.MeetingTranscripts.Count == 2 &&
+               retryState.MeetingTranscripts.All(item => item.RecordingId == recording.Id) &&
+               retryState.Meetings.Single(item => item.Id == fixture.Meeting.Id)
+                   .ActiveTranscriptId != firstTranscriptId &&
+               retryState.MeetingTranscripts.Single(item => item.Id ==
+                   retryState.Meetings.Single(meeting => meeting.Id == fixture.Meeting.Id)
+                       .ActiveTranscriptId).RecordingId == recording.Id,
+            "A transcription retry must persist a new active transcript linked to the same recording.");
+        Assert(ReadPersistedTranscriptRecordingId(
+                   fixture.Store.StatePath,
+                   retryState.Meetings.Single(meeting => meeting.Id == fixture.Meeting.Id)
+                       .ActiveTranscriptId!.Value) == recording.Id,
+            "The retry's active transcript link must be present in authoritative JSON without repair.");
     }
 
     private static async Task CompactTranscriptionRejectsMissingMixedTrack()
@@ -1400,7 +1443,12 @@ internal static class Program
             var transcription = await fixture.SendAsync(recording.Id);
             Assert(transcription.Success &&
                    fixture.Processor.Requests.Single().ProcessFromSeconds == 0.1 &&
-                   fixture.Processor.Requests.Single().ProcessUntilSeconds == 0.4,
+                   fixture.Processor.Requests.Single().ProcessUntilSeconds == 0.4 &&
+                   fixture.State.MeetingTranscripts.Single().RecordingId == recording.Id &&
+                   ReadPersistedTranscriptRecordingId(
+                       fixture.Store.StatePath,
+                       fixture.State.MeetingTranscripts.Single().Id) == recording.Id &&
+                   fixture.Store.Load().MeetingTranscripts.Single().RecordingId == recording.Id,
                 "The connected transcription path should forward the selected import range.");
 
             var processingDirectory = Path.Combine(importDirectory, "range-output");
@@ -1800,6 +1848,8 @@ internal static class Program
 
             File.Delete(audioPath);
             Assert(resolver.Describe(edited).Status == WorkspaceTranscriptAudioSnapshot.Unavailable &&
+                   resolver.Describe(edited).UnavailableReason ==
+                       WorkspaceTranscriptAudioSnapshot.ManagedAudioFileMissing &&
                    !resolver.TryResolveRecording(recording.Id, out _),
                 "A deleted recording should become a non-throwing unavailable descriptor.");
 
@@ -1814,6 +1864,9 @@ internal static class Program
             File.WriteAllBytes(Path.Combine(layout.AbsoluteFolder, "mixed.exe"), new byte[] { 1 });
             Assert(resolver.Describe(edited).Status == WorkspaceTranscriptAudioSnapshot.Unavailable,
                 "Unsupported managed files should remain unavailable without exposing an error.");
+            Assert(resolver.Describe(edited).UnavailableReason ==
+                       WorkspaceTranscriptAudioSnapshot.UnsupportedAudioFormat,
+                "Unsupported audio must expose only its safe snapshot reason code.");
 
             var importedMeeting = new MeetingItem
             {
@@ -1977,6 +2030,8 @@ internal static class Program
                        MeetingAudioResolutionReason.AmbiguousLink &&
                    compatibilityResolver.Describe(legacyTranscript).Status ==
                        WorkspaceTranscriptAudioSnapshot.Unavailable &&
+                   compatibilityResolver.Describe(legacyTranscript).UnavailableReason ==
+                       WorkspaceTranscriptAudioSnapshot.MultipleRecordingsMatch &&
                    diagnostics.Last().Contains("reason=AmbiguousLink", StringComparison.Ordinal) &&
                    !diagnostics.Last().Contains(directory, StringComparison.OrdinalIgnoreCase),
                 "Multiple persisted recording matches must remain unavailable with a path-free diagnostic reason.");
@@ -2019,9 +2074,204 @@ internal static class Program
             unrelatedMeeting.ActiveTranscriptId = unrelatedTranscript.Id;
             Assert(compatibilityResolver.Describe(unrelatedTranscript).Status ==
                        WorkspaceTranscriptAudioSnapshot.Unavailable &&
+                   compatibilityResolver.Describe(unrelatedTranscript).UnavailableReason ==
+                       WorkspaceTranscriptAudioSnapshot.DifferentMeeting &&
                    compatibilityResolver.ResolveTranscriptLink(unrelatedTranscript).Reason ==
                        MeetingAudioResolutionReason.DifferentMeeting,
                 "An explicit recording link cannot authorize audio owned by another MEET.");
+
+            var unlinkedMeeting = new MeetingItem
+            {
+                ProjectId = state.Projects.First().Id,
+                Title = "Unlinked generated transcript",
+                StartsAtUtc = DateTimeOffset.UtcNow
+            };
+            var unlinkedTranscript = new MeetingTranscript
+            {
+                MeetId = unlinkedMeeting.Id,
+                Origin = MeetingTranscriptOrigin.Generated,
+                StorageFolderRelativePath =
+                    $"meetings/{unlinkedMeeting.Id:N}/transcripts/{Guid.NewGuid():N}",
+                NormalizedArtifactFile = "transcript.json"
+            };
+            state.Meetings.Add(unlinkedMeeting);
+            state.MeetingTranscripts.Add(unlinkedTranscript);
+            unlinkedMeeting.ActiveTranscriptId = unlinkedTranscript.Id;
+            var diagnosticsBefore = diagnostics.Count;
+            var unlinkedAudio = compatibilityResolver.Describe(unlinkedTranscript);
+            Assert(unlinkedAudio.Status == WorkspaceTranscriptAudioSnapshot.Unavailable &&
+                   unlinkedAudio.UnavailableReason ==
+                       WorkspaceTranscriptAudioSnapshot.NoRecordingLinked &&
+                   diagnostics.Count == diagnosticsBefore + 1 &&
+                   diagnostics.Last().Contains(
+                       "reason=NoDeterministicLink",
+                       StringComparison.Ordinal) &&
+                   !diagnostics.Last().Contains(directory, StringComparison.OrdinalIgnoreCase) &&
+                   !JsonSerializer.Serialize(unlinkedAudio).Contains(
+                       directory,
+                       StringComparison.OrdinalIgnoreCase),
+                "A resolver rejection must invoke the supplied diagnostic delegate with a safe reason and no path.");
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(directory);
+        }
+    }
+
+    private static Task TranscriptRecordingLinksPersistAndRepair()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var state = AppState.CreateDefault();
+            var storage = new MeetingRecordingStorage(directory);
+            var sourceStorage = new MeetingSourceStorage(directory);
+            var store = new AppStateStore(directory);
+
+            MeetingItem AddMeeting(string title)
+            {
+                var meeting = new MeetingItem
+                {
+                    ProjectId = state.Projects.First().Id,
+                    Title = title,
+                    StartsAtUtc = DateTimeOffset.UtcNow
+                };
+                state.Meetings.Add(meeting);
+                return meeting;
+            }
+
+            MeetingRecording AddRecording(MeetingItem meeting, Guid transcriptId, Guid revisionId)
+            {
+                var recordingId = Guid.NewGuid();
+                var layout = storage.CreateLayout(meeting.Id, recordingId);
+                File.WriteAllBytes(layout.MixedAudioPath, new byte[] { 1, 2, 3, 4 });
+                storage.WriteJsonAtomic(
+                    layout.TranscriptPath,
+                    new NormalizedTranscript
+                    {
+                        TranscriptId = transcriptId,
+                        RevisionId = revisionId,
+                        RecordingId = recordingId,
+                        HasTimestamps = true
+                    });
+                var recording = new MeetingRecording
+                {
+                    Id = recordingId,
+                    MeetId = meeting.Id,
+                    State = MeetingRecordingState.TranscriptReady,
+                    RecordingFormat = MeetingRecordingFormat.Wav,
+                    RecordingFolderRelativePath = layout.RelativeFolder,
+                    MixedAudioFile = Path.GetFileName(layout.MixedAudioPath),
+                    TranscriptFile = Path.GetFileName(layout.TranscriptPath),
+                    Tracks = new List<MeetingRecordingTrackArtifact>
+                    {
+                        new()
+                        {
+                            Kind = MeetingRecordingTrackKind.Mixed,
+                            FileName = Path.GetFileName(layout.MixedAudioPath),
+                            Bytes = 4,
+                            HasAudioFrames = true,
+                            DurationSeconds = 5,
+                            FinalizationState = MeetingRecordingFinalizationState.Finalized,
+                            ValidationState = MeetingRecordingValidationState.Valid
+                        }
+                    }
+                };
+                state.MeetingRecordings.Add(recording);
+                return recording;
+            }
+
+            MeetingTranscript AddLegacyTranscript(MeetingItem meeting)
+            {
+                var transcript = new MeetingTranscript
+                {
+                    MeetId = meeting.Id,
+                    Origin = MeetingTranscriptOrigin.Generated,
+                    RevisionId = Guid.NewGuid(),
+                    HasTimestamps = true
+                };
+                var layout = sourceStorage.CreateTranscriptLayout(
+                    meeting.Id,
+                    transcript.Id,
+                    ".json");
+                transcript.StorageFolderRelativePath = layout.RelativeFolder;
+                transcript.OriginalArtifactFile = Path.GetFileName(layout.OriginalPath);
+                transcript.NormalizedArtifactFile = Path.GetFileName(layout.NormalizedPath);
+                transcript.MarkdownArtifactFile = Path.GetFileName(layout.MarkdownPath);
+                File.WriteAllText(layout.OriginalPath, "{}");
+                sourceStorage.WriteTranscript(
+                    layout,
+                    new NormalizedTranscript
+                    {
+                        TranscriptId = transcript.Id,
+                        RevisionId = transcript.RevisionId,
+                        RecordingId = Guid.Empty,
+                        HasTimestamps = true,
+                        Text = "Legacy segment",
+                        Segments = new List<TranscriptSegment>
+                        {
+                            new()
+                            {
+                                Index = 0,
+                                StartSeconds = 0,
+                                EndSeconds = 1,
+                                Text = "Legacy segment"
+                            }
+                        }
+                    });
+                state.MeetingTranscripts.Add(transcript);
+                meeting.ActiveTranscriptId = transcript.Id;
+                return transcript;
+            }
+
+            var repairMeeting = AddMeeting("Deterministic repair");
+            var repairTranscript = AddLegacyTranscript(repairMeeting);
+            var repairRecording = AddRecording(
+                repairMeeting,
+                repairTranscript.Id,
+                repairTranscript.RevisionId);
+
+            var ambiguousMeeting = AddMeeting("Ambiguous repair");
+            var ambiguousTranscript = AddLegacyTranscript(ambiguousMeeting);
+            AddRecording(ambiguousMeeting, ambiguousTranscript.Id, ambiguousTranscript.RevisionId);
+            AddRecording(ambiguousMeeting, ambiguousTranscript.Id, ambiguousTranscript.RevisionId);
+
+            store.Save(state);
+            var repaired = store.Load();
+            Assert(repaired.MeetingTranscripts.Single(item => item.Id == repairTranscript.Id)
+                       .RecordingId == repairRecording.Id &&
+                   repaired.MeetingTranscripts.Single(item => item.Id == ambiguousTranscript.Id)
+                       .RecordingId is null,
+                "State load must repair one deterministic old recording link and leave ambiguous data untouched.");
+            var idempotent = store.Load();
+            Assert(idempotent.MeetingTranscripts.Single(item => item.Id == repairTranscript.Id)
+                       .RecordingId == repairRecording.Id &&
+                   idempotent.MeetingTranscripts.Single(item => item.Id == ambiguousTranscript.Id)
+                       .RecordingId is null,
+                "Persisted compatibility repair must be idempotent across subsequent loads.");
+
+            var transcriptService = new MeetingTranscriptService(
+                idempotent,
+                new MeetingSourceStorage(directory));
+            var revision = transcriptService.SaveRevision(
+                new TranscriptRevisionRequest(
+                    repairMeeting.Id,
+                    repairTranscript.Id,
+                    idempotent.MeetingTranscripts.Single(item => item.Id == repairTranscript.Id)
+                        .RevisionId,
+                    new[] { new TranscriptSegmentEdit(0, "Persisted edit") },
+                    Array.Empty<TranscriptSpeakerEdit>(),
+                    Array.Empty<TranscriptSpeakerMerge>()));
+            store.Save(idempotent);
+            Assert(ReadPersistedTranscriptRecordingId(store.StatePath, revision.Id) ==
+                       repairRecording.Id,
+                "The edited revision's authoritative JSON must contain its resolved recording link.");
+            var revisionReload = store.Load().MeetingTranscripts.Single(item => item.Id == revision.Id);
+            Assert(revision.RecordingId == repairRecording.Id &&
+                   revisionReload.RecordingId == repairRecording.Id &&
+                   revisionReload.SourceTranscriptId == repairTranscript.Id,
+                "An edited revision must resolve, store, and reload its recording association.");
             return Task.CompletedTask;
         }
         finally
@@ -2477,6 +2727,29 @@ internal static class Program
     private static string ComputeFileSha256(string path) =>
         Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
 
+    private static Guid? ReadPersistedTranscriptRecordingId(
+        string statePath,
+        Guid transcriptId)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(statePath));
+        foreach (var transcript in document.RootElement
+                     .GetProperty("meetingTranscripts")
+                     .EnumerateArray())
+        {
+            if (transcript.GetProperty("id").GetGuid() != transcriptId)
+            {
+                continue;
+            }
+
+            return transcript.TryGetProperty("recordingId", out var recordingId) &&
+                   recordingId.ValueKind == JsonValueKind.String
+                ? recordingId.GetGuid()
+                : null;
+        }
+
+        return null;
+    }
+
     private static string CreateTemporaryDirectory()
     {
         var directory = Path.Combine(
@@ -2872,6 +3145,7 @@ internal static class Program
         }
 
         public AppState State { get; }
+        public string StateDirectory => _directory;
         public MeetingItem Meeting { get; }
         public AppStateStore Store { get; }
         public MeetingRecordingStorage Storage { get; }

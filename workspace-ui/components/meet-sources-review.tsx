@@ -6,6 +6,7 @@ import {
   activeTranscriptSegmentIndex,
   seekTranscriptSegment,
   shouldAutoScrollTranscript,
+  transcriptAudioUnavailableLabel,
   transcriptSpeakerLabel,
 } from "@/lib/meet-transcript-audio"
 import {
@@ -1156,10 +1157,12 @@ function TranscriptPlayback({
           </p>
         </div>
       )}
-      {(transcript.audio.status === "Unavailable" || runtimeUnavailable) && (
-        <div className="rounded border border-border px-2.5 py-1.5 text-[10px] text-muted-foreground" role="status">
-          Audio unavailable
-        </div>
+        {(transcript.audio.status === "Unavailable" || runtimeUnavailable) && (
+          <div className="rounded border border-border px-2.5 py-1.5 text-[10px] text-muted-foreground" role="status">
+            Audio unavailable: {runtimeUnavailable
+              ? "Playback failed"
+              : transcriptAudioUnavailableLabel(transcript.audio.unavailableReason)}
+          </div>
       )}
       <TranscriptContent
         transcript={transcript}
