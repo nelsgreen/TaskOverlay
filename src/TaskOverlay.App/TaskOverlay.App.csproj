@@ -28,7 +28,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\..\workspace-ui\out\**\*">
+    <Content Include="..\..\workspace-ui\out\**\*"
+             Exclude="..\..\workspace-ui\out\*.txt;..\..\workspace-ui\out\404.html;..\..\workspace-ui\out\404\**\*;..\..\workspace-ui\out\not-found.html;..\..\workspace-ui\out\not-found.txt;..\..\workspace-ui\out\not-found\**\*;..\..\workspace-ui\out\_not-found.html;..\..\workspace-ui\out\_not-found.txt;..\..\workspace-ui\out\_not-found\**\*">
       <Link>resources\WorkspaceWeb\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

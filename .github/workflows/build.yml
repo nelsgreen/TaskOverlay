@@ -71,6 +71,33 @@ jobs:
           if ($unexpectedRootFiles) { throw "Unexpected package root files: $($unexpectedRootFiles.Name -join ', ')" }
           if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'TaskOverlay.exe'))) { throw 'TaskOverlay.exe is missing.' }
           if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'resources\WorkspaceWeb\index.html'))) { throw 'resources/WorkspaceWeb/index.html is missing.' }
+          $workspaceRoot = Join-Path $packageRoot 'resources\WorkspaceWeb'
+          if (Test-Path -LiteralPath (Join-Path $workspaceRoot '.next')) {
+            throw 'Next build cache must not be packaged.'
+          }
+          $fallbackPaths = @(
+            '404.html', '404',
+            'not-found.html', 'not-found.txt', 'not-found',
+            '_not-found.html', '_not-found.txt', '_not-found'
+          )
+          foreach ($fallbackPath in $fallbackPaths) {
+            if (Test-Path -LiteralPath (Join-Path $workspaceRoot $fallbackPath)) {
+              throw "Unused Next fallback route was packaged: $fallbackPath"
+            }
+          }
+          if (Get-ChildItem -LiteralPath $workspaceRoot -Filter '*.txt' -File) {
+            throw 'Root-route RSC payloads must not be packaged for the single-route WebView2 application.'
+          }
+          $indexHtml = Get-Content -LiteralPath (Join-Path $workspaceRoot 'index.html') -Raw
+          $assetReferences = [regex]::Matches($indexHtml, '(?:src|href)="([^"]+)"') |
+            ForEach-Object { $_.Groups[1].Value } |
+            Where-Object { $_ -notmatch '^(?:https?:|data:|#)' }
+          foreach ($assetReference in $assetReferences) {
+            $assetPath = $assetReference.Split('?')[0].Split('#')[0].TrimStart('/') -replace '/', '\\'
+            if ($assetPath -and -not (Test-Path -LiteralPath (Join-Path $workspaceRoot $assetPath))) {
+              throw "Workspace index.html references a missing local asset: $assetReference"
+            }
+          }
           if (Test-Path -LiteralPath (Join-Path $packageRoot 'runtimes')) { throw 'runtimes folder must be bundled into the single-file executable.' }
           if (Get-ChildItem -LiteralPath $packageRoot -File -Recurse | Where-Object { $_.Extension -in @('.pdb', '.xml') }) { throw 'Development PDB or XML files remain in the package.' }
           Compress-Archive -LiteralPath $packageRoot -DestinationPath (Join-Path $artifactRoot 'TaskOverlay_Windows_Portable.zip') -Force
