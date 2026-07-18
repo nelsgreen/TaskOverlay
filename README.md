@@ -22,7 +22,8 @@ pnpm --dir .\workspace-ui install --frozen-lockfile
 pnpm --dir .\workspace-ui build
 dotnet restore .\TaskOverlay.sln --configfile .\NuGet.Config
 dotnet build .\TaskOverlay.sln --configuration Release --no-restore
-dotnet test .\TaskOverlay.sln --configuration Release --no-build
+dotnet run --project .\tests\TaskOverlay.Core.Tests\TaskOverlay.Core.Tests.csproj --configuration Release --no-build
+dotnet run --project .\tests\TaskOverlay.App.Tests\TaskOverlay.App.Tests.csproj --configuration Release --no-build
 dotnet publish .\src\TaskOverlay.App\TaskOverlay.App.csproj --configuration Release --self-contained false -r win-x64 --output .\artifacts\TaskOverlay
 ```
 

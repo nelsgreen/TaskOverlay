@@ -58,15 +58,15 @@ jobs:
           Get-ChildItem -LiteralPath $packageRoot -File -Recurse |
             Where-Object { $_.Extension -in @('.pdb', '.xml') } |
             Remove-Item -Force
-          @'
-          TaskOverlay portable
-
-          Run TaskOverlay.exe.
-          Windows 10/11 and .NET Desktop Runtime 8 are required.
-          The Microsoft Edge WebView2 Runtime is required for Workspace.
-          No installer is required.
-          Local state remains under %APPDATA%\TaskOverlayV2.
-'@ | Set-Content -LiteralPath (Join-Path $packageRoot 'README.txt') -Encoding utf8
+          @(
+            'TaskOverlay portable'
+            ''
+            'Run TaskOverlay.exe.'
+            'Windows 10/11 and .NET Desktop Runtime 8 are required.'
+            'The Microsoft Edge WebView2 Runtime is required for Workspace.'
+            'No installer is required.'
+            'Local state remains under %APPDATA%\TaskOverlayV2.'
+          ) | Set-Content -LiteralPath (Join-Path $packageRoot 'README.txt') -Encoding utf8
           $unexpectedRootFiles = Get-ChildItem -LiteralPath $packageRoot -File | Where-Object { $_.Name -notin @('TaskOverlay.exe', 'README.txt') }
           if ($unexpectedRootFiles) { throw "Unexpected package root files: $($unexpectedRootFiles.Name -join ', ')" }
           if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'TaskOverlay.exe'))) { throw 'TaskOverlay.exe is missing.' }
