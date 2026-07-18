@@ -1004,8 +1004,58 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
 
         try
         {
+            var meeting = _state.Meetings.FirstOrDefault(item => item.Id == request.MeetId);
+            var previousActiveTranscriptId = meeting?.ActiveTranscriptId;
+            var previousMeetingUpdatedAtUtc = meeting?.UpdatedAtUtc ?? default;
+            var previousStateUpdatedAtUtc = _state.UpdatedAtUtc;
             var revision = _transcriptService.SaveRevision(request);
-            PersistStateAndNotify();
+
+            // Commit boundary: the revision counts as saved only once
+            // state.json persists. A persistence failure rolls the in-memory
+            // mutation, active selection, timestamps, and the new managed
+            // folder back so the previous durable state stays authoritative.
+            try
+            {
+                _persistState();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                       InvalidDataException or NotSupportedException or
+                                       JsonException)
+            {
+                try
+                {
+                    _transcriptService.DiscardUnpersistedRevision(
+                        revision,
+                        previousActiveTranscriptId,
+                        previousMeetingUpdatedAtUtc,
+                        previousStateUpdatedAtUtc);
+                }
+                catch (Exception cleanupEx) when (cleanupEx is IOException or
+                                                  UnauthorizedAccessException or
+                                                  InvalidDataException)
+                {
+                    Report(
+                        $"Transcript revision rollback cleanup incomplete: transcriptId={revision.Id:N}.",
+                        cleanupEx);
+                }
+
+                return MeetingAssistantOperationResult.Fail(SafeMessage(ex));
+            }
+
+            // Past the commit boundary the revision is durable: a UI/snapshot
+            // notification failure must neither fail the command nor trigger
+            // any rollback.
+            try
+            {
+                _stateChanged();
+            }
+            catch (Exception ex)
+            {
+                Report(
+                    $"Transcript revision saved but state-change notification failed: transcriptId={revision.Id:N}.",
+                    ex);
+            }
+
             return new MeetingAssistantOperationResult(
                 true,
                 MeetingId: request.MeetId,

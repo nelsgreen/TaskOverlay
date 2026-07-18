@@ -547,6 +547,37 @@ public sealed class MeetingTranscriptService
         }
     }
 
+    /// <summary>
+    /// Reverts a revision created by <see cref="SaveRevision"/> whose durable
+    /// state save failed: removes it from AppState, restores the previous
+    /// active selection and timestamps, and deletes its managed folder. The
+    /// parent transcript, its artifacts, and its analyses are never touched.
+    /// In-memory state is restored before the folder delete so a cleanup I/O
+    /// failure cannot leave the unpersisted revision behind in memory.
+    /// </summary>
+    public void DiscardUnpersistedRevision(
+        MeetingTranscript revision,
+        Guid? previousActiveTranscriptId,
+        DateTimeOffset previousMeetingUpdatedAtUtc,
+        DateTimeOffset previousStateUpdatedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(revision);
+        _state.MeetingTranscripts.Remove(revision);
+        var meeting = _state.Meetings.FirstOrDefault(item => item.Id == revision.MeetId);
+        if (meeting is not null)
+        {
+            meeting.ActiveTranscriptId = previousActiveTranscriptId;
+            meeting.UpdatedAtUtc = previousMeetingUpdatedAtUtc;
+        }
+
+        _state.UpdatedAtUtc = previousStateUpdatedAtUtc;
+        var folder = _storage.ResolveFolder(revision.StorageFolderRelativePath);
+        if (Directory.Exists(folder))
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     private static Dictionary<string, string> ResolveMerges(
         IReadOnlyList<TranscriptSpeakerMerge> merges,
         ISet<string> speakerIds)
