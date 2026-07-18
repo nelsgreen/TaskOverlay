@@ -1893,6 +1893,9 @@ export function TaskManager() {
           onMeetingAssistantCommand={connected
             ? meetingOperationController.send
             : undefined}
+          onSaveTranscriptRevision={connected
+            ? bridge.sendMeetingAssistantCommandTracked
+            : undefined}
         />
       )}
 

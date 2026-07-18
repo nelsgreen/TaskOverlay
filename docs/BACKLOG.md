@@ -592,9 +592,8 @@ Product direction:
     indicator, existing PR #67 connected behavior, and MEET-specific Context
     behavior.
   - Phase 2 (Sources content redesign) and Phase 3 (Review content redesign) -
-    implemented in draft PR `claude/v2-meet-sources-review-visual-migration`
-    on top of the accepted Phase 1 shell; both remain pending manual Windows
-    artifact QA and are not yet accepted or complete. Sources now uses a
+    implemented on top of the accepted Phase 1 shell and merged into main in
+    PR #69 (`bdd3f11c8843a4a2f7e51a4ce8cd70dd5adff368`). Sources now uses a
     two-column layout (recording/audio left, transcripts/screenshots right)
     and Review keeps its transcript-left/assistant-right layout with a
     corrected single-scroll-per-column model. Implemented alongside the
@@ -621,11 +620,16 @@ Product direction:
   - periodic finalized M4A segments to bound unexpected-process crash loss;
   - richer emergency-recording inbox and classification flow;
   - transcript search and ContextHUB source promotion;
-  - transcript editor actions: rename speaker globally, mark speaker as You,
-    merge speakers, edit individual segments, and explicitly re-run stale
-    analysis after transcript edits;
-  - editable transcript as a working document, timestamp-to-source-audio
-    playback, and user-created transcript revisions;
+  - transcript editor foundation - done: Review's active transcript has an
+    Edit transcript mode with per-segment text editing, transcript-local
+    speaker rename, an exclusive Mark as You marker, and confirmed
+    speaker merge; Save revision creates one new immutable `UserEdited`
+    transcript version (new managed artifact, provenance to the source
+    transcript and parent revision), activates it, and leaves the original
+    imported/provider artifacts untouched, while prior analysis surfaces as
+    stale with explicit re-analysis only. Remaining editor follow-ups:
+    segment add/delete/split/merge, timestamp editing, and
+    timestamp-to-source-audio playback;
   - Russian-first transcription with project glossary/technical anglicisms;
     AI cleanup must create a reviewable revision, never silently replace text;
   - analysis prompt enrichment from the MEET project and approved ContextHUB

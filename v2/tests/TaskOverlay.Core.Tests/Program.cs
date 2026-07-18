@@ -234,6 +234,9 @@ internal static class Program
             ("meeting assistant persistence roundtrip", MeetingAssistantPersistenceRoundtrip),
             ("meeting source schema v5 migration", MeetingSourceSchemaV5Migration),
             ("meeting transcript imports and stable speakers", MeetingTranscriptImportsAndStableSpeakers),
+            ("meeting transcript user revision creation", MeetingTranscriptUserRevisionCreation),
+            ("meeting transcript user revision validation", MeetingTranscriptUserRevisionValidation),
+            ("meeting source schema v6 to v7 migration", MeetingSourceSchemaV6ToV7Migration),
             ("meeting source persistence and snapshot", MeetingSourcePersistenceAndSnapshot),
             ("meeting source malformed state repair", MeetingSourceMalformedStateRepair),
             ("meeting assistant secrets excluded from shared state", MeetingAssistantSecretsExcludedFromSharedState)
@@ -7927,7 +7930,7 @@ internal static class Program
         StateMigrator.Migrate(state);
 
         var transcript = state.MeetingTranscripts.Single();
-        Assert(state.SchemaVersion == 6 &&
+        Assert(state.SchemaVersion == AppState.CurrentSchemaVersion &&
                transcript.RecordingId == recording.Id &&
                transcript.MeetId == meeting.Id &&
                transcript.OriginalArtifactFile == "transcript.raw.json" &&
@@ -8072,6 +8075,284 @@ internal static class Program
                    !File.Exists(Path.Combine(sharedFolder, "transcript.json")),
                 "Deleting a migrated transcript must preserve audio in its shared recording folder.");
         });
+    }
+
+    private static void MeetingTranscriptUserRevisionCreation()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-17T09:00:00Z");
+            var stateDirectory = Path.Combine(directory, "state");
+            var importDirectory = Path.Combine(directory, "imports");
+            Directory.CreateDirectory(stateDirectory);
+            Directory.CreateDirectory(importDirectory);
+            var state = CreateMeetingAssistantState(now, out var meeting);
+            var storage = new MeetingSourceStorage(stateDirectory);
+            var service = new MeetingTranscriptService(state, storage);
+            var srtPath = Path.Combine(importDirectory, "call.srt");
+            File.WriteAllText(
+                srtPath,
+                "1\n00:00:01,000 --> 00:00:02,000\nA: First point\n\n" +
+                "2\n00:00:02,000 --> 00:00:03,500\nB: Second point\n\n" +
+                "3\n00:00:04,000 --> 00:00:05,000\nC: Third point\n\n" +
+                "4\n00:00:05,000 --> 00:00:06,000\nA: Follow-up\n");
+            var parent = service.Import(meeting.Id, srtPath, "SRT import", now);
+            var parentNormalized = service.Load(parent);
+            string SpeakerId(string label) => parentNormalized.Speakers
+                .Single(speaker => speaker.OriginalLabel == label).SpeakerId;
+            var analysis = new MeetingAnalysis
+            {
+                MeetId = meeting.Id,
+                TranscriptId = parent.Id,
+                TranscriptRevisionId = parent.RevisionId,
+                State = MeetingAnalysisState.ReadyForReview,
+                Summary = "Parent analysis",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            state.MeetingAnalyses.Add(analysis);
+            var originalPath = storage.ResolveTranscriptFile(parent, parent.OriginalArtifactFile);
+            var normalizedPath = storage.ResolveTranscriptFile(parent, parent.NormalizedArtifactFile);
+            var originalBytes = File.ReadAllBytes(originalPath);
+            var normalizedBytes = File.ReadAllBytes(normalizedPath);
+            var parentRevisionBefore = parent.RevisionId;
+
+            var revision = service.SaveRevision(new TranscriptRevisionRequest(
+                meeting.Id,
+                parent.Id,
+                parent.RevisionId,
+                new[] { new TranscriptSegmentEdit(1, "Edited second point") },
+                new[]
+                {
+                    new TranscriptSpeakerEdit(SpeakerId("A"), "Alexandra", false),
+                    new TranscriptSpeakerEdit(SpeakerId("B"), "You (manager)", true)
+                },
+                new[] { new TranscriptSpeakerMerge(SpeakerId("C"), SpeakerId("A")) }),
+                now.AddMinutes(5));
+
+            Assert(state.MeetingTranscripts.Count == 2 &&
+                   meeting.ActiveTranscriptId == revision.Id &&
+                   revision.Origin == MeetingTranscriptOrigin.UserEdited &&
+                   revision.SourceTranscriptId == parent.Id &&
+                   revision.ParentRevisionId == parentRevisionBefore &&
+                   revision.RevisionId != parentRevisionBefore &&
+                   revision.CreatedAtUtc == now.AddMinutes(5),
+                "A saved user revision should become active with full provenance.");
+            Assert(parent.RevisionId == parentRevisionBefore &&
+                   File.ReadAllBytes(originalPath).AsSpan().SequenceEqual(originalBytes) &&
+                   File.ReadAllBytes(normalizedPath).AsSpan().SequenceEqual(normalizedBytes),
+                "The parent transcript record and its artifacts must remain byte-for-byte unchanged.");
+
+            var loaded = service.Load(revision);
+            Assert(loaded.Segments.Count == 4 &&
+                   loaded.Segments.Single(segment => segment.Index == 1).Text == "Edited second point" &&
+                   loaded.Segments.Single(segment => segment.Index == 0).Text == "First point" &&
+                   loaded.Segments.All(segment => segment.StartSeconds ==
+                       parentNormalized.Segments.Single(source => source.Index == segment.Index).StartSeconds),
+                "Edited segment text should round-trip while untouched segments and timestamps are preserved.");
+            Assert(loaded.Segments.Where(segment => segment.Speaker is "A" or "C")
+                       .All(segment => segment.SpeakerId == SpeakerId("A")) &&
+                   loaded.Segments.Single(segment => segment.Speaker == "B").SpeakerId == SpeakerId("B") &&
+                   loaded.Speakers.All(speaker => speaker.SpeakerId != SpeakerId("C")) &&
+                   loaded.Segments.All(segment => loaded.Speakers.Any(speaker =>
+                       speaker.SpeakerId == segment.SpeakerId)),
+                "Merging C into A should reassign C's segments without dangling speaker references.");
+            Assert(revision.Speakers.Single(speaker => speaker.SpeakerId == SpeakerId("A")).DisplayName == "Alexandra" &&
+                   revision.Speakers.Single(speaker => speaker.SpeakerId == SpeakerId("A")).OriginalLabel == "A" &&
+                   loaded.Segments.Single(segment => segment.Index == 2).Speaker == "C" &&
+                   revision.Speakers.Single(speaker => speaker.IsCurrentUser).SpeakerId == SpeakerId("B"),
+                "Renames apply to the mapping, original labels stay as provenance, and exactly one speaker is You.");
+            Assert(TranscriptSpeakerMapping.BuildAnalysisText(loaded, revision.Speakers)
+                       .Split("Alexandra:", StringSplitOptions.None).Length - 1 == 3,
+                "The rename should affect every matching segment in the new revision.");
+
+            // Marking a different speaker as You in a further revision clears the previous marker.
+            var second = service.SaveRevision(new TranscriptRevisionRequest(
+                meeting.Id,
+                revision.Id,
+                revision.RevisionId,
+                Array.Empty<TranscriptSegmentEdit>(),
+                new[]
+                {
+                    new TranscriptSpeakerEdit(SpeakerId("A"), "Alexandra", true),
+                    new TranscriptSpeakerEdit(SpeakerId("B"), "Boris", false)
+                },
+                Array.Empty<TranscriptSpeakerMerge>()),
+                now.AddMinutes(10));
+            Assert(second.Speakers.Single(speaker => speaker.IsCurrentUser).SpeakerId == SpeakerId("A") &&
+                   revision.Speakers.Single(speaker => speaker.IsCurrentUser).SpeakerId == SpeakerId("B") &&
+                   meeting.ActiveTranscriptId == second.Id,
+                "Changing the You marker should be exclusive per revision and never rewrite prior revisions.");
+
+            // Existing revision-binding semantics mark the parent-bound analysis stale
+            // only against the revision it recorded; state round-trips through the store.
+            var store = new AppStateStore(stateDirectory);
+            store.Save(state);
+            var reloaded = store.Load();
+            var reloadedRevision = reloaded.MeetingTranscripts.Single(item => item.Id == second.Id);
+            Assert(reloaded.SchemaVersion == AppState.CurrentSchemaVersion &&
+                   reloaded.MeetingTranscripts.Count == 3 &&
+                   reloadedRevision.SourceTranscriptId == revision.Id &&
+                   reloaded.Meetings.Single(item => item.Id == meeting.Id).ActiveTranscriptId == second.Id &&
+                   reloaded.MeetingAnalyses.Single().TranscriptRevisionId == parentRevisionBefore,
+                "User revisions, provenance, and analysis bindings must survive an AppState round-trip.");
+
+            var snapshot = WorkspaceSnapshotFactory.Create(
+                reloaded,
+                now.AddMinutes(11),
+                WorkspaceSnapshotFactory.ConnectedMode,
+                meetingTranscriptLoader: metadata => new MeetingTranscriptSnapshotContent(
+                    new MeetingSourceStorage(stateDirectory).LoadTranscript(metadata),
+                    OriginalAvailable: false,
+                    NormalizedAvailable: true,
+                    MarkdownAvailable: true));
+            var snapshotRevision = snapshot.MeetingTranscripts
+                .Single(item => item.Id == second.Id.ToString("N"));
+            Assert(snapshotRevision.IsActive &&
+                   snapshotRevision.Origin == "UserEdited" &&
+                   snapshotRevision.SourceTranscriptId == revision.Id.ToString("N") &&
+                   snapshotRevision.ParentRevisionId == revision.RevisionId.ToString("N") &&
+                   snapshotRevision.Speakers.Single(speaker => speaker.IsCurrentUser).DisplayName == "Alexandra" &&
+                   !snapshot.MeetingAnalyses.Single().IsStale,
+                "The snapshot should expose the active user revision, provenance, and speaker mappings.");
+        });
+    }
+
+    private static void MeetingTranscriptUserRevisionValidation()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var now = DateTimeOffset.Parse("2026-07-17T10:00:00Z");
+            var stateDirectory = Path.Combine(directory, "state");
+            var importDirectory = Path.Combine(directory, "imports");
+            Directory.CreateDirectory(stateDirectory);
+            Directory.CreateDirectory(importDirectory);
+            var state = CreateMeetingAssistantState(now, out var meeting);
+            var storage = new MeetingSourceStorage(stateDirectory);
+            var service = new MeetingTranscriptService(state, storage);
+            var srtPath = Path.Combine(importDirectory, "call.srt");
+            File.WriteAllText(
+                srtPath,
+                "1\n00:00:01,000 --> 00:00:02,000\nA: First point\n\n" +
+                "2\n00:00:02,000 --> 00:00:03,500\nB: Second point\n");
+            var parent = service.Import(meeting.Id, srtPath, "SRT import", now);
+            var speakerA = parent.Speakers.Single(speaker => speaker.OriginalLabel == "A").SpeakerId;
+            var speakerB = parent.Speakers.Single(speaker => speaker.OriginalLabel == "B").SpeakerId;
+            TranscriptSpeakerEdit[] FullMapping() => new[]
+            {
+                new TranscriptSpeakerEdit(speakerA, "A", false),
+                new TranscriptSpeakerEdit(speakerB, "B", false)
+            };
+            var transcriptFolders = Directory.GetDirectories(
+                storage.ResolveFolder($"meetings/{meeting.Id:N}/transcripts"));
+
+            void AssertRejected(string reason, TranscriptRevisionRequest request)
+            {
+                var failed = false;
+                try
+                {
+                    service.SaveRevision(request, now.AddMinutes(1));
+                }
+                catch (InvalidDataException)
+                {
+                    failed = true;
+                }
+
+                Assert(failed, $"SaveRevision should reject: {reason}.");
+            }
+
+            AssertRejected("an unknown MEET", new TranscriptRevisionRequest(
+                Guid.NewGuid(), parent.Id, parent.RevisionId,
+                Array.Empty<TranscriptSegmentEdit>(), FullMapping(),
+                Array.Empty<TranscriptSpeakerMerge>()));
+            AssertRejected("an unknown transcript", new TranscriptRevisionRequest(
+                meeting.Id, Guid.NewGuid(), parent.RevisionId,
+                Array.Empty<TranscriptSegmentEdit>(), FullMapping(),
+                Array.Empty<TranscriptSpeakerMerge>()));
+            AssertRejected("a stale parent revision", new TranscriptRevisionRequest(
+                meeting.Id, parent.Id, Guid.NewGuid(),
+                Array.Empty<TranscriptSegmentEdit>(), FullMapping(),
+                Array.Empty<TranscriptSpeakerMerge>()));
+            AssertRejected("merge into self", new TranscriptRevisionRequest(
+                meeting.Id, parent.Id, parent.RevisionId,
+                Array.Empty<TranscriptSegmentEdit>(),
+                new[] { new TranscriptSpeakerEdit(speakerB, "B", false) },
+                new[] { new TranscriptSpeakerMerge(speakerA, speakerA) }));
+            AssertRejected("merge of an unknown speaker", new TranscriptRevisionRequest(
+                meeting.Id, parent.Id, parent.RevisionId,
+                Array.Empty<TranscriptSegmentEdit>(), FullMapping(),
+                new[] { new TranscriptSpeakerMerge("speaker-ghost", speakerA) }));
+            AssertRejected("a dangling speaker mapping", new TranscriptRevisionRequest(
+                meeting.Id, parent.Id, parent.RevisionId,
+                Array.Empty<TranscriptSegmentEdit>(),
+                new[]
+                {
+                    new TranscriptSpeakerEdit(speakerA, "A", false),
+                    new TranscriptSpeakerEdit("speaker-ghost", "Ghost", false)
+                },
+                Array.Empty<TranscriptSpeakerMerge>()));
+            AssertRejected("an incomplete speaker mapping", new TranscriptRevisionRequest(
+                meeting.Id, parent.Id, parent.RevisionId,
+                Array.Empty<TranscriptSegmentEdit>(),
+                new[] { new TranscriptSpeakerEdit(speakerA, "A", false) },
+                Array.Empty<TranscriptSpeakerMerge>()));
+            AssertRejected("two You markers", new TranscriptRevisionRequest(
+                meeting.Id, parent.Id, parent.RevisionId,
+                Array.Empty<TranscriptSegmentEdit>(),
+                new[]
+                {
+                    new TranscriptSpeakerEdit(speakerA, "A", true),
+                    new TranscriptSpeakerEdit(speakerB, "B", true)
+                },
+                Array.Empty<TranscriptSpeakerMerge>()));
+            AssertRejected("an unknown segment index", new TranscriptRevisionRequest(
+                meeting.Id, parent.Id, parent.RevisionId,
+                new[] { new TranscriptSegmentEdit(99, "text") }, FullMapping(),
+                Array.Empty<TranscriptSpeakerMerge>()));
+            AssertRejected("empty segment text", new TranscriptRevisionRequest(
+                meeting.Id, parent.Id, parent.RevisionId,
+                new[] { new TranscriptSegmentEdit(0, "   ") }, FullMapping(),
+                Array.Empty<TranscriptSpeakerMerge>()));
+
+            Assert(state.MeetingTranscripts.Count == 1 &&
+                   meeting.ActiveTranscriptId == parent.Id &&
+                   Directory.GetDirectories(storage.ResolveFolder(
+                       $"meetings/{meeting.Id:N}/transcripts")).Length == transcriptFolders.Length,
+                "A failed save must not activate, persist, or leave partial revision artifacts.");
+        });
+    }
+
+    private static void MeetingSourceSchemaV6ToV7Migration()
+    {
+        // Synthetic schema-6 fixture only — never derived from real AppData state.
+        var now = DateTimeOffset.Parse("2026-07-17T11:00:00Z");
+        var state = CreateMeetingAssistantState(now, out var meeting);
+        state.SchemaVersion = 6;
+        var transcript = new MeetingTranscript
+        {
+            MeetId = meeting.Id,
+            Origin = MeetingTranscriptOrigin.Imported,
+            StorageFolderRelativePath = $"meetings/{meeting.Id:N}/transcripts/{Guid.NewGuid():N}",
+            OriginalArtifactFile = "original.srt",
+            NormalizedArtifactFile = "transcript.json",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        state.MeetingTranscripts.Add(transcript);
+        meeting.ActiveTranscriptId = transcript.Id;
+        var revisionBefore = transcript.RevisionId;
+
+        StateMigrator.Migrate(state);
+        Assert(state.SchemaVersion == 7 &&
+               state.MeetingTranscripts.Single().RevisionId == revisionBefore &&
+               state.MeetingTranscripts.Single().SourceTranscriptId is null &&
+               state.MeetingTranscripts.Single().ParentRevisionId is null &&
+               meeting.ActiveTranscriptId == transcript.Id,
+            "Schema 6 states without transcript edits should migrate unchanged to schema 7.");
+
+        StateMigrator.Migrate(state);
+        Assert(state.SchemaVersion == 7 && state.MeetingTranscripts.Count == 1,
+            "The v6 to v7 migration should be idempotent.");
     }
 
     private static void MeetingSourcePersistenceAndSnapshot()

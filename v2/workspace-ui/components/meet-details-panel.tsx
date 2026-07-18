@@ -14,6 +14,7 @@ import type {
   Project,
   Section,
   Task,
+  WorkspaceCommandResult,
   WorkspaceContextHubCommand,
   WorkspaceContextItemSnapshot,
   WorkspaceContextSourceSnapshot,
@@ -42,7 +43,11 @@ import {
 } from "@/lib/meet-shell"
 import { isValidMeetingLinkUrl } from "@/lib/meeting-link"
 import { MeetContextBlock } from "./task-context-block"
-import { MeetingReviewWorkspace, MeetingSourcesWorkspace } from "./meet-sources-review"
+import {
+  MeetingReviewWorkspace,
+  MeetingSourcesWorkspace,
+  type TranscriptEditGuard,
+} from "./meet-sources-review"
 
 interface Props {
   meet: MeetItem | null
@@ -83,6 +88,10 @@ interface Props {
   onClearMeetingAssistantError?: () => void
   onClearMeetingAssistantNotice?: () => void
   onMeetingAssistantCommand?: (command: WorkspaceMeetingAssistantCommand) => boolean
+  /** Tracked sender for the transcript revision-save command (Review edit mode). */
+  onSaveTranscriptRevision?: (
+    command: WorkspaceMeetingAssistantCommand,
+  ) => Promise<WorkspaceCommandResult>
   defaultRecordingPolicy?: Exclude<MeetingRecordingPolicy, "Inherit">
 }
 
@@ -176,10 +185,30 @@ export function MeetDetailsModal({
   onClearMeetingAssistantError,
   onClearMeetingAssistantNotice,
   onMeetingAssistantCommand,
+  onSaveTranscriptRevision,
   defaultRecordingPolicy = "Manual",
 }: Props) {
   const [draft, setDraft] = useState<MeetItem | null>(meet)
   const [activeTab, setActiveTab] = useState<MeetWorkspaceTab>("details")
+  // Registered by the Review transcript editor while a draft exists; close,
+  // tab switches, and Escape route through it so dirty edits are never lost
+  // without the one "Discard unsaved transcript edits?" confirmation.
+  const transcriptEditGuardRef = useRef<TranscriptEditGuard | null>(null)
+  const registerTranscriptEditGuard = useCallback(
+    (guard: TranscriptEditGuard | null) => {
+      transcriptEditGuardRef.current = guard
+    },
+    [],
+  )
+  const confirmLeaveTranscriptEditor = useCallback((): boolean => {
+    const guard = transcriptEditGuardRef.current
+    return !guard?.isEditing || guard.requestExit()
+  }, [])
+  const switchTab = useCallback((tab: MeetWorkspaceTab) => {
+    if (tab !== "review" && !confirmLeaveTranscriptEditor()) return false
+    setActiveTab(tab)
+    return true
+  }, [confirmLeaveTranscriptEditor])
   const [saveStatus, setSaveStatus] = useState<MeetSaveStatus>("saved")
   const sessionBaseRef = useRef<MeetItem | null>(meet)
   const draftRef = useRef<MeetItem | null>(meet)
@@ -231,6 +260,7 @@ export function MeetDetailsModal({
   )
   const requestClose = useCallback(async (reason: MeetModalCloseReason) => {
     if (!shouldCloseMeetModal(reason)) return false
+    if (!confirmLeaveTranscriptEditor()) return false
     if (!await flushAutosave()) return false
 
     const current = draftRef.current
@@ -254,6 +284,7 @@ export function MeetDetailsModal({
     onClose()
     return true
   }, [
+    confirmLeaveTranscriptEditor,
     contextItems,
     contextSources,
     flushAutosave,
@@ -267,7 +298,15 @@ export function MeetDetailsModal({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") void requestClose("escape")
+      if (event.key !== "Escape") return
+      // While the transcript editor is open, Escape cancels the edit (with the
+      // dirty-draft confirmation) instead of closing the whole MEET modal.
+      const guard = transcriptEditGuardRef.current
+      if (guard?.isEditing) {
+        guard.requestExit()
+        return
+      }
+      void requestClose("escape")
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
@@ -339,7 +378,7 @@ export function MeetDetailsModal({
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
     event.preventDefault()
     const target = nextMeetTab(activeTab, event.key === "ArrowRight" ? "next" : "prev")
-    setActiveTab(target)
+    if (!switchTab(target)) return
     window.requestAnimationFrame(() => {
       document.getElementById(meetTabButtonId(target))?.focus()
     })
@@ -410,7 +449,7 @@ export function MeetDetailsModal({
                 aria-selected={active}
                 aria-controls={meetTabPanelId(tab)}
                 tabIndex={active ? 0 : -1}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => switchTab(tab)}
                 className={cn(
                   "relative flex-1 px-3 py-2.5 text-[12px] font-medium outline-none transition-colors",
                   "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
@@ -753,6 +792,8 @@ export function MeetDetailsModal({
               onClearError={onClearMeetingAssistantError}
               onClearNotice={onClearMeetingAssistantNotice}
               onCommand={onMeetingAssistantCommand ? sendMeetingAssistantCommand : undefined}
+              onSaveTranscriptRevision={onSaveTranscriptRevision}
+              registerTranscriptEditGuard={registerTranscriptEditGuard}
             />
           )}
         </div>

@@ -50,6 +50,14 @@ public static class StateMigrator
                     MigrateMeetingSourcesV5ToV6(state);
                     state.SchemaVersion = 6;
                     break;
+                case 6:
+                    // Schema 7 adds only nullable user-edited transcript revision
+                    // provenance (SourceTranscriptId / ParentRevisionId) and the
+                    // UserEdited transcript origin. Existing records need no
+                    // transformation; the bump keeps older binaries from loading
+                    // states whose origin value they cannot deserialize.
+                    state.SchemaVersion = 7;
+                    break;
                 default:
                     throw new InvalidDataException(
                         $"Unsupported schema version: {state.SchemaVersion}.");

@@ -5,7 +5,8 @@ the backlog into a full release plan.
 
 ## Immediate
 
-1. Complete and manually validate the current MEET Sources/Review PR.
+1. Manually validate the MEET editable-transcript/speaker-identity artifact
+   (the Sources/Review visual migration itself is merged in PR #69).
 2. Manually verify schema-2 planned-work -> schema-3 `TaskWorkSession`
    migration against the user's real work-computer state and artifact; the
    development environment had no copy of that state.
@@ -115,13 +116,21 @@ never a direct mutation without explicit user confirmation (see DECISIONS
     accepted geometry held stable across tabs, accessible three-tab structure,
     one autosave indicator, existing PR #67 connected behavior, and
     MEET-specific Context behavior. Phase 2 Sources and Phase 3 Review are
-    implemented in draft PR `claude/v2-meet-sources-review-visual-migration`
-    on top of the accepted shell, but remain pending manual Windows artifact
-    QA and are not yet accepted or complete.
-14. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
-    loss, device recovery, retention, transcript search/editor actions,
-    ContextHUB promotion, Meeting Brief, user speaker identification,
-    OCR/multimodal review, and additional/local providers.
+    implemented on top of the accepted shell and merged into main in PR #69
+    (`bdd3f11c8843a4a2f7e51a4ce8cd70dd5adff368`).
+14. Editable transcript foundation - implemented: Review offers Edit
+    transcript with segment text editing and transcript-local speaker
+    rename / exclusive You marker / confirmed merge; saving creates one new
+    immutable `UserEdited` revision with provenance, activates it, preserves
+    the original imported/provider artifacts, and marks prior analysis stale
+    with explicit re-analysis only. Next phase: context-aware AI transcript
+    cleanup and analysis using the MEET project and approved ContextHUB
+    context, always as a reviewable revision.
+15. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
+    loss, device recovery, retention, transcript search, segment
+    add/delete/split/merge and timestamp editing, ContextHUB promotion,
+    Meeting Brief, cross-MEET speaker identification, OCR/multimodal review,
+    and additional/local providers.
 
 Recurrence, calendar sync, live transcription, and external meeting-platform
 APIs remain intentionally later work.

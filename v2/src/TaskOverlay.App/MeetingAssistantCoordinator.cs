@@ -50,6 +50,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     private readonly IMeetingAnalysisProvider _analysisProvider;
     private readonly SemaphoreSlim _recordingGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, ProcessingOperation> _processing = new();
+    private readonly ConcurrentDictionary<Guid, byte> _transcriptRevisionSaves = new();
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -141,9 +142,11 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     {
         try
         {
-            var originalAvailable = File.Exists(_sourceStorage.ResolveTranscriptFile(
-                transcript,
-                transcript.OriginalArtifactFile));
+            // User-edited revisions have no original artifact of their own.
+            var originalAvailable = transcript.OriginalArtifactFile.Length > 0 &&
+                                    File.Exists(_sourceStorage.ResolveTranscriptFile(
+                                        transcript,
+                                        transcript.OriginalArtifactFile));
             var normalizedAvailable = File.Exists(_sourceStorage.ResolveTranscriptFile(
                 transcript,
                 transcript.NormalizedArtifactFile));
@@ -985,6 +988,39 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         recording.UpdatedAtUtc = DateTimeOffset.UtcNow;
         Persist(recording);
         return true;
+    }
+
+    public MeetingAssistantOperationResult SaveTranscriptRevision(
+        TranscriptRevisionRequest request)
+    {
+        // One deliberate save at a time per source transcript: a duplicate
+        // submission while the first is writing is rejected instead of creating
+        // two identical revisions.
+        if (!_transcriptRevisionSaves.TryAdd(request.TranscriptId, 0))
+        {
+            return MeetingAssistantOperationResult.Fail(
+                "A transcript revision save is already running for this transcript.");
+        }
+
+        try
+        {
+            var revision = _transcriptService.SaveRevision(request);
+            PersistStateAndNotify();
+            return new MeetingAssistantOperationResult(
+                true,
+                MeetingId: request.MeetId,
+                AnalysisId: revision.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   InvalidDataException or NotSupportedException or
+                                   JsonException)
+        {
+            return MeetingAssistantOperationResult.Fail(SafeMessage(ex));
+        }
+        finally
+        {
+            _transcriptRevisionSaves.TryRemove(request.TranscriptId, out _);
+        }
     }
 
     public bool SetActiveTranscript(Guid meetingId, Guid transcriptId)
