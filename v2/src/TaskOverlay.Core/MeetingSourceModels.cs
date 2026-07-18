@@ -11,7 +11,8 @@ namespace TaskOverlay.Core;
 public enum MeetingTranscriptOrigin
 {
     Generated,
-    Imported
+    Imported,
+    UserEdited
 }
 
 public enum MeetingTranscriptFormat
@@ -53,6 +54,14 @@ public sealed class MeetingTranscript
     public bool HasTimestamps { get; set; }
     public bool HasSpeakerLabels { get; set; }
     public Guid RevisionId { get; set; } = Guid.NewGuid();
+    /// <summary>
+    /// Provenance for user-edited revisions: the transcript this revision was
+    /// derived from and the exact parent revision that was edited. Null for
+    /// original generated/imported transcripts. The references are historical
+    /// (they survive parent deletion) and are never used to resolve artifacts.
+    /// </summary>
+    public Guid? SourceTranscriptId { get; set; }
+    public Guid? ParentRevisionId { get; set; }
     public List<TranscriptSpeaker> Speakers { get; set; } = new();
     public List<string> ImportWarnings { get; set; } = new();
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
@@ -118,6 +127,16 @@ public static class TranscriptSpeakerMapping
 
         foreach (var segment in transcript.Segments)
         {
+            // A segment that already references a known speaker is stable —
+            // e.g. after a user-revision merge its SpeakerId intentionally
+            // differs from its preserved original label and must not be
+            // re-mapped back by label.
+            if (!string.IsNullOrWhiteSpace(segment.SpeakerId) &&
+                usedIds.Contains(segment.SpeakerId))
+            {
+                continue;
+            }
+
             var original = segment.Speaker?.Trim() ?? string.Empty;
             if (original.Length == 0)
             {

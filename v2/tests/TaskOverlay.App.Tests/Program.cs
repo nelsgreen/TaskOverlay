@@ -55,6 +55,8 @@ internal static class Program
             ("oversized compact chunks derive from mixed track", OversizedCompactChunksDeriveFromMixedTrack),
             ("imported audio is managed and range bounded", ImportedAudioIsManagedAndRangeBounded),
             ("meeting source commands persist and refresh", MeetingSourceCommandsPersistAndRefresh),
+            ("transcript revision save command", TranscriptRevisionSaveCommand),
+            ("transcript revision persistence is transactional", TranscriptRevisionPersistenceIsTransactional),
             ("meeting analysis runtime state is shared and cancellable", MeetingAnalysisRuntimeStateIsSharedAndCancellable),
             ("transcription cancellation is neutral and preserves sources", TranscriptionCancellationIsNeutralAndPreservesSources),
             ("analysis cancellation preserves previous success", AnalysisCancellationPreservesPreviousSuccess),
@@ -1541,6 +1543,250 @@ internal static class Program
         }
     }
 
+    private static async Task TranscriptRevisionSaveCommand()
+    {
+        var importDirectory = CreateTemporaryDirectory();
+        try
+        {
+            var transcriptPath = Path.Combine(importDirectory, "editable.srt");
+            File.WriteAllText(
+                transcriptPath,
+                "1\n00:00:01,000 --> 00:00:02,000\nA: First point\n\n" +
+                "2\n00:00:02,000 --> 00:00:03,000\nB: Second point\n");
+            var interaction = new FakeMeetingSourceInteraction { TranscriptPath = transcriptPath };
+            await using var fixture = new TranscriptionFixture(interaction);
+            var import = await fixture.SendCommandAsync(
+                "importMeetingTranscript",
+                new { meetingId = fixture.Meeting.Id.ToString("N") });
+            Assert(import.Success, import.ErrorMessage ?? "Transcript import failed.");
+            var parent = fixture.State.MeetingTranscripts.Single();
+            var speakerA = parent.Speakers.Single(speaker => speaker.OriginalLabel == "A").SpeakerId;
+            var speakerB = parent.Speakers.Single(speaker => speaker.OriginalLabel == "B").SpeakerId;
+            var stateChangesBefore = fixture.StateChangedCount;
+
+            object ValidPayload() => new
+            {
+                meetingId = fixture.Meeting.Id.ToString("N"),
+                transcriptId = parent.Id.ToString("N"),
+                parentRevisionId = parent.RevisionId.ToString("N"),
+                segmentEdits = new[] { new { index = 0, text = "Edited first point" } },
+                speakers = new[]
+                {
+                    new { speakerId = speakerA, displayName = "Alexandra", isCurrentUser = true },
+                    new { speakerId = speakerB, displayName = "Boris", isCurrentUser = false }
+                },
+                merges = Array.Empty<object>()
+            };
+
+            var invalidMeeting = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                new
+                {
+                    meetingId = Guid.NewGuid().ToString("N"),
+                    transcriptId = parent.Id.ToString("N"),
+                    parentRevisionId = parent.RevisionId.ToString("N"),
+                    speakers = new[]
+                    {
+                        new { speakerId = speakerA, displayName = "A", isCurrentUser = false },
+                        new { speakerId = speakerB, displayName = "B", isCurrentUser = false }
+                    }
+                });
+            var invalidTranscript = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                new
+                {
+                    meetingId = fixture.Meeting.Id.ToString("N"),
+                    transcriptId = Guid.NewGuid().ToString("N"),
+                    parentRevisionId = parent.RevisionId.ToString("N")
+                });
+            var invalidRevision = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                new
+                {
+                    meetingId = fixture.Meeting.Id.ToString("N"),
+                    transcriptId = parent.Id.ToString("N"),
+                    parentRevisionId = Guid.NewGuid().ToString("N")
+                });
+            var invalidSpeaker = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                new
+                {
+                    meetingId = fixture.Meeting.Id.ToString("N"),
+                    transcriptId = parent.Id.ToString("N"),
+                    parentRevisionId = parent.RevisionId.ToString("N"),
+                    speakers = new[]
+                    {
+                        new { speakerId = "speaker-ghost", displayName = "Ghost", isCurrentUser = false }
+                    }
+                });
+            var invalidSegment = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                new
+                {
+                    meetingId = fixture.Meeting.Id.ToString("N"),
+                    transcriptId = parent.Id.ToString("N"),
+                    parentRevisionId = parent.RevisionId.ToString("N"),
+                    segmentEdits = new[] { new { index = 99, text = "text" } },
+                    speakers = new[]
+                    {
+                        new { speakerId = speakerA, displayName = "A", isCurrentUser = false },
+                        new { speakerId = speakerB, displayName = "B", isCurrentUser = false }
+                    }
+                });
+            var malformedPayload = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                new
+                {
+                    meetingId = fixture.Meeting.Id.ToString("N"),
+                    transcriptId = parent.Id.ToString("N"),
+                    parentRevisionId = parent.RevisionId.ToString("N"),
+                    segmentEdits = "not-an-array"
+                });
+            Assert(!invalidMeeting.Success && !invalidTranscript.Success &&
+                   !invalidRevision.Success && !invalidSpeaker.Success &&
+                   !invalidSegment.Success && !malformedPayload.Success &&
+                   fixture.State.MeetingTranscripts.Count == 1 &&
+                   fixture.Meeting.ActiveTranscriptId == parent.Id &&
+                   fixture.StateChangedCount == stateChangesBefore,
+                "Invalid revision-save payloads must be rejected without state changes.");
+
+            var save = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                ValidPayload());
+            Assert(save.Success, save.ErrorMessage ?? "Revision save failed.");
+            var revision = fixture.State.MeetingTranscripts.Single(item => item.Id != parent.Id);
+            Assert(fixture.Meeting.ActiveTranscriptId == revision.Id &&
+                   revision.SourceTranscriptId == parent.Id &&
+                   revision.ParentRevisionId == parent.RevisionId &&
+                   fixture.StateChangedCount == stateChangesBefore + 1 &&
+                   fixture.Store.Load().MeetingTranscripts.Count == 2,
+                "A valid revision save should persist, activate the new revision, and notify once.");
+
+            // A duplicate submission built against the old parent revision is
+            // rejected instead of silently creating a second identical revision.
+            var duplicate = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                ValidPayload());
+            Assert(!duplicate.Success && fixture.State.MeetingTranscripts.Count == 2,
+                "Replaying the same save must not create another revision.");
+
+            var snapshot = fixture.SnapshotWithSources();
+            var snapshotRevision = snapshot.MeetingTranscripts
+                .Single(item => item.Id == revision.Id.ToString("N"));
+            Assert(snapshotRevision.IsActive &&
+                   snapshotRevision.Origin == "UserEdited" &&
+                   snapshotRevision.SourceTranscriptId == parent.Id.ToString("N") &&
+                   snapshotRevision.Segments.First().Text == "Edited first point" &&
+                   snapshotRevision.Segments.First().SpeakerName == "Alexandra" &&
+                   snapshotRevision.Speakers.Single(speaker => speaker.IsCurrentUser).DisplayName == "Alexandra" &&
+                   snapshot.MeetingTranscripts.Single(item => item.Id == parent.Id.ToString("N"))
+                       .Segments.First().Text == "First point",
+                "The fresh snapshot should expose the new active revision, mappings, and untouched parent.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(importDirectory);
+        }
+    }
+
+    private static async Task TranscriptRevisionPersistenceIsTransactional()
+    {
+        var importDirectory = CreateTemporaryDirectory();
+        try
+        {
+            var transcriptPath = Path.Combine(importDirectory, "transactional.srt");
+            File.WriteAllText(
+                transcriptPath,
+                "1\n00:00:01,000 --> 00:00:02,000\nA: First point\n\n" +
+                "2\n00:00:02,000 --> 00:00:03,000\nB: Second point\n");
+            var interaction = new FakeMeetingSourceInteraction { TranscriptPath = transcriptPath };
+            await using var fixture = new TranscriptionFixture(interaction);
+            var import = await fixture.SendCommandAsync(
+                "importMeetingTranscript",
+                new { meetingId = fixture.Meeting.Id.ToString("N") });
+            Assert(import.Success, import.ErrorMessage ?? "Transcript import failed.");
+            var parent = fixture.State.MeetingTranscripts.Single();
+            var speakerA = parent.Speakers.Single(speaker => speaker.OriginalLabel == "A").SpeakerId;
+            var speakerB = parent.Speakers.Single(speaker => speaker.OriginalLabel == "B").SpeakerId;
+            var sourceStorage = new MeetingSourceStorage(fixture.Store.StateDirectory);
+            var originalPath = sourceStorage.ResolveTranscriptFile(parent, parent.OriginalArtifactFile);
+            var normalizedPath = sourceStorage.ResolveTranscriptFile(parent, parent.NormalizedArtifactFile);
+            var originalBytes = File.ReadAllBytes(originalPath);
+            var normalizedBytes = File.ReadAllBytes(normalizedPath);
+            var transcriptsRoot = sourceStorage.ResolveFolder(
+                $"meetings/{fixture.Meeting.Id:N}/transcripts");
+            var foldersBefore = Directory.GetDirectories(transcriptsRoot);
+            var meetingUpdatedBefore = fixture.Meeting.UpdatedAtUtc;
+            var stateUpdatedBefore = fixture.State.UpdatedAtUtc;
+
+            object Payload(MeetingTranscript source) => new
+            {
+                meetingId = fixture.Meeting.Id.ToString("N"),
+                transcriptId = source.Id.ToString("N"),
+                parentRevisionId = source.RevisionId.ToString("N"),
+                segmentEdits = new[] { new { index = 0, text = "Edited durably" } },
+                speakers = source.Speakers
+                    .Select(speaker => new
+                    {
+                        speakerId = speaker.SpeakerId,
+                        displayName = speaker.DisplayName,
+                        isCurrentUser = speaker.IsCurrentUser
+                    })
+                    .ToArray(),
+                merges = Array.Empty<object>()
+            };
+
+            fixture.PersistFailure = new IOException("Simulated state.json write failure.");
+            var failed = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                Payload(parent));
+            Assert(!failed.Success, "The save must report failure when persistence fails.");
+            Assert(fixture.State.MeetingTranscripts.Single().Id == parent.Id &&
+                   fixture.Meeting.ActiveTranscriptId == parent.Id &&
+                   fixture.Meeting.UpdatedAtUtc == meetingUpdatedBefore &&
+                   fixture.State.UpdatedAtUtc == stateUpdatedBefore,
+                "A failed persistence must roll back the revision, active selection, and timestamps.");
+            Assert(Directory.GetDirectories(transcriptsRoot).SequenceEqual(foldersBefore) &&
+                   File.ReadAllBytes(originalPath).AsSpan().SequenceEqual(originalBytes) &&
+                   File.ReadAllBytes(normalizedPath).AsSpan().SequenceEqual(normalizedBytes),
+                "A failed persistence must remove the new managed folder and keep parent artifacts unchanged.");
+            Assert(fixture.Store.Load().MeetingTranscripts.Single().Id == parent.Id,
+                "Durable state must still reference only the original transcript after a failed save.");
+
+            // Retrying once persistence is available again succeeds with the same payload.
+            fixture.PersistFailure = null;
+            var retry = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                Payload(parent));
+            Assert(retry.Success, retry.ErrorMessage ?? "Retry after persistence recovery failed.");
+            var revision = fixture.State.MeetingTranscripts.Single(item => item.Id != parent.Id);
+            Assert(fixture.Meeting.ActiveTranscriptId == revision.Id &&
+                   fixture.Store.Load().MeetingTranscripts.Count == 2,
+                "The retried save should create and activate one durable revision.");
+
+            // Once state.json has persisted, a failing UI/snapshot notification
+            // must neither fail the command nor roll anything back.
+            fixture.StateChangedFailure = new InvalidOperationException("Simulated notification failure.");
+            var notified = await fixture.SendCommandAsync(
+                "saveMeetingTranscriptRevision",
+                Payload(revision));
+            fixture.StateChangedFailure = null;
+            var latest = fixture.State.MeetingTranscripts
+                .Single(item => item.Id != parent.Id && item.Id != revision.Id);
+            var latestFolder = sourceStorage.ResolveFolder(latest.StorageFolderRelativePath);
+            Assert(notified.Success &&
+                   fixture.Meeting.ActiveTranscriptId == latest.Id &&
+                   Directory.Exists(latestFolder) &&
+                   fixture.Store.Load().MeetingTranscripts.Count == 3 &&
+                   fixture.Store.Load().Meetings.Single().ActiveTranscriptId == latest.Id,
+                "A notification failure after successful persistence must keep the revision committed.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(importDirectory);
+        }
+    }
+
     private static async Task MeetingAnalysisRuntimeStateIsSharedAndCancellable()
     {
         var importDirectory = CreateTemporaryDirectory();
@@ -2238,9 +2484,24 @@ internal static class Program
                 State,
                 settings,
                 _directory,
-                () => Store.Save(State),
+                () =>
+                {
+                    if (PersistFailure is Exception persistFailure)
+                    {
+                        throw persistFailure;
+                    }
+
+                    Store.Save(State);
+                },
                 () => { },
-                () => StateChangedCount++,
+                () =>
+                {
+                    StateChangedCount++;
+                    if (StateChangedFailure is Exception stateChangedFailure)
+                    {
+                        throw stateChangedFailure;
+                    }
+                },
                 new FakeMeetingRecorder(),
                 Processor,
                 Provider,
@@ -2261,6 +2522,10 @@ internal static class Program
         public MeetingAssistantWorkspaceCommandHandler Handler { get; }
         public List<string> Diagnostics { get; } = new();
         public int StateChangedCount { get; private set; }
+        /// <summary>Injected failure for persistState calls; null restores normal saves.</summary>
+        public Exception? PersistFailure { get; set; }
+        /// <summary>Injected failure thrown by the stateChanged notification callback.</summary>
+        public Exception? StateChangedFailure { get; set; }
 
         public MeetingRecording AddRecordedWav(string label, double frequency)
         {

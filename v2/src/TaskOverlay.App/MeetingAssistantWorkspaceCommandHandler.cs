@@ -31,6 +31,7 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
         "importMeetingAudio",
         "setImportedAudioRange",
         "importMeetingTranscript",
+        "saveMeetingTranscriptRevision",
         "setActiveMeetingTranscript",
         "deleteMeetingTranscript",
         "openMeetingTranscriptArtifact",
@@ -144,6 +145,7 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
                     "importMeetingAudio" => ImportAudio(commandId, payload),
                     "setImportedAudioRange" => SetImportedAudioRange(commandId, payload),
                     "importMeetingTranscript" => ImportTranscript(commandId, payload),
+                    "saveMeetingTranscriptRevision" => SaveTranscriptRevision(commandId, payload),
                     "setActiveMeetingTranscript" => SetActiveTranscript(commandId, payload),
                     "deleteMeetingTranscript" => WithTranscript(
                         commandId,
@@ -257,6 +259,131 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
                 commandId,
                 "mutationRejected",
                 "The imported audio processing range is invalid.");
+    }
+
+    private WorkspaceCommandResult SaveTranscriptRevision(string commandId, JsonElement payload)
+    {
+        if (!TryReadGuid(payload, "meetingId", out var meetingId) ||
+            !TryReadGuid(payload, "transcriptId", out var transcriptId) ||
+            !TryReadGuid(payload, "parentRevisionId", out var parentRevisionId))
+        {
+            return Invalid(
+                commandId,
+                "A valid meetingId, transcriptId, and parentRevisionId are required.");
+        }
+
+        if (!TryReadSegmentEdits(payload, out var segmentEdits) ||
+            !TryReadSpeakerEdits(payload, out var speakers) ||
+            !TryReadSpeakerMerges(payload, out var merges))
+        {
+            return Invalid(commandId, "The transcript revision payload is invalid.");
+        }
+
+        return ToCommandResult(
+            commandId,
+            _coordinator.SaveTranscriptRevision(new TranscriptRevisionRequest(
+                meetingId,
+                transcriptId,
+                parentRevisionId,
+                segmentEdits,
+                speakers,
+                merges)));
+    }
+
+    private static bool TryReadSegmentEdits(
+        JsonElement payload,
+        out List<TranscriptSegmentEdit> edits)
+    {
+        edits = new List<TranscriptSegmentEdit>();
+        if (payload.ValueKind != JsonValueKind.Object ||
+            !payload.TryGetProperty("segmentEdits", out var values))
+        {
+            return true;
+        }
+
+        if (values.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var value in values.EnumerateArray())
+        {
+            if (value.ValueKind != JsonValueKind.Object ||
+                !value.TryGetProperty("index", out var index) ||
+                index.ValueKind != JsonValueKind.Number ||
+                !index.TryGetInt32(out var parsedIndex))
+            {
+                return false;
+            }
+
+            edits.Add(new TranscriptSegmentEdit(parsedIndex, ReadString(value, "text")));
+        }
+
+        return true;
+    }
+
+    private static bool TryReadSpeakerEdits(
+        JsonElement payload,
+        out List<TranscriptSpeakerEdit> speakers)
+    {
+        speakers = new List<TranscriptSpeakerEdit>();
+        if (payload.ValueKind != JsonValueKind.Object ||
+            !payload.TryGetProperty("speakers", out var values))
+        {
+            return true;
+        }
+
+        if (values.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var value in values.EnumerateArray())
+        {
+            var speakerId = ReadString(value, "speakerId");
+            if (speakerId.Length == 0)
+            {
+                return false;
+            }
+
+            speakers.Add(new TranscriptSpeakerEdit(
+                speakerId,
+                ReadString(value, "displayName"),
+                ReadBoolean(value, "isCurrentUser")));
+        }
+
+        return true;
+    }
+
+    private static bool TryReadSpeakerMerges(
+        JsonElement payload,
+        out List<TranscriptSpeakerMerge> merges)
+    {
+        merges = new List<TranscriptSpeakerMerge>();
+        if (payload.ValueKind != JsonValueKind.Object ||
+            !payload.TryGetProperty("merges", out var values))
+        {
+            return true;
+        }
+
+        if (values.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var value in values.EnumerateArray())
+        {
+            var from = ReadString(value, "fromSpeakerId");
+            var into = ReadString(value, "intoSpeakerId");
+            if (from.Length == 0 || into.Length == 0)
+            {
+                return false;
+            }
+
+            merges.Add(new TranscriptSpeakerMerge(from, into));
+        }
+
+        return true;
     }
 
     private WorkspaceCommandResult SetActiveTranscript(string commandId, JsonElement payload)

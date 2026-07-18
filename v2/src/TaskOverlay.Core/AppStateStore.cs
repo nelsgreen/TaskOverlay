@@ -401,6 +401,11 @@ public sealed class AppStateStore
                 !RecordingPathPolicy.IsSafeRelativePath(transcript.StorageFolderRelativePath) ||
                 string.IsNullOrWhiteSpace(transcript.NormalizedArtifactFile) ||
                 transcript.RevisionId == Guid.Empty ||
+                transcript.SourceTranscriptId is Guid sourceTranscriptId &&
+                (sourceTranscriptId == Guid.Empty || sourceTranscriptId == transcript.Id) ||
+                transcript.ParentRevisionId == Guid.Empty ||
+                transcript.Origin == MeetingTranscriptOrigin.UserEdited &&
+                (transcript.SourceTranscriptId is null || transcript.ParentRevisionId is null) ||
                 transcript.Speakers is null ||
                 transcript.ImportWarnings is null ||
                 transcript.Speakers.Any(speaker =>

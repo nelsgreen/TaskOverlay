@@ -10,6 +10,28 @@ using System.Text.RegularExpressions;
 
 namespace TaskOverlay.Core;
 
+public sealed record TranscriptSegmentEdit(int Index, string Text);
+
+public sealed record TranscriptSpeakerEdit(
+    string SpeakerId,
+    string DisplayName,
+    bool IsCurrentUser);
+
+public sealed record TranscriptSpeakerMerge(string FromSpeakerId, string IntoSpeakerId);
+
+/// <summary>
+/// One deliberate user save of transcript edits. Segment edits address parent
+/// segments by index; Speakers must cover every speaker that remains after the
+/// merges; merges must already be resolved to their final targets (no chains).
+/// </summary>
+public sealed record TranscriptRevisionRequest(
+    Guid MeetId,
+    Guid TranscriptId,
+    Guid ParentRevisionId,
+    IReadOnlyList<TranscriptSegmentEdit> SegmentEdits,
+    IReadOnlyList<TranscriptSpeakerEdit> Speakers,
+    IReadOnlyList<TranscriptSpeakerMerge> Merges);
+
 public sealed record MeetingTranscriptLayout(
     string RelativeFolder,
     string AbsoluteFolder,
@@ -358,6 +380,295 @@ public sealed class MeetingTranscriptService
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// Creates a new immutable user-edited transcript revision derived from the
+    /// parent transcript's current revision, writes it as a new managed
+    /// artifact, and activates it. The parent record and all of its artifacts
+    /// remain untouched; a failure before completion leaves no state change.
+    /// </summary>
+    public MeetingTranscript SaveRevision(
+        TranscriptRevisionRequest request,
+        DateTimeOffset? now = null)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var meeting = _state.Meetings.FirstOrDefault(item => item.Id == request.MeetId) ??
+                      throw new InvalidDataException("MEET was not found.");
+        var parent = _state.MeetingTranscripts.FirstOrDefault(item =>
+                         item.Id == request.TranscriptId && item.MeetId == request.MeetId) ??
+                     throw new InvalidDataException("Transcript was not found for this MEET.");
+        if (parent.RevisionId != request.ParentRevisionId)
+        {
+            throw new InvalidDataException(
+                "The transcript changed since editing started. Reopen the editor and retry.");
+        }
+
+        // Editing always starts from the active transcript, and a successful
+        // save activates the new revision — so a replayed duplicate submission
+        // (whose source is no longer active) is rejected instead of silently
+        // creating a second identical revision.
+        if (meeting.ActiveTranscriptId != parent.Id)
+        {
+            throw new InvalidDataException(
+                "Only the active transcript can be edited. Reopen the editor and retry.");
+        }
+
+        var normalized = _storage.LoadTranscript(parent);
+        if (normalized.Segments.Count == 0)
+        {
+            throw new InvalidDataException("The transcript has no editable segments.");
+        }
+
+        var speakerIds = normalized.Speakers
+            .Select(speaker => speaker.SpeakerId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var mergeTargets = ResolveMerges(request.Merges, speakerIds);
+        var remainingIds = speakerIds
+            .Where(id => !mergeTargets.ContainsKey(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var finalSpeakers = BuildFinalSpeakers(request.Speakers, normalized.Speakers, remainingIds);
+
+        var segmentsByIndex = new Dictionary<int, TranscriptSegment>();
+        foreach (var segment in normalized.Segments)
+        {
+            if (!segmentsByIndex.TryAdd(segment.Index, segment))
+            {
+                throw new InvalidDataException("The transcript contains duplicate segment indexes.");
+            }
+        }
+
+        var editedTexts = new Dictionary<int, string>();
+        foreach (var edit in request.SegmentEdits)
+        {
+            if (edit is null || !segmentsByIndex.ContainsKey(edit.Index))
+            {
+                throw new InvalidDataException("A segment edit references an unknown segment.");
+            }
+
+            if (string.IsNullOrWhiteSpace(edit.Text))
+            {
+                throw new InvalidDataException("Segment text cannot be empty.");
+            }
+
+            if (!editedTexts.TryAdd(edit.Index, edit.Text.Trim()))
+            {
+                throw new InvalidDataException("A segment was edited more than once.");
+            }
+        }
+
+        var timestamp = now ?? DateTimeOffset.UtcNow;
+        var revision = new MeetingTranscript
+        {
+            MeetId = parent.MeetId,
+            RecordingId = parent.RecordingId,
+            Origin = MeetingTranscriptOrigin.UserEdited,
+            Format = MeetingTranscriptFormat.NormalizedJson,
+            Provider = "User",
+            SourceLabel = "Edited",
+            OriginalFileName = parent.OriginalFileName,
+            SourceTranscriptId = parent.Id,
+            ParentRevisionId = parent.RevisionId,
+            HasTimestamps = normalized.HasTimestamps,
+            HasSpeakerLabels = finalSpeakers.Count > 0,
+            Speakers = finalSpeakers.Select(CloneSpeaker).ToList(),
+            CreatedAtUtc = timestamp,
+            UpdatedAtUtc = timestamp
+        };
+        var newSegments = normalized.Segments
+            .OrderBy(segment => segment.Index)
+            .Select(segment => new TranscriptSegment
+            {
+                Index = segment.Index,
+                StartSeconds = segment.StartSeconds,
+                EndSeconds = segment.EndSeconds,
+                Text = editedTexts.TryGetValue(segment.Index, out var edited)
+                    ? edited
+                    : segment.Text,
+                SpeakerId = segment.SpeakerId is string speakerId &&
+                            mergeTargets.TryGetValue(speakerId, out var target)
+                    ? target
+                    : segment.SpeakerId,
+                Speaker = segment.Speaker
+            })
+            .ToList();
+        if (newSegments.All(segment => string.IsNullOrWhiteSpace(segment.Text)))
+        {
+            throw new InvalidDataException("The edited transcript has no usable content.");
+        }
+
+        if (newSegments.Any(segment => segment.SpeakerId is string id &&
+                                       id.Length > 0 &&
+                                       !remainingIds.Contains(id)))
+        {
+            throw new InvalidDataException(
+                "The edited transcript would contain a dangling speaker reference.");
+        }
+
+        var newNormalized = new NormalizedTranscript
+        {
+            TranscriptId = revision.Id,
+            RevisionId = revision.RevisionId,
+            RecordingId = normalized.RecordingId,
+            Provider = normalized.Provider,
+            Model = normalized.Model,
+            Language = normalized.Language,
+            HasTimestamps = normalized.HasTimestamps,
+            Segments = newSegments,
+            Speakers = finalSpeakers,
+            Text = string.Join(
+                Environment.NewLine,
+                newSegments.Select(segment => segment.Text)),
+            GeneratedAtUtc = timestamp
+        };
+
+        var layout = _storage.CreateTranscriptLayout(request.MeetId, revision.Id, ".json");
+        try
+        {
+            revision.StorageFolderRelativePath = layout.RelativeFolder;
+            revision.OriginalArtifactFile = string.Empty;
+            revision.NormalizedArtifactFile = Path.GetFileName(layout.NormalizedPath);
+            revision.MarkdownArtifactFile = Path.GetFileName(layout.MarkdownPath);
+            _storage.WriteTranscript(layout, newNormalized);
+            _state.MeetingTranscripts.Add(revision);
+            meeting.ActiveTranscriptId = revision.Id;
+            meeting.UpdatedAtUtc = timestamp;
+            _state.UpdatedAtUtc = timestamp;
+            return revision;
+        }
+        catch
+        {
+            if (Directory.Exists(layout.AbsoluteFolder))
+            {
+                Directory.Delete(layout.AbsoluteFolder, recursive: true);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Reverts a revision created by <see cref="SaveRevision"/> whose durable
+    /// state save failed: removes it from AppState, restores the previous
+    /// active selection and timestamps, and deletes its managed folder. The
+    /// parent transcript, its artifacts, and its analyses are never touched.
+    /// In-memory state is restored before the folder delete so a cleanup I/O
+    /// failure cannot leave the unpersisted revision behind in memory.
+    /// </summary>
+    public void DiscardUnpersistedRevision(
+        MeetingTranscript revision,
+        Guid? previousActiveTranscriptId,
+        DateTimeOffset previousMeetingUpdatedAtUtc,
+        DateTimeOffset previousStateUpdatedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(revision);
+        _state.MeetingTranscripts.Remove(revision);
+        var meeting = _state.Meetings.FirstOrDefault(item => item.Id == revision.MeetId);
+        if (meeting is not null)
+        {
+            meeting.ActiveTranscriptId = previousActiveTranscriptId;
+            meeting.UpdatedAtUtc = previousMeetingUpdatedAtUtc;
+        }
+
+        _state.UpdatedAtUtc = previousStateUpdatedAtUtc;
+        var folder = _storage.ResolveFolder(revision.StorageFolderRelativePath);
+        if (Directory.Exists(folder))
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    private static Dictionary<string, string> ResolveMerges(
+        IReadOnlyList<TranscriptSpeakerMerge> merges,
+        ISet<string> speakerIds)
+    {
+        var targets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var merge in merges)
+        {
+            if (merge is null ||
+                string.IsNullOrWhiteSpace(merge.FromSpeakerId) ||
+                string.IsNullOrWhiteSpace(merge.IntoSpeakerId) ||
+                !speakerIds.Contains(merge.FromSpeakerId) ||
+                !speakerIds.Contains(merge.IntoSpeakerId))
+            {
+                throw new InvalidDataException("A speaker merge references an unknown speaker.");
+            }
+
+            if (string.Equals(
+                    merge.FromSpeakerId,
+                    merge.IntoSpeakerId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("A speaker cannot be merged into itself.");
+            }
+
+            if (!targets.TryAdd(merge.FromSpeakerId, merge.IntoSpeakerId))
+            {
+                throw new InvalidDataException("A speaker was merged more than once.");
+            }
+        }
+
+        // Merges must arrive resolved to final targets: a merge target may not
+        // itself be merged away, which also rules out cycles.
+        if (targets.Values.Any(target => targets.ContainsKey(target)))
+        {
+            throw new InvalidDataException("A speaker merge targets a merged speaker.");
+        }
+
+        return targets;
+    }
+
+    private static List<TranscriptSpeaker> BuildFinalSpeakers(
+        IReadOnlyList<TranscriptSpeakerEdit> edits,
+        IReadOnlyList<TranscriptSpeaker> parentSpeakers,
+        ISet<string> remainingIds)
+    {
+        var editsById = new Dictionary<string, TranscriptSpeakerEdit>(StringComparer.OrdinalIgnoreCase);
+        foreach (var edit in edits)
+        {
+            if (edit is null ||
+                string.IsNullOrWhiteSpace(edit.SpeakerId) ||
+                !remainingIds.Contains(edit.SpeakerId))
+            {
+                throw new InvalidDataException("A speaker mapping references an unknown speaker.");
+            }
+
+            if (string.IsNullOrWhiteSpace(edit.DisplayName))
+            {
+                throw new InvalidDataException("Speaker display names cannot be empty.");
+            }
+
+            if (!editsById.TryAdd(edit.SpeakerId, edit))
+            {
+                throw new InvalidDataException("A speaker mapping was provided more than once.");
+            }
+        }
+
+        if (editsById.Count != remainingIds.Count)
+        {
+            throw new InvalidDataException(
+                "Speaker mappings must cover every remaining transcript speaker.");
+        }
+
+        if (edits.Count(edit => edit.IsCurrentUser) > 1)
+        {
+            throw new InvalidDataException("Only one speaker can be marked as You.");
+        }
+
+        return parentSpeakers
+            .Where(speaker => remainingIds.Contains(speaker.SpeakerId))
+            .Select(speaker =>
+            {
+                var edit = editsById[speaker.SpeakerId];
+                return new TranscriptSpeaker
+                {
+                    SpeakerId = speaker.SpeakerId,
+                    OriginalLabel = speaker.OriginalLabel,
+                    DisplayName = edit.DisplayName.Trim(),
+                    IsCurrentUser = edit.IsCurrentUser
+                };
+            })
+            .ToList();
     }
 
     public bool SetActive(Guid meetId, Guid transcriptId, DateTimeOffset? now = null)

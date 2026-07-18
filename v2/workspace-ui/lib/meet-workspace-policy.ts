@@ -41,6 +41,55 @@ export function selectLatestTranscriptAnalysis<
   )
 }
 
+/**
+ * Analysis shown in Review for the active transcript. A freshly saved
+ * user-edited revision has no analysis of its own yet, so the nearest ancestor
+ * revision's analysis is shown instead and reported as stale through the same
+ * revision-mismatch semantics the snapshot already uses — re-analysis stays an
+ * explicit user action.
+ */
+export function selectReviewAnalysis<
+  TTranscript extends {
+    id: string
+    revisionId: string
+    sourceTranscriptId: string | null
+  },
+  TAnalysis extends {
+    transcriptId: string
+    transcriptRevisionId: string
+    isStale: boolean
+    updatedAtUtc: string
+    state?: string
+  },
+>(
+  activeTranscript: TTranscript | null,
+  transcripts: readonly TTranscript[],
+  analyses: readonly TAnalysis[],
+): { analysis: TAnalysis | null; isStaleForActive: boolean } {
+  if (!activeTranscript) return { analysis: null, isStaleForActive: false }
+
+  const visited = new Set<string>()
+  let current: TTranscript | null = activeTranscript
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id)
+    const analysis = selectLatestTranscriptAnalysis(current.id, analyses)
+    if (analysis) {
+      return {
+        analysis,
+        isStaleForActive:
+          analysis.transcriptId !== activeTranscript.id ||
+          analysis.transcriptRevisionId !== activeTranscript.revisionId,
+      }
+    }
+    const sourceId: string | null = current.sourceTranscriptId
+    current = sourceId
+      ? transcripts.find((transcript) => transcript.id === sourceId) ?? null
+      : null
+  }
+
+  return { analysis: null, isStaleForActive: false }
+}
+
 export function sortMeetingScreenshots<
   T extends { meetingId: string; capturedAtUtc: string },
 >(meetingId: string, screenshots: readonly T[]): T[] {

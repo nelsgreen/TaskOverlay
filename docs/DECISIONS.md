@@ -180,10 +180,9 @@ item.
   near-fullscreen `1600x1000 / viewport minus 16px` direction with the
   accepted bounded clamp `min(1280px, 90vw)` by `min(820px, 88dvh)`, which
   keeps clearly visible Workspace margins on a normal desktop. Phase 2 Sources
-  and Phase 3 Review are implemented in a new draft PR
-  (`claude/v2-meet-sources-review-visual-migration`) on top of the accepted
-  shell, but remain pending manual Windows artifact QA and are not yet
-  accepted or complete. Preserve the useful technical foundation: shared
+  and Phase 3 Review are implemented on top of the accepted shell and merged
+  into main in PR #69 (`bdd3f11c8843a4a2f7e51a4ce8cd70dd5adff368`).
+  Preserve the useful technical foundation: shared
   Header / Tabs / Content / Footer shell, the accepted bounded geometry held
   stable across tabs, accessible three-tab structure, one autosave indicator,
   existing PR #67 connected behavior, and MEET-specific Context behavior. The
@@ -207,8 +206,30 @@ item.
 - Speaker identity is separate from presentation: normalized segments reference
   stable `SpeakerId` values, while transcript-level mappings store
   `OriginalLabel`, `DisplayName`, and `IsCurrentUser`. Renaming or merging
-  speakers must not rewrite original imported/provider artifacts. Global
-  speaker editing UI is intentionally deferred.
+  speakers must not rewrite original imported/provider artifacts. Speaker
+  display names and the You marker are transcript/revision-local, not a global
+  People database; global speaker/People editing is intentionally deferred.
+- Transcript editing never mutates an existing transcript. Review's Edit
+  transcript mode holds an ephemeral React draft (no localStorage, no per-
+  keystroke persistence, MEET autosave intentionally not involved), and one
+  deliberate `saveMeetingTranscriptRevision` command creates a new immutable
+  `UserEdited` transcript version: a new managed `transcript.json`/`.md`
+  artifact plus state metadata carrying `SourceTranscriptId` and
+  `ParentRevisionId` provenance (schema 7, additive). The C# side validates
+  the MEET, source transcript, parent revision, segment indexes, and speaker
+  integrity (full mapping coverage, at most one You, merges resolved to
+  final targets, no dangling references), activates the new revision only
+  after the durable write succeeds, and preserves every previous artifact.
+  Only the active transcript is editable, which also rejects replayed
+  duplicate saves. Speaker merge applies only inside the new revision and
+  requires an explicit target plus confirmation in the editor. Prior analysis
+  surfaces as stale through the existing revision-binding semantics (Review
+  falls back to the nearest ancestor revision's analysis and shows the
+  existing stale badge); re-analysis stays an explicit user action. A dirty
+  draft is protected on close, tab switch, transcript switch, and Escape by
+  one "Discard unsaved transcript edits?" confirmation. Context-aware AI
+  transcript cleanup remains the next separate phase and must create a
+  reviewable revision, never silently replace text.
 - Screenshots are explicit user-selected Window/Display captures, stored as
   managed PNG artifacts with UTC time and active-recording offset when one is
   available. There is no silent/periodic capture, video, OCR, or multimodal AI

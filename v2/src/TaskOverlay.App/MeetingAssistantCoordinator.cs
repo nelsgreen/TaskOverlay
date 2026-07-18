@@ -50,6 +50,7 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     private readonly IMeetingAnalysisProvider _analysisProvider;
     private readonly SemaphoreSlim _recordingGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, ProcessingOperation> _processing = new();
+    private readonly ConcurrentDictionary<Guid, byte> _transcriptRevisionSaves = new();
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -141,9 +142,11 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     {
         try
         {
-            var originalAvailable = File.Exists(_sourceStorage.ResolveTranscriptFile(
-                transcript,
-                transcript.OriginalArtifactFile));
+            // User-edited revisions have no original artifact of their own.
+            var originalAvailable = transcript.OriginalArtifactFile.Length > 0 &&
+                                    File.Exists(_sourceStorage.ResolveTranscriptFile(
+                                        transcript,
+                                        transcript.OriginalArtifactFile));
             var normalizedAvailable = File.Exists(_sourceStorage.ResolveTranscriptFile(
                 transcript,
                 transcript.NormalizedArtifactFile));
@@ -985,6 +988,89 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         recording.UpdatedAtUtc = DateTimeOffset.UtcNow;
         Persist(recording);
         return true;
+    }
+
+    public MeetingAssistantOperationResult SaveTranscriptRevision(
+        TranscriptRevisionRequest request)
+    {
+        // One deliberate save at a time per source transcript: a duplicate
+        // submission while the first is writing is rejected instead of creating
+        // two identical revisions.
+        if (!_transcriptRevisionSaves.TryAdd(request.TranscriptId, 0))
+        {
+            return MeetingAssistantOperationResult.Fail(
+                "A transcript revision save is already running for this transcript.");
+        }
+
+        try
+        {
+            var meeting = _state.Meetings.FirstOrDefault(item => item.Id == request.MeetId);
+            var previousActiveTranscriptId = meeting?.ActiveTranscriptId;
+            var previousMeetingUpdatedAtUtc = meeting?.UpdatedAtUtc ?? default;
+            var previousStateUpdatedAtUtc = _state.UpdatedAtUtc;
+            var revision = _transcriptService.SaveRevision(request);
+
+            // Commit boundary: the revision counts as saved only once
+            // state.json persists. A persistence failure rolls the in-memory
+            // mutation, active selection, timestamps, and the new managed
+            // folder back so the previous durable state stays authoritative.
+            try
+            {
+                _persistState();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                       InvalidDataException or NotSupportedException or
+                                       JsonException)
+            {
+                try
+                {
+                    _transcriptService.DiscardUnpersistedRevision(
+                        revision,
+                        previousActiveTranscriptId,
+                        previousMeetingUpdatedAtUtc,
+                        previousStateUpdatedAtUtc);
+                }
+                catch (Exception cleanupEx) when (cleanupEx is IOException or
+                                                  UnauthorizedAccessException or
+                                                  InvalidDataException)
+                {
+                    Report(
+                        $"Transcript revision rollback cleanup incomplete: transcriptId={revision.Id:N}.",
+                        cleanupEx);
+                }
+
+                return MeetingAssistantOperationResult.Fail(SafeMessage(ex));
+            }
+
+            // Past the commit boundary the revision is durable: a UI/snapshot
+            // notification failure must neither fail the command nor trigger
+            // any rollback.
+            try
+            {
+                _stateChanged();
+            }
+            catch (Exception ex)
+            {
+                Report(
+                    $"Transcript revision saved but state-change notification failed: transcriptId={revision.Id:N}.",
+                    ex);
+            }
+
+            return new MeetingAssistantOperationResult(
+                true,
+                MeetingId: request.MeetId,
+                AnalysisId: revision.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   InvalidDataException or NotSupportedException or
+                                   JsonException)
+        {
+            return MeetingAssistantOperationResult.Fail(SafeMessage(ex));
+        }
+        finally
+        {
+            _transcriptRevisionSaves.TryRemove(request.TranscriptId, out _);
+        }
     }
 
     public bool SetActiveTranscript(Guid meetingId, Guid transcriptId)

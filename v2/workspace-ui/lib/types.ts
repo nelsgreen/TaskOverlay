@@ -287,7 +287,7 @@ export interface MeetingTranscriptSnapshot {
   id: string
   meetingId: string
   recordingId: string | null
-  origin: "Generated" | "Imported"
+  origin: "Generated" | "Imported" | "UserEdited"
   format: "NormalizedJson" | "PlainText" | "Markdown" | "SubRip" | "WebVtt"
   provider: string
   sourceLabel: string
@@ -297,6 +297,8 @@ export interface MeetingTranscriptSnapshot {
   hasSpeakerLabels: boolean
   isActive: boolean
   revisionId: string
+  sourceTranscriptId: string | null
+  parentRevisionId: string | null
   originalAvailable: boolean
   normalizedAvailable: boolean
   markdownAvailable: boolean
@@ -738,6 +740,15 @@ export type WorkspaceMeetingAssistantCommand =
       untilSeconds: number | null
     }
   | { type: "importMeetingTranscript"; meetingId: string; sourceLabel?: string }
+  | {
+      type: "saveMeetingTranscriptRevision"
+      meetingId: string
+      transcriptId: string
+      parentRevisionId: string
+      segmentEdits: { index: number; text: string }[]
+      speakers: { speakerId: string; displayName: string; isCurrentUser: boolean }[]
+      merges: { fromSpeakerId: string; intoSpeakerId: string }[]
+    }
   | { type: "setActiveMeetingTranscript"; meetingId: string; transcriptId: string }
   | { type: "deleteMeetingTranscript"; transcriptId: string }
   | {

@@ -19,7 +19,8 @@
     "test:meeting-link": "node --test lib/meeting-link.test.mjs",
     "test:meeting-proposed-action": "node --test lib/meeting-proposed-action.test.mjs",
     "test:meeting-assistant-section": "node --test lib/meeting-assistant-section.test.mjs",
-    "test:meet-sources-review-layout": "node --test lib/meet-sources-review-layout.test.mjs"
+    "test:meet-sources-review-layout": "node --test lib/meet-sources-review-layout.test.mjs",
+    "test:meet-transcript-editor": "node --test lib/meet-transcript-editor.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

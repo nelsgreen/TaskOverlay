@@ -164,6 +164,8 @@ public sealed record WorkspaceMeetingTranscriptSnapshot(
     bool HasSpeakerLabels,
     bool IsActive,
     string RevisionId,
+    string? SourceTranscriptId,
+    string? ParentRevisionId,
     bool OriginalAvailable,
     bool NormalizedAvailable,
     bool MarkdownAvailable,
@@ -595,6 +597,12 @@ public static class WorkspaceSnapshotFactory
                     transcript.HasSpeakerLabels,
                     meetingById[transcript.MeetId.Value].ActiveTranscriptId == transcript.Id,
                     FormatId(transcript.RevisionId),
+                    transcript.SourceTranscriptId is Guid sourceTranscriptId
+                        ? FormatId(sourceTranscriptId)
+                        : null,
+                    transcript.ParentRevisionId is Guid parentRevisionId
+                        ? FormatId(parentRevisionId)
+                        : null,
                     content?.OriginalAvailable == true,
                     content?.NormalizedAvailable == true,
                     content?.MarkdownAvailable == true,
