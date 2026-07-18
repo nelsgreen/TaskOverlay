@@ -51,8 +51,11 @@ public partial class WorkspaceWindow : Window
         Func<IReadOnlyList<WorkspaceMeetingOperationSnapshot>>? meetingOperationLoader = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
-        _meetingAudioResolver = new MeetingAudioResourceResolver(_state, stateDirectory);
         _diagnostic = diagnostic;
+        _meetingAudioResolver = new MeetingAudioResourceResolver(
+            _state,
+            stateDirectory,
+            diagnostic);
         _commandDispatcher = new WorkspaceCommandDispatcher(
             _state,
             saveState,

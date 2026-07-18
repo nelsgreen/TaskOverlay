@@ -236,7 +236,11 @@ item.
   reviewable revision, never silently replace text.
 - Transcript playback uses a same-origin WebView2 media endpoint whose URL
   contains only the linked recording ID. Every request is re-authorized against
-  the explicitly active transcript, finalized valid (or migrated legacy)
+  the active transcript. Recording linkage resolves in strict priority order:
+  its explicit `RecordingId`, a linked ancestor in `SourceTranscriptId`
+  revision lineage, then a single same-MEET candidate proven by persisted
+  recording/transcription metadata; ambiguous candidates stay unavailable.
+  Resource authorization still requires finalized valid (or migrated legacy)
   mixed-track metadata, the
   exact deterministic managed MEET recording folder, supported M4A/WAV/MP3
   extensions, and a present non-reparse-point file. The endpoint implements
@@ -244,7 +248,8 @@ item.
   responses for missing or rejected resources. Workspace snapshots contain
   only `Available` / `Unavailable` / `NotLinked`, the opaque URL, and duration;
   they never contain audio bytes, base64, or local filesystem paths. Edited
-  revisions reuse their preserved `RecordingId` and segment timings. Playback
+  revisions reuse their preserved or inherited recording association and
+  segment timings. Playback
   and auto-scroll state is intentionally ephemeral UI state, not persistence.
 - Screenshots are explicit user-selected Window/Display captures, stored as
   managed PNG artifacts with UTC time and active-recording offset when one is

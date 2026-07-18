@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
@@ -10,6 +12,24 @@ public sealed record MeetingAudioResource(
     string ContentType,
     long Length,
     double DurationSeconds);
+
+public enum MeetingAudioResolutionReason
+{
+    Available,
+    InactiveTranscript,
+    NoDeterministicLink,
+    AmbiguousLink,
+    RecordingMissing,
+    DifferentMeeting,
+    UnsafeManagedFolder,
+    MixedTrackUnavailable,
+    UnsupportedFormat,
+    ManagedFileUnavailable
+}
+
+public sealed record MeetingAudioResolution(
+    Guid? RecordingId,
+    MeetingAudioResolutionReason Reason);
 
 /// <summary>
 /// Resolves the opaque Workspace audio endpoint to the mixed track linked to
@@ -21,25 +41,45 @@ public sealed class MeetingAudioResourceResolver
 
     private readonly AppState _state;
     private readonly MeetingRecordingStorage _storage;
+    private readonly Action<string, Exception?>? _diagnostic;
+    private readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
-    public MeetingAudioResourceResolver(AppState state, string stateDirectory)
+    public MeetingAudioResourceResolver(
+        AppState state,
+        string stateDirectory,
+        Action<string, Exception?>? diagnostic = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _storage = new MeetingRecordingStorage(stateDirectory);
+        _diagnostic = diagnostic;
     }
 
     public WorkspaceTranscriptAudioSnapshot Describe(MeetingTranscript transcript)
     {
         ArgumentNullException.ThrowIfNull(transcript);
-        if (transcript.RecordingId is not Guid recordingId)
+        var link = ResolveTranscriptLink(transcript);
+        if (link.RecordingId is not Guid recordingId)
         {
+            Report(transcript, link.Reason);
             return new WorkspaceTranscriptAudioSnapshot(
-                WorkspaceTranscriptAudioSnapshot.NotLinked,
+                link.Reason is MeetingAudioResolutionReason.InactiveTranscript or
+                    MeetingAudioResolutionReason.NoDeterministicLink
+                    ? WorkspaceTranscriptAudioSnapshot.NotLinked
+                    : WorkspaceTranscriptAudioSnapshot.Unavailable,
                 null,
                 0);
         }
 
-        return TryResolveRecording(recordingId, out var resource)
+        var resolution = ResolveRecording(recordingId, out var resource);
+        if (resolution != MeetingAudioResolutionReason.Available)
+        {
+            Report(transcript, resolution);
+        }
+
+        return resolution == MeetingAudioResolutionReason.Available
             ? new WorkspaceTranscriptAudioSnapshot(
                 WorkspaceTranscriptAudioSnapshot.Available,
                 $"https://taskoverlay.workspace{ResourcePathPrefix}{recordingId:N}",
@@ -72,6 +112,123 @@ public sealed class MeetingAudioResourceResolver
     }
 
     public bool TryResolveRecording(Guid recordingId, out MeetingAudioResource resource)
+        => ResolveRecording(recordingId, out resource) ==
+           MeetingAudioResolutionReason.Available;
+
+    public MeetingAudioResolution ResolveTranscriptLink(MeetingTranscript transcript)
+    {
+        ArgumentNullException.ThrowIfNull(transcript);
+        if (transcript.MeetId is not Guid meetingId ||
+            _state.Meetings.SingleOrDefault(item => item.Id == meetingId)
+                ?.ActiveTranscriptId != transcript.Id)
+        {
+            return new MeetingAudioResolution(
+                null,
+                MeetingAudioResolutionReason.InactiveTranscript);
+        }
+
+        if (transcript.RecordingId is Guid explicitRecordingId)
+        {
+            if (_state.MeetingRecordings.SingleOrDefault(item =>
+                    item.Id == explicitRecordingId) is { MeetId: Guid ownerMeetingId } &&
+                ownerMeetingId != meetingId)
+            {
+                return new MeetingAudioResolution(
+                    null,
+                    MeetingAudioResolutionReason.DifferentMeeting);
+            }
+
+            return new MeetingAudioResolution(
+                explicitRecordingId,
+                MeetingAudioResolutionReason.Available);
+        }
+
+        var lineage = new List<MeetingTranscript> { transcript };
+        var visited = new HashSet<Guid> { transcript.Id };
+        var current = transcript;
+        while (current.SourceTranscriptId is Guid sourceId && visited.Add(sourceId))
+        {
+            var source = _state.MeetingTranscripts.SingleOrDefault(item =>
+                item.Id == sourceId && item.MeetId == meetingId);
+            if (source is null)
+            {
+                break;
+            }
+
+            lineage.Add(source);
+            if (source.RecordingId is Guid inheritedRecordingId)
+            {
+                if (_state.MeetingRecordings.SingleOrDefault(item =>
+                        item.Id == inheritedRecordingId) is { MeetId: Guid ownerMeetingId } &&
+                    ownerMeetingId != meetingId)
+                {
+                    return new MeetingAudioResolution(
+                        null,
+                        MeetingAudioResolutionReason.DifferentMeeting);
+                }
+
+                return new MeetingAudioResolution(
+                    inheritedRecordingId,
+                    MeetingAudioResolutionReason.Available);
+            }
+
+            current = source;
+        }
+
+        var transcriptIds = lineage.Select(item => item.Id).ToHashSet();
+        var revisionIds = lineage.Select(item => item.RevisionId).ToHashSet();
+        var candidates = new HashSet<Guid>();
+
+        foreach (var analysis in _state.MeetingAnalyses.Where(item =>
+                     (item.MeetId is null || item.MeetId == meetingId) &&
+                     item.RecordingId.HasValue &&
+                     _state.MeetingRecordings.Any(recording =>
+                         recording.Id == item.RecordingId.Value &&
+                         recording.MeetId == meetingId) &&
+                     ((item.TranscriptId.HasValue && transcriptIds.Contains(item.TranscriptId.Value)) ||
+                      (item.TranscriptRevisionId.HasValue && revisionIds.Contains(item.TranscriptRevisionId.Value)))))
+        {
+            candidates.Add(analysis.RecordingId!.Value);
+        }
+
+        foreach (var recording in _state.MeetingRecordings.Where(item =>
+                     item.MeetId == meetingId))
+        {
+            if (lineage.Any(item =>
+                    SameManagedFolder(item.StorageFolderRelativePath, recording.RecordingFolderRelativePath) &&
+                    !string.IsNullOrWhiteSpace(item.NormalizedArtifactFile) &&
+                    string.Equals(item.NormalizedArtifactFile, recording.TranscriptFile,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                candidates.Add(recording.Id);
+                continue;
+            }
+
+            if (TryLoadRecordingTranscript(recording, out var persisted) &&
+                ((persisted.TranscriptId != Guid.Empty && transcriptIds.Contains(persisted.TranscriptId)) ||
+                 (persisted.RevisionId != Guid.Empty && revisionIds.Contains(persisted.RevisionId))))
+            {
+                candidates.Add(recording.Id);
+            }
+        }
+
+        return candidates.Count switch
+        {
+            1 => new MeetingAudioResolution(
+                candidates.Single(),
+                MeetingAudioResolutionReason.Available),
+            > 1 => new MeetingAudioResolution(
+                null,
+                MeetingAudioResolutionReason.AmbiguousLink),
+            _ => new MeetingAudioResolution(
+                null,
+                MeetingAudioResolutionReason.NoDeterministicLink)
+        };
+    }
+
+    private MeetingAudioResolutionReason ResolveRecording(
+        Guid recordingId,
+        out MeetingAudioResource resource)
     {
         resource = default!;
         try
@@ -80,7 +237,7 @@ public sealed class MeetingAudioResourceResolver
                 item.Id == recordingId);
             if (recording is null || recording.MeetId is not Guid meetingId)
             {
-                return false;
+                return MeetingAudioResolutionReason.RecordingMissing;
             }
 
             var meeting = _state.Meetings.SingleOrDefault(item => item.Id == meetingId);
@@ -88,9 +245,17 @@ public sealed class MeetingAudioResourceResolver
                 ? _state.MeetingTranscripts.SingleOrDefault(item =>
                     item.Id == transcriptId && item.MeetId == meetingId)
                 : null;
-            if (activeTranscript?.RecordingId != recordingId)
+            if (activeTranscript is null)
             {
-                return false;
+                return MeetingAudioResolutionReason.InactiveTranscript;
+            }
+
+            var link = ResolveTranscriptLink(activeTranscript);
+            if (link.RecordingId != recordingId)
+            {
+                return link.Reason == MeetingAudioResolutionReason.Available
+                    ? MeetingAudioResolutionReason.DifferentMeeting
+                    : link.Reason;
             }
 
             var expectedRelativeFolder =
@@ -100,7 +265,7 @@ public sealed class MeetingAudioResourceResolver
                     expectedRelativeFolder,
                     StringComparison.OrdinalIgnoreCase))
             {
-                return false;
+                return MeetingAudioResolutionReason.UnsafeManagedFolder;
             }
 
             var mixedTrack = recording.Tracks
@@ -116,13 +281,13 @@ public sealed class MeetingAudioResourceResolver
                     StringComparison.OrdinalIgnoreCase));
             if (mixedTrack is null)
             {
-                return false;
+                return MeetingAudioResolutionReason.MixedTrackUnavailable;
             }
 
             var contentType = ContentTypeFor(mixedTrack.FileName);
             if (contentType is null)
             {
-                return false;
+                return MeetingAudioResolutionReason.UnsupportedFormat;
             }
 
             var path = _storage.ResolveFile(recording, mixedTrack.FileName);
@@ -132,13 +297,13 @@ public sealed class MeetingAudioResourceResolver
                 !File.Exists(path) ||
                 ContainsReparsePoint(meetingsRoot, path))
             {
-                return false;
+                return MeetingAudioResolutionReason.ManagedFileUnavailable;
             }
 
             var length = new FileInfo(path).Length;
             if (length <= 0)
             {
-                return false;
+                return MeetingAudioResolutionReason.ManagedFileUnavailable;
             }
 
             resource = new MeetingAudioResource(
@@ -146,7 +311,7 @@ public sealed class MeetingAudioResourceResolver
                 contentType,
                 length,
                 Math.Max(0, mixedTrack.DurationSeconds));
-            return true;
+            return MeetingAudioResolutionReason.Available;
         }
         catch (Exception ex) when (
             ex is InvalidOperationException or
@@ -154,9 +319,73 @@ public sealed class MeetingAudioResourceResolver
             IOException or
             UnauthorizedAccessException)
         {
+            return MeetingAudioResolutionReason.ManagedFileUnavailable;
+        }
+    }
+
+    private bool TryLoadRecordingTranscript(
+        MeetingRecording recording,
+        out NormalizedTranscript transcript)
+    {
+        transcript = default!;
+        if (string.IsNullOrWhiteSpace(recording.TranscriptFile))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (recording.MeetId is not Guid meetingId ||
+                !string.Equals(
+                    recording.RecordingFolderRelativePath.TrimEnd('/'),
+                    $"meetings/{meetingId:N}/recordings/{recording.Id:N}",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var path = _storage.ResolveFile(recording, recording.TranscriptFile);
+            var meetingsRoot = Path.GetFullPath(_storage.RootDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!path.StartsWith(meetingsRoot, StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(path) ||
+                ContainsReparsePoint(meetingsRoot, path))
+            {
+                return false;
+            }
+
+            transcript = JsonSerializer.Deserialize<NormalizedTranscript>(
+                             File.ReadAllText(path),
+                             _jsonOptions)!;
+            return transcript is not null;
+        }
+        catch (Exception ex) when (
+            ex is InvalidOperationException or
+            InvalidDataException or
+            IOException or
+            UnauthorizedAccessException or
+            JsonException)
+        {
             return false;
         }
     }
+
+    private static bool SameManagedFolder(string left, string right) =>
+        !string.IsNullOrWhiteSpace(left) &&
+        !string.IsNullOrWhiteSpace(right) &&
+        string.Equals(
+            left.Replace('\\', '/').TrimEnd('/'),
+            right.Replace('\\', '/').TrimEnd('/'),
+            StringComparison.OrdinalIgnoreCase);
+
+    private void Report(
+        MeetingTranscript transcript,
+        MeetingAudioResolutionReason reason) =>
+        _diagnostic?.Invoke(
+            $"Meeting transcript audio rejected: reason={reason}; " +
+            $"meetId={transcript.MeetId?.ToString("N") ?? "none"}; " +
+            $"transcriptId={transcript.Id:N}.",
+            null);
 
     private static string? ContentTypeFor(string fileName) =>
         Path.GetExtension(fileName).ToLowerInvariant() switch

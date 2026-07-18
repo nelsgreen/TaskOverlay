@@ -1814,6 +1814,214 @@ internal static class Program
             File.WriteAllBytes(Path.Combine(layout.AbsoluteFolder, "mixed.exe"), new byte[] { 1 });
             Assert(resolver.Describe(edited).Status == WorkspaceTranscriptAudioSnapshot.Unavailable,
                 "Unsupported managed files should remain unavailable without exposing an error.");
+
+            var importedMeeting = new MeetingItem
+            {
+                ProjectId = state.Projects.First().Id,
+                Title = "Legacy imported M4A fixture",
+                StartsAtUtc = DateTimeOffset.UtcNow
+            };
+            state.Meetings.Add(importedMeeting);
+            var importedId = Guid.NewGuid();
+            var importedLayout = storage.CreateLayout(importedMeeting.Id, importedId);
+            const string importedFile = "imported-original.m4a";
+            var importedPath = Path.Combine(importedLayout.AbsoluteFolder, importedFile);
+            File.WriteAllBytes(importedPath, new byte[] { 10, 20, 30, 40, 50, 60, 70, 80 });
+            var legacyTranscript = new MeetingTranscript
+            {
+                MeetId = importedMeeting.Id,
+                Origin = MeetingTranscriptOrigin.Generated,
+                HasTimestamps = true,
+                RevisionId = Guid.NewGuid(),
+                StorageFolderRelativePath = importedLayout.RelativeFolder,
+                NormalizedArtifactFile = "transcript.json"
+            };
+            var importedRecording = new MeetingRecording
+            {
+                Id = importedId,
+                MeetId = importedMeeting.Id,
+                SourceKind = MeetingRecordingSourceKind.Imported,
+                State = MeetingRecordingState.Ready,
+                RecordingFormat = MeetingRecordingFormat.AacM4a,
+                RecordingFolderRelativePath = importedLayout.RelativeFolder,
+                MixedAudioFile = importedFile,
+                ManagedFileName = importedFile,
+                OriginalFileName = "qa-source.m4a",
+                TranscriptFile = "transcript.json",
+                Tracks = new List<MeetingRecordingTrackArtifact>
+                {
+                    new()
+                    {
+                        Kind = MeetingRecordingTrackKind.Mixed,
+                        FileName = importedFile,
+                        DurationSeconds = 32.25,
+                        Bytes = 8,
+                        HasAudioFrames = true,
+                        FinalizationState = MeetingRecordingFinalizationState.Finalized,
+                        ValidationState = MeetingRecordingValidationState.Valid
+                    }
+                }
+            };
+            state.MeetingRecordings.Add(importedRecording);
+            state.MeetingTranscripts.Add(legacyTranscript);
+            importedMeeting.ActiveTranscriptId = legacyTranscript.Id;
+            storage.WriteJsonAtomic(
+                Path.Combine(importedLayout.AbsoluteFolder, importedRecording.TranscriptFile),
+                new NormalizedTranscript
+                {
+                    TranscriptId = legacyTranscript.Id,
+                    RevisionId = legacyTranscript.RevisionId,
+                    RecordingId = importedRecording.Id,
+                    HasTimestamps = true
+                });
+
+            var diagnostics = new List<string>();
+            var compatibilityResolver = new MeetingAudioResourceResolver(
+                state,
+                directory,
+                (message, _) => diagnostics.Add(message));
+            var importedAudio = compatibilityResolver.Describe(legacyTranscript);
+            Assert(importedAudio.Status == WorkspaceTranscriptAudioSnapshot.Available &&
+                   importedAudio.Url is not null &&
+                   compatibilityResolver.TryResolveRequest(importedAudio.Url, out var importedResource) &&
+                   importedResource.FilePath == importedPath &&
+                   importedResource.Length == 8 &&
+                   MeetingAudioByteRange.TryParse("bytes=2-5", importedResource.Length, out var mediaRange) &&
+                   mediaRange.Start == 2 && mediaRange.Length == 4,
+                "A legacy generated transcript must resolve its finalized imported M4A through persisted recording metadata and support byte ranges.");
+            var importedSnapshot = WorkspaceSnapshotFactory.Create(
+                state,
+                meetingAudioLoader: compatibilityResolver.Describe);
+            var importedSnapshotJson = JsonSerializer.Serialize(
+                importedSnapshot.MeetingTranscripts.Single(item => item.Id == legacyTranscript.Id.ToString("N")));
+            Assert(!importedSnapshotJson.Contains(directory, StringComparison.OrdinalIgnoreCase) &&
+                   !importedSnapshotJson.Contains(importedPath, StringComparison.OrdinalIgnoreCase),
+                "Meeting audio snapshots must never expose managed filesystem paths.");
+
+            var legacyEdit = new MeetingTranscript
+            {
+                MeetId = importedMeeting.Id,
+                Origin = MeetingTranscriptOrigin.UserEdited,
+                SourceTranscriptId = legacyTranscript.Id,
+                ParentRevisionId = legacyTranscript.RevisionId,
+                RevisionId = Guid.NewGuid(),
+                HasTimestamps = true
+            };
+            state.MeetingTranscripts.Add(legacyEdit);
+            importedMeeting.ActiveTranscriptId = legacyEdit.Id;
+            Assert(compatibilityResolver.ResolveTranscriptLink(legacyEdit).RecordingId ==
+                       importedRecording.Id &&
+                   compatibilityResolver.Describe(legacyEdit).Status ==
+                       WorkspaceTranscriptAudioSnapshot.Available,
+                "An edited revision of a legacy generated transcript must retain its deterministic reverse recording association.");
+
+            var linkedAncestor = new MeetingTranscript
+            {
+                MeetId = importedMeeting.Id,
+                RecordingId = importedRecording.Id,
+                Origin = MeetingTranscriptOrigin.Generated,
+                RevisionId = Guid.NewGuid(),
+                HasTimestamps = true
+            };
+            var lineageRevision = new MeetingTranscript
+            {
+                MeetId = importedMeeting.Id,
+                Origin = MeetingTranscriptOrigin.UserEdited,
+                SourceTranscriptId = linkedAncestor.Id,
+                ParentRevisionId = linkedAncestor.RevisionId,
+                RevisionId = Guid.NewGuid(),
+                HasTimestamps = true
+            };
+            state.MeetingTranscripts.Add(linkedAncestor);
+            state.MeetingTranscripts.Add(lineageRevision);
+            importedMeeting.ActiveTranscriptId = lineageRevision.Id;
+            Assert(compatibilityResolver.ResolveTranscriptLink(lineageRevision).RecordingId == importedRecording.Id &&
+                   compatibilityResolver.Describe(lineageRevision).Status == WorkspaceTranscriptAudioSnapshot.Available,
+                "An edited revision must inherit an explicit recording link from its transcript ancestry.");
+
+            importedMeeting.ActiveTranscriptId = legacyTranscript.Id;
+            var ambiguousId = Guid.NewGuid();
+            var ambiguousLayout = storage.CreateLayout(importedMeeting.Id, ambiguousId);
+            File.WriteAllBytes(Path.Combine(ambiguousLayout.AbsoluteFolder, importedFile), new byte[] { 1 });
+            var ambiguousRecording = new MeetingRecording
+            {
+                Id = ambiguousId,
+                MeetId = importedMeeting.Id,
+                SourceKind = MeetingRecordingSourceKind.Imported,
+                State = MeetingRecordingState.Ready,
+                RecordingFormat = MeetingRecordingFormat.AacM4a,
+                RecordingFolderRelativePath = ambiguousLayout.RelativeFolder,
+                MixedAudioFile = importedFile,
+                TranscriptFile = "transcript.json",
+                Tracks = importedRecording.Tracks.Select(track => new MeetingRecordingTrackArtifact
+                {
+                    Kind = track.Kind,
+                    FileName = track.FileName,
+                    DurationSeconds = track.DurationSeconds,
+                    Bytes = 1,
+                    HasAudioFrames = true,
+                    FinalizationState = track.FinalizationState,
+                    ValidationState = track.ValidationState
+                }).ToList()
+            };
+            state.MeetingRecordings.Add(ambiguousRecording);
+            storage.WriteJsonAtomic(
+                Path.Combine(ambiguousLayout.AbsoluteFolder, ambiguousRecording.TranscriptFile),
+                new NormalizedTranscript
+                {
+                    TranscriptId = legacyTranscript.Id,
+                    RevisionId = legacyTranscript.RevisionId,
+                    RecordingId = ambiguousRecording.Id
+                });
+            Assert(compatibilityResolver.ResolveTranscriptLink(legacyTranscript).Reason ==
+                       MeetingAudioResolutionReason.AmbiguousLink &&
+                   compatibilityResolver.Describe(legacyTranscript).Status ==
+                       WorkspaceTranscriptAudioSnapshot.Unavailable &&
+                   diagnostics.Last().Contains("reason=AmbiguousLink", StringComparison.Ordinal) &&
+                   !diagnostics.Last().Contains(directory, StringComparison.OrdinalIgnoreCase),
+                "Multiple persisted recording matches must remain unavailable with a path-free diagnostic reason.");
+            state.MeetingRecordings.Remove(ambiguousRecording);
+
+            File.Delete(importedPath);
+            Assert(compatibilityResolver.Describe(legacyTranscript).Status ==
+                       WorkspaceTranscriptAudioSnapshot.Unavailable &&
+                   diagnostics.Last().Contains(
+                       "reason=ManagedFileUnavailable",
+                       StringComparison.Ordinal),
+                "A deterministically linked imported recording with a missing managed file must remain unavailable.");
+            File.WriteAllBytes(importedPath, new byte[] { 1 });
+            importedRecording.MixedAudioFile = "imported-original.flac";
+            importedRecording.Tracks[0].FileName = importedRecording.MixedAudioFile;
+            File.WriteAllBytes(
+                Path.Combine(importedLayout.AbsoluteFolder, importedRecording.MixedAudioFile),
+                new byte[] { 1 });
+            Assert(compatibilityResolver.Describe(legacyTranscript).Status ==
+                       WorkspaceTranscriptAudioSnapshot.Unavailable &&
+                   diagnostics.Last().Contains(
+                       "reason=UnsupportedFormat",
+                       StringComparison.Ordinal),
+                "An unsupported imported codec must remain unavailable.");
+
+            var unrelatedMeeting = new MeetingItem
+            {
+                ProjectId = state.Projects.First().Id,
+                Title = "Unrelated meeting",
+                StartsAtUtc = DateTimeOffset.UtcNow
+            };
+            state.Meetings.Add(unrelatedMeeting);
+            var unrelatedTranscript = new MeetingTranscript
+            {
+                MeetId = unrelatedMeeting.Id,
+                RecordingId = importedRecording.Id,
+                Origin = MeetingTranscriptOrigin.Generated
+            };
+            state.MeetingTranscripts.Add(unrelatedTranscript);
+            unrelatedMeeting.ActiveTranscriptId = unrelatedTranscript.Id;
+            Assert(compatibilityResolver.Describe(unrelatedTranscript).Status ==
+                       WorkspaceTranscriptAudioSnapshot.Unavailable &&
+                   compatibilityResolver.ResolveTranscriptLink(unrelatedTranscript).Reason ==
+                       MeetingAudioResolutionReason.DifferentMeeting,
+                "An explicit recording link cannot authorize audio owned by another MEET.");
             return Task.CompletedTask;
         }
         finally
