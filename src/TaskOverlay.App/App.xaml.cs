@@ -278,7 +278,7 @@ public partial class App : System.Windows.Application
         _trayApplicationIcon = LoadApplicationIcon();
         _trayIcon = new Forms.NotifyIcon
         {
-            Text = "TaskOverlay v2 prototype",
+            Text = "TaskOverlay",
             Icon = _trayApplicationIcon,
             ContextMenuStrip = _trayMenu,
             Visible = true

@@ -3,6 +3,9 @@
 This roadmap is intentionally practical. It orders likely work without turning
 the backlog into a full release plan.
 
+The WPF application is the sole TaskOverlay product. Its source lives at the
+repository root and portable downloads use `TaskOverlay_Windows_Portable`.
+
 ## Immediate
 
 1. Manually validate the MEET editable-transcript/speaker-identity artifact

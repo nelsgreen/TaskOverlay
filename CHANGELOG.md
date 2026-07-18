@@ -208,7 +208,7 @@
 
 ### Added
 
-- Added an isolated Windows-only .NET 8 WPF prototype under `v2/`.
+- Added the Windows-only .NET 8 WPF application.
 - Added a transparent passive overlay with three static tasks and hover-active
   background behavior.
 - Added a 500 ms return to passive mode.
@@ -233,7 +233,7 @@ Architecture-only refactor.
 - Added Windows build script.
 - Added GitHub Actions workflow.
 - Added README and architecture notes.
-- Preserved original v13 source in `legacy/main_v13.go`.
+- Preserved original v13 source in repository history.
 
 ### Not changed
 

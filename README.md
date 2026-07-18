@@ -1,219 +1,48 @@
 # TaskOverlay
 
-Portable Windows 10/11 desktop overlay for editable tasks.
-
-## Status
-
-WPF v2 is the active product. All new development happens in `v2/`.
-
-Go v1 (`cmd/taskoverlay/`) is a legacy prototype. It is no longer built or distributed.
-Do not use Go v1 for testing or reporting issues.
-
-## Windows WPF v2
-
-A Windows-only WPF app lives in `v2/`. It validates transparent
-overlay rendering, hover activation, tray lifecycle, a separate settings window,
-and practical DPI-aware monitor placement.
-
-Build and run:
-
-```powershell
-dotnet restore .\v2\TaskOverlay.sln --configfile .\v2\NuGet.Config
-dotnet build .\v2\TaskOverlay.sln --configuration Release --no-restore
-dotnet run --project .\v2\tests\TaskOverlay.Core.Tests\TaskOverlay.Core.Tests.csproj --configuration Release --no-build
-dotnet run --project .\v2\src\TaskOverlay.App\TaskOverlay.App.csproj
-```
-
-V2 stores its independent local state at
-`%APPDATA%\TaskOverlayV2\state.json`. On first run, the three prototype tasks are
-created as seed data. Click the marker to complete a task. Click the task text
-to mark it in work, or right-click a row for Edit, description visibility,
-in-work, completion, and delete actions. Completed tasks are saved and removed
-from the overlay. The Go v1 state is not read or modified.
-
-The Settings window provides two in-work modes. **Multiple tasks** independently
-toggles focus on each text click and is the default. **Single task** focuses the
-clicked task and clears focus from the others. In-work rows are highlighted.
-Right-click **Edit** opens a separate details window for title, description,
-project, Todo/In work/Waiting/Done status, waiting-for person, reminder time,
-repeat preset, and deletion. Save persists changes; Cancel discards them.
-Descriptions remain hidden in passive mode and may appear in active mode for
-expanded or in-work tasks.
-
-Use **Quick Add task** in the tray or `Ctrl+Alt+Q` for daily capture. Choose a
-project, Todo/Waiting/In work status, reminder preset, optional waiting-for
-person, and description. First startup seeds KazChess (green), PLHIV (orange),
-TaskOverlay (purple), and Personal (gray). Overlay rows retain a compact colored
-project stripe/badge plus explicit `WAIT` and `DUE` badges.
-
-Reminder presets cover 30 minutes, 1 hour, 2 hours, tomorrow morning, every 2
-hours, and daily. A 30-second in-app timer activates due tasks, records the last
-reminder, advances repeating schedules, sorts due tasks toward the top, and
-reveals the overlay. Use task context actions to snooze 30 minutes/1 hour or
-mark **Still waiting**. Windows toast notifications are deferred; reminders are
-in-app for this MVP.
-
-V2 provides three clipboard intake modes through the tray and fixed global
-hotkeys:
-
-- `Ctrl+Alt+A` creates one task for every non-empty clipboard line.
-- `Ctrl+Alt+S` creates one task and collapses clipboard lines into its title.
-- `Ctrl+Alt+D` creates one task whose first non-empty line is the title and
-  remaining text is the description.
-- `Ctrl+Alt+T` shows or hides the overlay.
-- `Ctrl+Alt+Q` opens Quick Add.
-
-Created tasks are saved together in one atomic state update and the overlay is
-shown. Clipboard tasks use the last selected project, then Personal, with Todo
-status and no reminder. Empty clipboard text is ignored and logged.
-
-Choose one persisted **Overlay mode** from the tray: **Auto quest tracker**
-shows the passive task list and expands on hover, **Collapsed handle** rests as
-only the compact handle, and **Pinned expanded** keeps the active panel open.
-Only one mode can be active. `Ctrl+Alt+T` still shows or hides the entire overlay.
-
-The handle remains visible in every mode. Left-clicking it switches between
-collapsed-handle and pinned-expanded behavior; right-clicking opens the same
-three mode choices. It uses yellow, blue, and green styling for collapsed,
-expanded, and pinned presentation.
-
-Drag the active panel or handle to move it. The handle captures the pointer and
-uses a five-DIP threshold, so dragging does not accidentally change mode. The window
-snaps near any edge of the current monitor work area and keeps expanded content
-on-screen. The collapsed strip has its own saved anchor, so temporary left/up
-adjustment during expansion does not move a right/bottom snapped strip. Long
-task titles and visible descriptions wrap within the monitor-safe overlay width.
-
-The overlay stays expanded while Task Details, Settings, a task context menu, or
-a confirmation/message dialog is open, and while a drag is in progress. After
-the interaction closes, normal 500 ms return behavior resumes unless the mode
-is **Pinned expanded**.
-
-V2 runtime and crash logs are stored under
-`%APPDATA%\TaskOverlayV2\logs`. Unhandled exceptions create a dedicated
-`crash-<timestamp>.log` containing the exception chain, stack traces, state path,
-shutdown status, and current overlay mode.
+TaskOverlay is a local Windows 10/11 WPF desktop application for task and
+meeting working memory. The overlay is the attention layer; Workspace and Tree
+remain the primary management surfaces.
 
 ## Download and run
 
-Go to the Actions tab and open the latest successful build.
-Download TaskOverlayV2_WPF_FrameworkDependent.
-Extract the archive.
-Run TaskOverlay.V2.exe.
+Download the `TaskOverlay_Windows_Portable` artifact from a successful GitHub
+Actions build and extract the ZIP. Run `TaskOverlay.exe` from its top-level
+`TaskOverlay` folder. No installer is required.
 
-Requirement: .NET Desktop Runtime 8.0 must be installed. If you are not sure whether it is installed, run:
+TaskOverlay requires the .NET Desktop Runtime 8 and the Microsoft Edge WebView2
+Runtime. The app is local-first and uses the existing compatibility state path:
+`%APPDATA%\TaskOverlayV2\state.json`. Logs remain in
+`%APPDATA%\TaskOverlayV2\logs`.
+
+## Build on Windows
 
 ```powershell
-dotnet --list-runtimes
+pnpm --dir .\workspace-ui install --frozen-lockfile
+pnpm --dir .\workspace-ui build
+dotnet restore .\TaskOverlay.sln --configfile .\NuGet.Config
+dotnet build .\TaskOverlay.sln --configuration Release --no-restore
+dotnet run --project .\tests\TaskOverlay.Core.Tests\TaskOverlay.Core.Tests.csproj --configuration Release --no-build
+dotnet run --project .\tests\TaskOverlay.App.Tests\TaskOverlay.App.Tests.csproj --configuration Release --no-build
+dotnet publish .\src\TaskOverlay.App\TaskOverlay.App.csproj --configuration Release --self-contained false -r win-x64 --output .\artifacts\TaskOverlay
 ```
 
-Look for Microsoft.WindowsDesktop.App 8.0.x in the output.
-
-Note: If you see TaskOverlay.exe instead of TaskOverlay.V2.exe, you downloaded the wrong artifact or an old release. Do not use it.
-
-See `docs/V2_ARCHITECTURE.md` for scope and limitations.
-
-The app is intentionally local-only:
-- no installer required;
-- no server;
-- no internet dependency;
-- state is stored in `%APPDATA%\TaskOverlay\state.json`;
-- logs are stored in `%APPDATA%\TaskOverlay\logs`.
-
-## Current behavior preserved from v13
-
-- editable task title;
-- task description;
-- subtasks;
-- done status;
-- completed section;
-- priority;
-- in-work marker;
-- due time / blink notification;
-- local JSON state;
-- diagnostics export;
-- topmost overlay;
-- resize;
-- visual settings.
+The publish output is a framework-dependent single-file executable plus the
+external `resources\WorkspaceWeb` static bundle. `README.txt` is added by the
+portable packaging step in CI.
 
 ## Repository layout
 
 ```text
 TaskOverlay/
-  cmd/taskoverlay/       Windows app source
-  assets/                Icon and static assets
-  build/                 Local build scripts and generated artifacts
-  docs/                  Architecture notes
-  legacy/                Original v13 single-file source for comparison
-  .github/workflows/     GitHub Actions build workflow
+  TaskOverlay.sln
+  NuGet.Config
+  src/             WPF app and Core library
+  tests/           Core and App test executables
+  workspace-ui/    React/Next static Workspace
+  docs/            product and architecture documentation
+  .github/         CI and portable packaging
 ```
 
-## Build locally on Windows
-
-Legacy (Go v1 prototype - not maintained)
-
-Requirements:
-- Go 1.23 or newer;
-- Windows 10/11.
-
-Run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build\build_windows.ps1
-```
-
-Output:
-
-```text
-build\dist\TaskOverlay.exe
-build\dist\TaskOverlay_portable.zip
-```
-
-## Cross-build from Linux/macOS
-
-Legacy (Go v1 prototype - not maintained)
-
-```bash
-GOOS=windows GOARCH=amd64 go build -ldflags="-H windowsgui" -o build/TaskOverlay.exe ./cmd/taskoverlay
-```
-
-## Release policy
-
-Legacy (Go v1 prototype - not maintained)
-
-Use semantic tags:
-
-```text
-v13.1.0
-v14.0.0
-```
-
-Recommended release artifact:
-
-```text
-TaskOverlay_portable.zip
-```
-
-The portable ZIP should contain:
-
-```text
-TaskOverlay.exe
-README.txt
-CHANGELOG.txt
-```
-
-## State compatibility
-
-The refactor does not change the state path:
-
-```text
-%APPDATA%\TaskOverlay\state.json
-```
-
-The original v13 source is preserved in:
-
-```text
-legacy/main_v13.go
-```
-
-This allows behavior comparison during later changes.
+`AppState` remains the source of truth. Production React code only communicates
+through the WebView2 bridge and never reads or writes `state.json` directly.

@@ -77,6 +77,7 @@ public partial class WorkspaceWindow : Window
         _initialized = true;
         var workspaceDirectory = Path.Combine(
             AppContext.BaseDirectory,
+            "resources",
             "WorkspaceWeb");
         var indexPath = Path.Combine(workspaceDirectory, "index.html");
         if (!File.Exists(indexPath))

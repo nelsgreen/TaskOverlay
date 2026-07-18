@@ -11,8 +11,7 @@ item.
 - TaskOverlay is a personal Windows-first working-memory system. It should
   provide a practical interface to the user's external working memory, not just
   a place to store tasks or context snippets.
-- WPF v2 is the active product.
-- Go v1 is legacy.
+- WPF is the sole TaskOverlay product; the retired Go prototype is removed.
 - Workspace is the main management surface.
 - Overlay is the attention layer, not the full task manager.
 - Tree is the master structure.
@@ -26,11 +25,16 @@ item.
 
 ## Names And Artifacts
 
-- Correct solution: `v2/TaskOverlay.sln`.
-- Correct executable: `TaskOverlay.V2.exe`.
-- Correct development artifact: `TaskOverlayV2_WPF_FrameworkDependent`.
+- Correct solution: `TaskOverlay.sln`.
+- Correct executable: `TaskOverlay.exe`.
+- Correct development artifact: `TaskOverlay_Windows_Portable`.
 - Runtime state: `%APPDATA%\TaskOverlayV2\state.json`.
 - Logs: `%APPDATA%\TaskOverlayV2\logs`.
+- The source tree lives at repository root. User-facing names do not use V2.
+- The `%APPDATA%\TaskOverlayV2` state and log location is intentionally retained
+  temporarily for compatibility; this PR does not migrate it.
+- Portable distribution is framework-dependent single-file at the package root,
+  with Workspace static resources in `resources/WorkspaceWeb`.
 - Use REMIND, not DUE.
 - Use FOCUS, not IN WORK.
 - Use Focus, not Acknowledge.
@@ -439,7 +443,7 @@ item.
   (Project/Task/MEET). If the Clipboard API throws or is unavailable, the
   text stays selected in the preview and the modal shows "Copy failed -
   select text manually" rather than failing silently.
-- No JS test runner exists in `v2/workspace-ui` (still true as of the
+- No JS test runner exists in `workspace-ui` (still true as of the
   ContextHUB linked task picker PR #59); consistent with that precedent, no
   new test framework was introduced. The builder was verified with a
   throwaway manual script (compiled via `tsc`, run with plain `node` against
