@@ -477,6 +477,8 @@ public sealed class MeetingTranscriptService
             OriginalFileName = parent.OriginalFileName,
             SourceTranscriptId = parent.Id,
             ParentRevisionId = parent.RevisionId,
+            SourceAudioStartSeconds = parent.SourceAudioStartSeconds,
+            SourceAudioEndSeconds = parent.SourceAudioEndSeconds,
             HasTimestamps = normalized.HasTimestamps,
             HasSpeakerLabels = finalSpeakers.Count > 0,
             Speakers = finalSpeakers.Select(CloneSpeaker).ToList(),

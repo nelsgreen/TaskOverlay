@@ -1452,6 +1452,13 @@ internal static class Program
                        fixture.State.MeetingTranscripts.Single().Id) == recording.Id &&
                    fixture.Store.Load().MeetingTranscripts.Single().RecordingId == recording.Id,
                 "The connected transcription path should forward the selected import range.");
+            var rangedTranscript = fixture.State.MeetingTranscripts.Single();
+            recording.ProcessFromSeconds = 0;
+            recording.ProcessUntilSeconds = 0.2;
+            Assert(Math.Abs(rangedTranscript.SourceAudioStartSeconds!.Value - 0.1) < 0.001 &&
+                   Math.Abs(rangedTranscript.SourceAudioEndSeconds!.Value - 0.4) < 0.001 &&
+                   Math.Abs(fixture.Store.Load().MeetingTranscripts.Single().SourceAudioEndSeconds!.Value - 0.4) < 0.001,
+                "A generated transcript must persist its applied range independently of later recording range edits.");
 
             var processingDirectory = Path.Combine(importDirectory, "range-output");
             Directory.CreateDirectory(processingDirectory);
@@ -2382,7 +2389,7 @@ internal static class Program
         using var service = new MeetingNativeAudioPlaybackService(path =>
         {
             sourcePaths.Add(path);
-            var backend = new FakeNativeAudioBackend(20);
+            var backend = new FakeNativeAudioBackend(path.Contains("second", StringComparison.Ordinal) ? 300 : 20);
             created.Add(backend);
             return backend;
         });
@@ -2425,7 +2432,22 @@ internal static class Program
                created.Count == 2 && created[0].Disposed &&
                !service.Pause(firstRecordingId, firstTranscriptId),
             "Starting another transcript must dispose the prior backend and reject stale ownership commands.");
-        created[1].RaiseFailed();
+        var boundedTranscriptId = Guid.NewGuid();
+        var bounded = second with { DurationSeconds = 300 };
+        Assert(service.Play(bounded, boundedTranscriptId, 0, new MeetingTranscriptAudioRange(180, 240)) &&
+               created[2].PositionSeconds == 180 &&
+               service.Snapshot() is { PositionSeconds: 0, DurationSeconds: 60 },
+            "A bounded transcript must map relative zero to its persisted source start.");
+        Assert(service.Seek(secondRecordingId, boundedTranscriptId, 30) &&
+               created[2].PositionSeconds == 210 &&
+               service.Snapshot().PositionSeconds == 30,
+            "A bounded seek must map transcript-relative seconds to the source file.");
+        created[2].PositionSeconds = 240;
+        Assert(service.Snapshot() is { State: MeetingNativeAudioPlaybackState.Stopped, PositionSeconds: 60, DurationSeconds: 60 } &&
+               service.Play(bounded, boundedTranscriptId, 60, new MeetingTranscriptAudioRange(180, 240)) &&
+               created[2].PositionSeconds == 180,
+            "A bounded session must stop at its source end and restart from relative zero.");
+        created[2].RaiseFailed();
         Assert(service.Snapshot() is
                {
                    State: MeetingNativeAudioPlaybackState.Failed,
@@ -2435,7 +2457,7 @@ internal static class Program
         var safeEvent = JsonSerializer.Serialize(service.Snapshot());
         Assert(!safeEvent.Contains("synthetic-private", StringComparison.OrdinalIgnoreCase) &&
                !safeEvent.Contains(".m4a", StringComparison.OrdinalIgnoreCase) &&
-               sourcePaths.Count == 2,
+               sourcePaths.Count == 3,
             "Native playback events must contain only IDs, state, position, duration, and a safe failure.");
         return Task.CompletedTask;
     }

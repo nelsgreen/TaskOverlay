@@ -9,6 +9,7 @@ import {
   isNativeAudioPlaybackEvent,
   postNativeAudioPlaybackCommand,
   projectNativeTranscriptPlayback,
+  projectTranscriptScreenshots,
   probeTranscriptAudioEndpoint,
   resolveSegmentIntervals,
   selectTranscriptPlaybackMode,
@@ -300,6 +301,19 @@ test("native events project position, playback state, active segment, and speake
   }, segments, 14)
   assert.equal(failed.failureReason, "Native playback unavailable")
   assert.ok(!JSON.stringify(failed).includes("\\"))
+})
+
+test("ranged transcript screenshots are filtered and projected to transcript-relative offsets", () => {
+  const projected = projectTranscriptScreenshots([
+    { id: "before", recordingId: "r", offsetFromRecordingStartSeconds: 179 },
+    { id: "inside", recordingId: "r", offsetFromRecordingStartSeconds: 210 },
+    { id: "after", recordingId: "r", offsetFromRecordingStartSeconds: 241 },
+    { id: "other", recordingId: "other", offsetFromRecordingStartSeconds: 210 },
+  ], "r", 180, 240)
+  assert.deepEqual(projected, [{
+    id: "inside", recordingId: "r", offsetFromRecordingStartSeconds: 210,
+    transcriptOffsetSeconds: 30,
+  }])
 })
 
 test("native fallback commands and events carry only IDs, seconds, and safe state", () => {

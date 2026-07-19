@@ -182,7 +182,9 @@ public sealed record WorkspaceTranscriptAudioSnapshot(
     string? Url,
     double DurationSeconds,
     string? UnavailableReason = null,
-    Guid? RecordingId = null)
+    Guid? RecordingId = null,
+    double? StartSeconds = null,
+    double? EndSeconds = null)
 {
     public const string NotLinked = "NotLinked";
     public const string Available = "Available";

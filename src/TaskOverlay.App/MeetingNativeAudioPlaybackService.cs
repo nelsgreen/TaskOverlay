@@ -1,5 +1,6 @@
 using System;
 using NAudio.Wave;
+using TaskOverlay.Core;
 
 namespace TaskOverlay.App;
 
@@ -37,6 +38,8 @@ public sealed class MeetingNativeAudioPlaybackService : IDisposable
     private IMeetingNativeAudioBackend? _backend;
     private Guid? _recordingId;
     private Guid? _transcriptId;
+    private double _sourceStartSeconds;
+    private double _sourceEndSeconds;
     private MeetingNativeAudioPlaybackState _state = MeetingNativeAudioPlaybackState.Stopped;
     private string? _failureReason;
 
@@ -49,7 +52,8 @@ public sealed class MeetingNativeAudioPlaybackService : IDisposable
     public bool Play(
         MeetingAudioResource resource,
         Guid transcriptId,
-        double positionSeconds)
+        double positionSeconds,
+        MeetingTranscriptAudioRange sourceRange = default)
     {
         ArgumentNullException.ThrowIfNull(resource);
         lock (_sync)
@@ -67,7 +71,22 @@ public sealed class MeetingNativeAudioPlaybackService : IDisposable
                     _transcriptId = transcriptId;
                 }
 
-                _backend.PositionSeconds = ClampPosition(positionSeconds, _backend.DurationSeconds);
+                sourceRange = sourceRange.SourceEndSeconds > sourceRange.SourceStartSeconds
+                    ? sourceRange
+                    : MeetingTranscriptAudioRange.Full(_backend.DurationSeconds);
+                _sourceStartSeconds = Math.Clamp(sourceRange.SourceStartSeconds, 0, _backend.DurationSeconds);
+                _sourceEndSeconds = Math.Clamp(sourceRange.SourceEndSeconds, _sourceStartSeconds, _backend.DurationSeconds);
+                if (_sourceEndSeconds <= _sourceStartSeconds)
+                {
+                    _sourceStartSeconds = 0;
+                    _sourceEndSeconds = _backend.DurationSeconds;
+                }
+                var relativePosition = ClampRelativePosition(positionSeconds);
+                if (relativePosition >= RangeDurationSeconds)
+                {
+                    relativePosition = 0;
+                }
+                _backend.PositionSeconds = _sourceStartSeconds + relativePosition;
                 _backend.Play();
                 _state = MeetingNativeAudioPlaybackState.Playing;
                 _failureReason = null;
@@ -115,7 +134,7 @@ public sealed class MeetingNativeAudioPlaybackService : IDisposable
 
             try
             {
-                _backend.PositionSeconds = ClampPosition(positionSeconds, _backend.DurationSeconds);
+                _backend.PositionSeconds = _sourceStartSeconds + ClampRelativePosition(positionSeconds);
                 return true;
             }
             catch
@@ -141,6 +160,8 @@ public sealed class MeetingNativeAudioPlaybackService : IDisposable
             DisposeBackend();
             _recordingId = null;
             _transcriptId = null;
+            _sourceStartSeconds = 0;
+            _sourceEndSeconds = 0;
             _state = MeetingNativeAudioPlaybackState.Stopped;
             _failureReason = null;
         }
@@ -156,8 +177,15 @@ public sealed class MeetingNativeAudioPlaybackService : IDisposable
             {
                 try
                 {
-                    position = Math.Max(0, _backend.PositionSeconds);
-                    duration = Math.Max(0, _backend.DurationSeconds);
+                    duration = RangeDurationSeconds;
+                    var sourcePosition = Math.Max(0, _backend.PositionSeconds);
+                    if (sourcePosition >= _sourceEndSeconds && _state == MeetingNativeAudioPlaybackState.Playing)
+                    {
+                        _backend.Pause();
+                        _state = MeetingNativeAudioPlaybackState.Stopped;
+                        sourcePosition = _sourceEndSeconds;
+                    }
+                    position = Math.Clamp(sourcePosition - _sourceStartSeconds, 0, duration);
                 }
                 catch
                 {
@@ -225,6 +253,13 @@ public sealed class MeetingNativeAudioPlaybackService : IDisposable
     private static double ClampPosition(double seconds, double duration) =>
         double.IsFinite(seconds)
             ? Math.Clamp(seconds, 0, Math.Max(0, duration))
+            : 0;
+
+    private double RangeDurationSeconds => Math.Max(0, _sourceEndSeconds - _sourceStartSeconds);
+
+    private double ClampRelativePosition(double seconds) =>
+        double.IsFinite(seconds)
+            ? Math.Clamp(seconds, 0, RangeDurationSeconds)
             : 0;
 }
 

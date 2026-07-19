@@ -9,9 +9,9 @@ import {
   mediaPlaybackFailureLabel,
   postNativeAudioPlaybackCommand,
   projectNativeTranscriptPlayback,
+  projectTranscriptScreenshots,
   probeTranscriptAudioEndpoint,
   selectTranscriptPlaybackMode,
-  seekTranscriptSegment,
   shouldAutoScrollTranscript,
   transcriptAudioUnavailableLabel,
   transcriptSpeakerLabel,
@@ -1062,6 +1062,9 @@ function TranscriptPlayback({
     })
   const audioAvailable = (playbackMode === "Native" || playbackMode === "Browser") &&
     !runtimeUnavailable
+  const browserSourceStart = transcript.audio.startSeconds ?? 0
+  const browserSourceEnd = transcript.audio.endSeconds ??
+    browserSourceStart + transcript.audio.durationSeconds
 
   useEffect(() => {
     setPlaybackEnvironment(window.chrome?.webview ? "Connected" : "Browser")
@@ -1152,11 +1155,14 @@ function TranscriptPlayback({
   const updateActiveSegment = () => {
     const player = audioRef.current
     if (!player) return
-    const duration = Number.isFinite(player.duration) ? player.duration : audioDuration
+    if (player.currentTime >= browserSourceEnd) {
+      player.pause()
+      player.currentTime = browserSourceEnd
+    }
     setActiveSegmentIndex(activeTranscriptSegmentIndex(
       transcript.segments,
-      player.currentTime,
-      duration,
+      Math.max(0, player.currentTime - browserSourceStart),
+      audioDuration,
     ))
   }
 
@@ -1177,7 +1183,8 @@ function TranscriptPlayback({
     const player = audioRef.current
     if (!player) return
     try {
-      await seekTranscriptSegment(player, startSeconds)
+      player.currentTime = browserSourceStart + startSeconds
+      await player.play()
       updateActiveSegment()
     } catch {
       setRuntimeUnavailable("Unknown playback failure")
@@ -1202,9 +1209,7 @@ function TranscriptPlayback({
               aria-label="Transcript recording"
               className="h-8 min-w-0 flex-1"
               onLoadedMetadata={(event) => {
-                if (Number.isFinite(event.currentTarget.duration)) {
-                  setAudioDuration(event.currentTarget.duration)
-                }
+                event.currentTarget.currentTime = browserSourceStart
                 updateActiveSegment()
               }}
               onTimeUpdate={updateActiveSegment}
@@ -1340,9 +1345,12 @@ function TranscriptContent({
       : null
     return speaker?.isCurrentUser ? "You" : segment.speakerName
   }
-  const inlineScreenshots = screenshots.filter((screenshot) =>
-    screenshot.recordingId === transcript.recordingId &&
-    screenshot.offsetFromRecordingStartSeconds != null)
+  const inlineScreenshots = projectTranscriptScreenshots(
+    screenshots,
+    transcript.recordingId,
+    transcript.audio.startSeconds ?? 0,
+    transcript.audio.endSeconds ?? transcript.audio.durationSeconds,
+  )
   const rows = [
     ...transcript.segments.map((segment) => ({
       kind: "segment" as const,
@@ -1353,7 +1361,7 @@ function TranscriptContent({
     ...inlineScreenshots.map((screenshot) => ({
       kind: "screenshot" as const,
       key: `screenshot:${screenshot.id}`,
-      at: screenshot.offsetFromRecordingStartSeconds ?? Number.MAX_SAFE_INTEGER,
+      at: screenshot.transcriptOffsetSeconds,
       screenshot,
     })),
   ].sort((left, right) => left.at - right.at)

@@ -421,7 +421,13 @@ public partial class WorkspaceWindow : Window
         return activeTranscript is not null &&
                _meetingAudioResolver.ResolveTranscriptLink(activeTranscript).RecordingId == recordingId &&
                _meetingAudioResolver.TryResolveRecording(recordingId, out var resource) &&
-               _nativeAudioPlayback.Play(resource, transcriptId, positionSeconds);
+               _nativeAudioPlayback.Play(
+                   resource,
+                   transcriptId,
+                   positionSeconds,
+                   _meetingAudioResolver.ResolveTranscriptAudioRange(
+                       activeTranscript,
+                       resource.DurationSeconds));
     }
 
     private bool StopNativeAudio()

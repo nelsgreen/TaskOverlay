@@ -483,6 +483,12 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             Persist(recording);
             var mixedBitrate = recording.Tracks.FirstOrDefault(track =>
                 track.Kind == MeetingRecordingTrackKind.Mixed)?.Bitrate ?? 96_000;
+            var sourceDuration = recording.Tracks.FirstOrDefault(track =>
+                track.Kind == MeetingRecordingTrackKind.Mixed)?.DurationSeconds ?? 0;
+            var appliedRange = MeetingTranscriptAudioRange.Resolve(
+                sourceDuration,
+                recording.ProcessFromSeconds,
+                recording.ProcessUntilSeconds);
             var processing = await _audioProcessor.ProcessAsync(
                 new MeetingAudioProcessingRequest(
                     recording.Id,
@@ -623,6 +629,8 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                     HasTimestamps = normalized.HasTimestamps,
                     HasSpeakerLabels = normalized.Speakers.Count > 0,
                     RevisionId = transcriptRevisionId,
+                    SourceAudioStartSeconds = recording.ProcessFromSeconds is null ? null : appliedRange.SourceStartSeconds,
+                    SourceAudioEndSeconds = recording.ProcessUntilSeconds is null ? null : appliedRange.SourceEndSeconds,
                     Speakers = normalized.Speakers.Select(CloneSpeaker).ToList(),
                     CreatedAtUtc = normalized.GeneratedAtUtc,
                     UpdatedAtUtc = normalized.GeneratedAtUtc

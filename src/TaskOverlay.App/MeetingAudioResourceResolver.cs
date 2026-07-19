@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using TaskOverlay.Core;
@@ -80,11 +81,7 @@ public sealed class MeetingAudioResourceResolver
         }
 
         return resolution == MeetingAudioResolutionReason.Available
-            ? new WorkspaceTranscriptAudioSnapshot(
-                WorkspaceTranscriptAudioSnapshot.Available,
-                $"https://taskoverlay.workspace{ResourcePathPrefix}{recordingId:N}",
-                resource.DurationSeconds,
-                RecordingId: recordingId)
+            ? DescribeAvailable(transcript, recordingId, resource)
             : new WorkspaceTranscriptAudioSnapshot(
                 WorkspaceTranscriptAudioSnapshot.Unavailable,
                 null,
@@ -116,6 +113,53 @@ public sealed class MeetingAudioResourceResolver
     public bool TryResolveRecording(Guid recordingId, out MeetingAudioResource resource)
         => ResolveRecording(recordingId, out resource) ==
            MeetingAudioResolutionReason.Available;
+
+    public MeetingTranscriptAudioRange ResolveTranscriptAudioRange(
+        MeetingTranscript transcript,
+        double sourceDurationSeconds)
+    {
+        var current = transcript;
+        var visited = new HashSet<Guid>();
+        while (visited.Add(current.Id))
+        {
+            if (current.SourceAudioStartSeconds.HasValue || current.SourceAudioEndSeconds.HasValue)
+            {
+                return MeetingTranscriptAudioRange.Resolve(
+                    sourceDurationSeconds,
+                    current.SourceAudioStartSeconds,
+                    current.SourceAudioEndSeconds);
+            }
+
+            if (current.SourceTranscriptId is not Guid sourceId)
+            {
+                break;
+            }
+
+            current = _state.MeetingTranscripts.SingleOrDefault(item =>
+                item.Id == sourceId && item.MeetId == transcript.MeetId) ?? current;
+            if (current.Id == transcript.Id)
+            {
+                break;
+            }
+        }
+
+        return MeetingTranscriptAudioRange.Full(sourceDurationSeconds);
+    }
+
+    private WorkspaceTranscriptAudioSnapshot DescribeAvailable(
+        MeetingTranscript transcript,
+        Guid recordingId,
+        MeetingAudioResource resource)
+    {
+        var range = ResolveTranscriptAudioRange(transcript, resource.DurationSeconds);
+        return new WorkspaceTranscriptAudioSnapshot(
+            WorkspaceTranscriptAudioSnapshot.Available,
+            $"https://taskoverlay.workspace{ResourcePathPrefix}{recordingId:N}",
+            range.DurationSeconds,
+            RecordingId: recordingId,
+            StartSeconds: range.SourceStartSeconds,
+            EndSeconds: range.SourceEndSeconds);
+    }
 
     public MeetingAudioResolution ResolveTranscriptLink(MeetingTranscript transcript)
     {

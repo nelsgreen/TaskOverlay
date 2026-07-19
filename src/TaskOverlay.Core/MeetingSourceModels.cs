@@ -62,10 +62,34 @@ public sealed class MeetingTranscript
     /// </summary>
     public Guid? SourceTranscriptId { get; set; }
     public Guid? ParentRevisionId { get; set; }
+    /// <summary>Immutable source-file interval used to generate this transcript.</summary>
+    public double? SourceAudioStartSeconds { get; set; }
+    public double? SourceAudioEndSeconds { get; set; }
     public List<TranscriptSpeaker> Speakers { get; set; } = new();
     public List<string> ImportWarnings { get; set; } = new();
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public readonly record struct MeetingTranscriptAudioRange(
+    double SourceStartSeconds,
+    double SourceEndSeconds)
+{
+    public double DurationSeconds => SourceEndSeconds - SourceStartSeconds;
+
+    public static MeetingTranscriptAudioRange Full(double durationSeconds) =>
+        new(0, Math.Max(0, durationSeconds));
+
+    public static MeetingTranscriptAudioRange Resolve(
+        double durationSeconds,
+        double? startSeconds,
+        double? endSeconds)
+    {
+        var duration = Math.Max(0, durationSeconds);
+        var start = Math.Clamp(startSeconds ?? 0, 0, duration);
+        var end = Math.Clamp(endSeconds ?? duration, 0, duration);
+        return end > start ? new MeetingTranscriptAudioRange(start, end) : Full(duration);
+    }
 }
 
 public sealed class TranscriptSpeaker

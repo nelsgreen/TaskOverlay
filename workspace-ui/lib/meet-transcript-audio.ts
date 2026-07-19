@@ -62,6 +62,20 @@ export interface NativeTranscriptPlaybackProjection {
   failureReason: string | null
 }
 
+export function projectTranscriptScreenshots<T extends {
+  recordingId: string | null
+  offsetFromRecordingStartSeconds: number | null
+}>(screenshots: T[], recordingId: string | null, startSeconds: number, endSeconds: number):
+  Array<T & { transcriptOffsetSeconds: number }> {
+  return screenshots.flatMap((screenshot) =>
+    screenshot.recordingId === recordingId &&
+    screenshot.offsetFromRecordingStartSeconds != null &&
+    screenshot.offsetFromRecordingStartSeconds >= startSeconds &&
+    screenshot.offsetFromRecordingStartSeconds <= endSeconds
+      ? [{ ...screenshot, transcriptOffsetSeconds: screenshot.offsetFromRecordingStartSeconds - startSeconds }]
+      : [])
+}
+
 export function selectTranscriptPlaybackMode(input: {
   hasWebViewBridge: boolean
   audioStatus: string

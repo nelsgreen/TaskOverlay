@@ -143,6 +143,69 @@ public sealed class MeetingTranscriptRecordingLinker
         return repaired;
     }
 
+    /// <summary>Backfills a legacy processing interval only when one generated lineage owns it.</summary>
+    public int RepairMissingAudioRanges()
+    {
+        var repaired = 0;
+        foreach (var recording in _state.MeetingRecordings)
+        {
+            if (recording.ProcessFromSeconds is null && recording.ProcessUntilSeconds is null)
+            {
+                continue;
+            }
+
+            var duration = recording.Tracks.FirstOrDefault(track =>
+                track.Kind == MeetingRecordingTrackKind.Mixed)?.DurationSeconds ?? 0;
+            var range = MeetingTranscriptAudioRange.Resolve(
+                duration, recording.ProcessFromSeconds, recording.ProcessUntilSeconds);
+            if (range.DurationSeconds <= 0 || duration <= 0)
+            {
+                continue;
+            }
+
+            var generatedRoots = _state.MeetingTranscripts.Where(transcript =>
+                    transcript.Origin == MeetingTranscriptOrigin.Generated &&
+                    transcript.RecordingId == recording.Id &&
+                    transcript.SourceAudioStartSeconds is null &&
+                    transcript.SourceAudioEndSeconds is null)
+                .ToList();
+            if (generatedRoots.Count != 1)
+            {
+                continue;
+            }
+
+            var root = generatedRoots[0];
+            foreach (var transcript in _state.MeetingTranscripts.Where(item =>
+                         item.Id == root.Id || IsDescendedFrom(item, root.Id)))
+            {
+                if (transcript.SourceAudioStartSeconds.HasValue || transcript.SourceAudioEndSeconds.HasValue)
+                {
+                    continue;
+                }
+
+                transcript.SourceAudioStartSeconds = range.SourceStartSeconds;
+                transcript.SourceAudioEndSeconds = range.SourceEndSeconds;
+                transcript.UpdatedAtUtc = DateTimeOffset.UtcNow;
+                repaired++;
+            }
+        }
+
+        return repaired;
+    }
+
+    private bool IsDescendedFrom(MeetingTranscript transcript, Guid rootId)
+    {
+        var visited = new HashSet<Guid>();
+        var current = transcript;
+        while (current.SourceTranscriptId is Guid sourceId && visited.Add(sourceId))
+        {
+            if (sourceId == rootId) return true;
+            current = _state.MeetingTranscripts.SingleOrDefault(item => item.Id == sourceId) ?? current;
+            if (current.Id == transcript.Id) break;
+        }
+        return false;
+    }
+
     private List<MeetingTranscript> BuildLineage(MeetingTranscript transcript, Guid meetingId)
     {
         var lineage = new List<MeetingTranscript> { transcript };
