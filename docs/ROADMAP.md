@@ -8,18 +8,17 @@ repository root and portable downloads use `TaskOverlay_Windows_Portable`.
 
 ## Immediate
 
-1. Manually validate the MEET editable-transcript/speaker-identity artifact
-   (the Sources/Review visual migration itself is merged in PR #69).
-2. Manually verify schema-2 planned-work -> schema-3 `TaskWorkSession`
-   migration against the user's real work-computer state and artifact; the
-   development environment had no copy of that state.
-3. Planning Pool filters: Active / Unscheduled / Today / All (the real
+1. Planning Pool filters: Active / Unscheduled / Today / All (the real
    per-task scheduling indicators are implemented).
-4. Task Details work-session history and total-duration summary.
-5. Working hours / evening deadline presets.
-6. Calendar visual links for deadline/reminder markers.
-7. FUCKUP marker MVP.
-8. Global Ctrl+Z later, as architecture-level work - not a quick add-on.
+2. Task Details work-session history and total-duration summary.
+3. Working hours / evening deadline presets.
+4. Calendar visual links for deadline/reminder markers.
+5. FUCKUP marker MVP.
+6. Global Ctrl+Z later, as architecture-level work - not a quick add-on.
+
+The MEET editable-transcript/speaker-identity artifact and the schema-2 planned-
+work -> schema-3 `TaskWorkSession` migration were manually accepted on the
+user's work computer. They are no longer pending roadmap gates.
 
 The MEET Assistant foundation implements the first bounded ProposedActions
 review/apply path. Future AI work must keep the same rule: raw input ->
@@ -129,16 +128,24 @@ never a direct mutation without explicit user confirmation (see DECISIONS
     with explicit re-analysis only. Next phase: context-aware AI transcript
     cleanup and analysis using the MEET project and approved ContextHUB
     context, always as a reviewable revision.
-15. Transcript-synchronized local playback - implemented for the explicitly
-    active transcript with timestamp seek/play, segment and speaker tracking,
-    a You label, manual-scroll-aware auto-scroll, and a non-blocking unavailable
-    state. Audio is served by a range-capable, active-recording-only WebView2
-    endpoint; no filesystem path or audio payload enters the snapshot.
-16. Recording artifact/manual QA, finalized M4A segmentation for bounded crash
-    loss, device recovery, retention, transcript search, segment
-    add/delete/split/merge and timestamp editing, ContextHUB promotion,
-    Meeting Brief, cross-MEET speaker identification, OCR/multimodal review,
-    and additional/local providers.
+15. Transcript-synchronized local playback - implemented and manually accepted
+    in PR #72 (`d52b212e74946be52b12d7d957b949b5705a54be`). Connected WPF uses
+    native C# playback through NAudio (`MediaFoundationReader` / `WaveOutEvent`);
+    React owns controls, transcript rendering, active-segment/speaker tracking,
+    and manual-scroll-aware auto-scroll. The bridge passes opaque IDs, actions,
+    relative seconds, and safe state only - never paths or audio payloads.
+    Durable `RecordingId` linkage supports generated/imported transcripts,
+    retries, `UserEdited` revisions, and deterministic unambiguous legacy
+    repair. Each transcript owns immutable source-audio bounds; C# maps
+    transcript-relative seek positions, reports bounded duration/position, and
+    stops at the source-range end. Screenshot offsets are filtered and projected
+    into that relative range. Manual Windows QA confirmed both audible native
+    playback and stopping at the bounded transcript range.
+16. Recording-device QA across real microphone/output combinations, finalized
+    M4A segmentation for bounded crash loss, device recovery, retention,
+    transcript search, segment add/delete/split/merge and timestamp editing,
+    ContextHUB promotion, Meeting Brief, cross-MEET speaker identification,
+    OCR/multimodal review, and additional/local providers.
 
 Recurrence, calendar sync, live transcription, and external meeting-platform
 APIs remain intentionally later work.
