@@ -317,6 +317,25 @@ item.
   Create MEET, using the clicked date/time as the new record's schedule.
   Right-clicking an existing task/MEET block shows that block's own context
   menu instead - it never falls back to the empty-slot menu.
+- Calendar scheduling geometry is always one local wall-clock day,
+  00:00-24:00. Global working hours do not clamp creation, movement, resize,
+  or visibility; they control only the Day/Week background band and the
+  initial-scroll anchor for a non-current date or week. Today/current week
+  still initially scrolls to the current time.
+- Global working hours are authoritative `WorkspaceSettings` fields in
+  `AppState` / `state.json`: `workdayStartMinutes` and
+  `workdayEndMinutes`, stored as integer minutes from local midnight. Defaults
+  are 540/1080. Values must be 15-minute aligned, remain within 0..1440,
+  and define a same-day interval of at least 15 minutes with start before end;
+  invalid persisted values repair to the defaults and invalid commands are
+  rejected. State schema 8 adds these fields through a synthetic-tested
+  additive schema-7 migration.
+- Workspace snapshot schema 6 projects working hours to React. Connected
+  updates use the WebView2 command -> C# validation -> `AppState` save -> fresh
+  snapshot path; the native Settings surface uses the same C# validation and
+  persistence policy, then publishes a fresh snapshot to an open Workspace.
+  React never owns or persists the setting. Untimed Deadline presentation
+  remains explicitly fixed at 18:00 and does not follow workday end.
 - Planning Pool holds logical Tasks, not calendar blocks. Scheduling a task
   onto Calendar does not remove it from Planning Pool - a task stays visible
   there until it is DONE (hidden by default once DONE), since a long-running

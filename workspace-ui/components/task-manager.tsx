@@ -30,6 +30,12 @@ import { cn } from "@/lib/utils"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { addDaysKey, isoFromLocalDateTime, localSlotFromIso, todayKey } from "@/lib/calendar-date"
+import {
+  DAY_END_MIN,
+  DEFAULT_MEET_DURATION_MIN,
+  DEFAULT_WORKDAY_END_MIN,
+  DEFAULT_WORKDAY_START_MIN,
+} from "@/lib/calendar-layout"
 import { buildProjectContextPack } from "@/lib/context-pack-builder"
 import {
   meetDurationFields,
@@ -72,11 +78,15 @@ function createMeetingDraft(
   projectName: string | undefined,
   dateKey?: string,
   startMin?: number,
+  durationMin = DEFAULT_MEET_DURATION_MIN,
 ): MeetItem {
   const now = new Date()
   now.setMinutes(Math.ceil(now.getMinutes() / 30) * 30, 0, 0)
   const pad = (value: number) => String(value).padStart(2, "0")
-  const draftStartMin = startMin ?? (now.getHours() * 60 + now.getMinutes())
+  const draftStartMin = startMin ?? Math.min(
+    now.getHours() * 60 + now.getMinutes(),
+    DAY_END_MIN - DEFAULT_MEET_DURATION_MIN,
+  )
   const date = dateKey ?? `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
   const startTime = `${pad(Math.floor(draftStartMin / 60))}:${pad(draftStartMin % 60)}`
   return {
@@ -86,7 +96,7 @@ function createMeetingDraft(
     titleIsGenerated: true,
     date,
     startTime,
-    duration: "30m",
+    ...meetDurationFields(draftStartMin, durationMin),
   }
 }
 
@@ -96,7 +106,6 @@ export function TaskManager() {
   const [mockTaskWorkSessions, setMockTaskWorkSessions] = useState<TaskWorkSession[]>([])
   const [mockMeetItems, setMockMeetItems] = useState<MeetItem[]>(initialMeetItems)
   const [meetModalOpen, setMeetModalOpen] = useState(false)
-  const [newlyCreatedMeetId, setNewlyCreatedMeetId] = useState<string | null>(null)
   const [pendingMeetDeleteId, setPendingMeetDeleteId] = useState<string | null>(null)
   const [meetingCreatePhase, setMeetingCreatePhase] = useState<MeetingCreatePhase>("idle")
   const [meetingCreateError, setMeetingCreateError] = useState<string | null>(null)
@@ -159,6 +168,8 @@ export function TaskManager() {
   const tasks = bridge.data?.tasks ?? mockTasks
   const taskWorkSessions = bridge.data?.taskWorkSessions ?? mockTaskWorkSessions
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
+  const workdayStartMinutes = bridge.data?.workdayStartMinutes ?? DEFAULT_WORKDAY_START_MIN
+  const workdayEndMinutes = bridge.data?.workdayEndMinutes ?? DEFAULT_WORKDAY_END_MIN
   const meetingRecordings = bridge.data?.meetingRecordings ?? []
   const meetingTranscripts = bridge.data?.meetingTranscripts ?? []
   const meetingScreenshots = bridge.data?.meetingScreenshots ?? []
@@ -385,7 +396,6 @@ export function TaskManager() {
     }
     setSelectedTimelineItemId(timelineItemId)
     setSelection({ kind: "meet", id: meetId })
-    setNewlyCreatedMeetId((current) => current === meetId ? current : null)
     setMeetModalOpen(true)
   }
   const selectMeet = (meetId: string) => {
@@ -395,7 +405,6 @@ export function TaskManager() {
     }
     setSelectedTimelineItemId(`meet:${meetId}`)
     setSelection({ kind: "meet", id: meetId })
-    setNewlyCreatedMeetId((current) => current === meetId ? current : null)
     setMeetModalOpen(true)
   }
   // The single project used for the Tree tab (Tree is single-project by design)
@@ -721,12 +730,12 @@ export function TaskManager() {
     }
   }
 
-  const handleCreateCalendarTask = (dateKey: string, startMin: number) => {
+  const handleCreateCalendarTask = (dateKey: string, startMin: number, durationMin: number) => {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId || readOnly) return
     const rootSectionId = sections.find((s) => s.projectId === projectId && s.isProjectRoot)?.id ?? `project:${projectId}:root`
     const workSessionStartUtc = isoFromLocalDateTime(dateKey, Math.floor(startMin / 60), startMin % 60)
-    const endMin = startMin + 60
+    const endMin = startMin + durationMin
     const workSessionEndUtc = isoFromLocalDateTime(dateKey, Math.floor(endMin / 60), endMin % 60)
     setCalendarSelectedDate(dateKey)
     setTab("calendar")
@@ -1294,7 +1303,6 @@ export function TaskManager() {
       const result = await bridge.sendMeetingCommandTracked({ type: "deleteMeeting", meetingId: id })
       if (result.success) {
         setPendingMeetDeleteId(id)
-        setNewlyCreatedMeetId((current) => current === id ? null : current)
       }
       return result.success
     }
@@ -1304,7 +1312,6 @@ export function TaskManager() {
       setSelection(null)
       setSelectedTimelineItemId(null)
     }
-    setNewlyCreatedMeetId((current) => current === id ? null : current)
     setMeetModalOpen(false)
     return true
   }
@@ -1322,12 +1329,13 @@ export function TaskManager() {
   const handleMoveMeet = (meetId: string, startsAtUtc: string, durationMinutes: number) => {
     const meeting = meetItems.find((m) => m.id === meetId)
     if (!meeting) return
+    const nextDurationMinutes = durationMinutes || meetDurationMinutes(meeting)
     if (connected) {
       bridge.sendMeetingCommand({
         type: "updateMeeting",
         meetingId: meetId,
         startsAtUtc,
-        durationMinutes: durationMinutes || meetDurationMinutes(meeting),
+        durationMinutes: nextDurationMinutes,
       })
     } else if (!bridged) {
       const slot = localSlotFromIso(startsAtUtc)
@@ -1337,6 +1345,7 @@ export function TaskManager() {
             ...m,
             date: slot.dateKey,
             startTime: `${String(Math.floor(slot.minutes / 60)).padStart(2, "0")}:${String(slot.minutes % 60).padStart(2, "0")}`,
+            ...meetDurationFields(slot.minutes, nextDurationMinutes),
           }
         : m))
     }
@@ -1344,13 +1353,13 @@ export function TaskManager() {
     setSelectedTimelineItemId(`meet:${meetId}`)
   }
 
-  const handleCreateMeeting = (dateKey?: string, startMin?: number) => {
+  const handleCreateMeeting = (dateKey?: string, startMin?: number, durationMin = DEFAULT_MEET_DURATION_MIN) => {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId) return
     if (readOnly) return
     if (connected && meetingCreateGuardRef.current?.isCreateBlocked()) return
     const projectName = projects.find((project) => project.id === projectId)?.name
-    const draft = createMeetingDraft(crypto.randomUUID(), projectId, projectName, dateKey, startMin)
+    const draft = createMeetingDraft(crypto.randomUUID(), projectId, projectName, dateKey, startMin, durationMin)
     if (dateKey) setCalendarSelectedDate(dateKey)
     setTab("calendar")
     if (connected) {
@@ -1384,7 +1393,6 @@ export function TaskManager() {
     if (bridged) return
     setMockMeetItems((items) => [...items, draft])
     setSelection({ kind: "meet", id: draft.id })
-    setNewlyCreatedMeetId(draft.id)
     setMeetModalOpen(true)
     setPendingTitleFocusMeetId(draft.id)
     setSelectedTimelineItemId(`meet:${draft.id}`)
@@ -1417,7 +1425,6 @@ export function TaskManager() {
     if (!id || !meetItems.some((meeting) => meeting.id === id)) return
     setSelection({ kind: "meet", id })
     setSelectedTimelineItemId(`meet:${id}`)
-    setNewlyCreatedMeetId(id)
     setMeetModalOpen(true)
     setPendingTitleFocusMeetId(id)
     bridge.clearLastCreatedMeetingId()
@@ -1583,7 +1590,7 @@ export function TaskManager() {
             onToggleProject={toggleProject}
             onSelectAll={selectAllProjects}
           />
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className={cn("min-h-0 flex-1", tab === "calendar" ? "overflow-hidden" : "overflow-y-auto")}>
             {tab === "tree" && (
               <div className="flex min-h-full flex-col">
                 {multi && (
@@ -1728,6 +1735,8 @@ export function TaskManager() {
                 selectedMeetId={selectedMeetId}
                 showDone={calendarShowDone}
                 canSchedule={connected || !bridged}
+                workdayStartMinutes={workdayStartMinutes}
+                workdayEndMinutes={workdayEndMinutes}
                 createMeetDisabled={meetingCreatePhase !== "idle"}
                 onSelectTask={selectTask}
                 onSelectMeet={selectMeet}
@@ -1861,10 +1870,8 @@ export function TaskManager() {
           onDelete={handleDeleteMeet}
           onClose={() => {
             setMeetModalOpen(false)
-            setNewlyCreatedMeetId((current) => current === selectedMeet.id ? null : current)
             setPendingTitleFocusMeetId(null)
           }}
-          isNewlyCreated={selectedMeet.id === newlyCreatedMeetId}
           onOpenLinkedTask={selectTask}
           focusTitle={selectedMeet.id === pendingTitleFocusMeetId}
           onTitleFocused={() => setPendingTitleFocusMeetId(null)}

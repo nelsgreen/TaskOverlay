@@ -155,6 +155,10 @@ internal static class Program
             ("workspace timeline consistency", WorkspaceTimelineConsistency),
             ("workspace orphan fallback", WorkspaceOrphanFallback),
             ("workspace state persistence and repair", WorkspaceStatePersistenceAndRepair),
+            ("working hours schema migration and defaults", WorkingHoursSchemaMigrationAndDefaults),
+            ("working hours persistence and repair", WorkingHoursPersistenceAndRepair),
+            ("working hours command persistence and validation", WorkingHoursCommandPersistenceAndValidation),
+            ("working hours workspace snapshot", WorkingHoursWorkspaceSnapshot),
             ("workspace context command persistence", WorkspaceContextCommandPersistence),
             ("workspace command status persistence", WorkspaceCommandStatusPersistence),
             ("workspace command invalid task and status", WorkspaceCommandInvalidTaskAndStatus),
@@ -4425,7 +4429,7 @@ internal static class Program
         var waitingSnapshot = snapshot.Tasks.Single(task =>
             task.Id == waiting.Id.ToString("N"));
 
-        Assert(snapshot.SchemaVersion == 5, "Workspace contract version should be 5.");
+        Assert(snapshot.SchemaVersion == 6, "Workspace contract version should be 6.");
         Assert(snapshot.MeetingOperations.Count == 0,
             "A fresh snapshot must not claim transient MEET operations survive startup.");
         Assert(snapshot.Mode == "readonly", "Workspace contract should be read-only.");
@@ -4461,10 +4465,118 @@ internal static class Program
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
         var document = JsonDocument.Parse(json);
-        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 5,
+        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 6,
             "Serialized workspace contract should use camelCase fields.");
         Assert(document.RootElement.GetProperty("mode").GetString() == "readonly",
             "Serialized workspace contract mode mismatch.");
+    }
+
+    private static void WorkingHoursSchemaMigrationAndDefaults()
+    {
+        // Synthetic schema-7 fixture only. No real user state is read or modified.
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-20T08:00:00Z"));
+            store.Save(state);
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            root["schemaVersion"] = 7;
+            var workspaceSettings = root["workspaceSettings"]!.AsObject();
+            workspaceSettings.Remove("workdayStartMinutes");
+            workspaceSettings.Remove("workdayEndMinutes");
+            File.WriteAllText(store.StatePath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+            var loaded = store.Load();
+            Assert(loaded.SchemaVersion == 8,
+                "Schema-7 state should migrate additively to schema 8.");
+            Assert(loaded.WorkspaceSettings.WorkdayStartMinutes == 540 &&
+                   loaded.WorkspaceSettings.WorkdayEndMinutes == 1080,
+                "Missing working-hours fields should default to 09:00-18:00.");
+        });
+    }
+
+    private static void WorkingHoursPersistenceAndRepair()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = AppState.CreateDefault();
+            state.WorkspaceSettings.WorkdayStartMinutes = 480;
+            state.WorkspaceSettings.WorkdayEndMinutes = 1200;
+            store.Save(state);
+            var loaded = store.Load();
+            Assert(loaded.WorkspaceSettings.WorkdayStartMinutes == 480 &&
+                   loaded.WorkspaceSettings.WorkdayEndMinutes == 1200,
+                "Valid working hours should survive serialization and reload.");
+
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            var workspaceSettings = root["workspaceSettings"]!.AsObject();
+            workspaceSettings["workdayStartMinutes"] = 1200;
+            workspaceSettings["workdayEndMinutes"] = 480;
+            File.WriteAllText(store.StatePath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            loaded = store.Load();
+            Assert(loaded.WorkspaceSettings.WorkdayStartMinutes == 540 &&
+                   loaded.WorkspaceSettings.WorkdayEndMinutes == 1080,
+                "Invalid persisted working hours should repair to safe defaults.");
+        });
+    }
+
+    private static void WorkingHoursCommandPersistenceAndValidation()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var state = AppState.CreateDefault();
+            var store = new AppStateStore(directory);
+            var dispatcher = new WorkspaceCommandDispatcher(state, () => store.Save(state), () => { });
+            var valid = dispatcher.Dispatch(WorkspaceCommandJson(
+                "working-hours-valid",
+                "updateWorkingHours",
+                new { workdayStartMinutes = 480, workdayEndMinutes = 1200 }));
+            Assert(valid.Success, "Valid working hours command should succeed.");
+            var loaded = store.Load();
+            Assert(loaded.WorkspaceSettings.WorkdayStartMinutes == 480 &&
+                   loaded.WorkspaceSettings.WorkdayEndMinutes == 1200,
+                "Working hours command should persist authoritative values.");
+
+            var invalidPairs = new[]
+            {
+                (Start: 600, End: 600),
+                (Start: 615, End: 600),
+                (Start: -15, End: 600),
+                (Start: 600, End: 1455),
+                (Start: 600, End: 610),
+                (Start: 607, End: 900)
+            };
+            foreach (var pair in invalidPairs)
+            {
+                var result = dispatcher.Dispatch(WorkspaceCommandJson(
+                    $"working-hours-{pair.Start}-{pair.End}",
+                    "updateWorkingHours",
+                    new { workdayStartMinutes = pair.Start, workdayEndMinutes = pair.End }));
+                Assert(!result.Success && result.ErrorCode == "invalidWorkingHours",
+                    $"Invalid working hours {pair.Start}-{pair.End} should be rejected.");
+            }
+
+            Assert(state.WorkspaceSettings.WorkdayStartMinutes == 480 &&
+                   state.WorkspaceSettings.WorkdayEndMinutes == 1200,
+                "Rejected commands must not mutate working hours.");
+        });
+    }
+
+    private static void WorkingHoursWorkspaceSnapshot()
+    {
+        var state = AppState.CreateDefault();
+        state.WorkspaceSettings.WorkdayStartMinutes = 480;
+        state.WorkspaceSettings.WorkdayEndMinutes = 1200;
+        var snapshot = WorkspaceSnapshotFactory.Create(state);
+        Assert(snapshot.WorkdayStartMinutes == 480 && snapshot.WorkdayEndMinutes == 1200,
+            "Workspace snapshot should project authoritative working hours.");
+
+        state.WorkspaceSettings.WorkdayStartMinutes = 1200;
+        state.WorkspaceSettings.WorkdayEndMinutes = 480;
+        snapshot = WorkspaceSnapshotFactory.Create(state);
+        Assert(snapshot.WorkdayStartMinutes == 540 && snapshot.WorkdayEndMinutes == 1080,
+            "Workspace snapshot should fall back safely for invalid in-memory values.");
     }
 
     private static void WorkspaceTimelineConsistency()
@@ -4614,6 +4726,8 @@ internal static class Program
         WithTemporaryDirectory(directory =>
         {
             var state = AppState.CreateDefault();
+            state.WorkspaceSettings.WorkdayStartMinutes = 480;
+            state.WorkspaceSettings.WorkdayEndMinutes = 1200;
             var project = state.Projects[0];
             var task = state.Tasks[0];
             task.RemindAtUtc = DateTimeOffset.UtcNow.AddHours(1);
@@ -4649,8 +4763,10 @@ internal static class Program
                 loaded.SelectedProjectIds.SequenceEqual(new[] { project.Id }) &&
                 loaded.SelectedTaskId == task.Id &&
                 loaded.SelectedTimelineItemId == $"remind:{task.Id:N}" &&
-                loaded.Filter == WorkspaceFilter.Active,
-                "Workspace context command should persist through AppStateStore.");
+                loaded.Filter == WorkspaceFilter.Active &&
+                loaded.WorkdayStartMinutes == 480 &&
+                loaded.WorkdayEndMinutes == 1200,
+                "Workspace context command should persist without replacing unrelated settings.");
 
             var invalid = dispatcher.Dispatch(WorkspaceCommandJson(
                 "workspace-context-invalid",
@@ -6406,6 +6522,8 @@ internal static class Program
             Assert(create.Success && Guid.TryParse(create.CreatedMeetingId, out _),
                 "Opening a new MEET should immediately persist a stable meeting id.");
             var meetingId = Guid.Parse(create.CreatedMeetingId!);
+            Assert(state.Meetings.Any(meeting => meeting.Id == meetingId),
+                "Authoritative in-memory state should contain the MEET before modal interaction.");
 
             var afterCreate = store.Load();
             var created = afterCreate.Meetings.Single(meeting => meeting.Id == meetingId);
@@ -7779,10 +7897,10 @@ internal static class Program
         Assert(migrated.Meetings.Single().Id == meeting.Id,
             "Migration must preserve existing MEET data.");
         var snapshot = WorkspaceSnapshotFactory.Create(migrated, now);
-        Assert(snapshot.SchemaVersion == 5 &&
+        Assert(snapshot.SchemaVersion == 6 &&
                snapshot.MeetingRecordings.Count == 0 &&
                snapshot.MeetingAnalyses.Count == 0,
-            "Old states should produce a valid schema 5 Workspace snapshot.");
+            "Old states should produce a valid current Workspace snapshot.");
     }
 
     private static void MeetingAssistantPersistenceRoundtrip()
@@ -8347,16 +8465,16 @@ internal static class Program
         var revisionBefore = transcript.RevisionId;
 
         StateMigrator.Migrate(state);
-        Assert(state.SchemaVersion == 7 &&
+        Assert(state.SchemaVersion == 8 &&
                state.MeetingTranscripts.Single().RevisionId == revisionBefore &&
                state.MeetingTranscripts.Single().SourceTranscriptId is null &&
                state.MeetingTranscripts.Single().ParentRevisionId is null &&
                meeting.ActiveTranscriptId == transcript.Id,
-            "Schema 6 states without transcript edits should migrate unchanged to schema 7.");
+            "Schema 6 states without transcript edits should reach the current schema unchanged.");
 
         StateMigrator.Migrate(state);
-        Assert(state.SchemaVersion == 7 && state.MeetingTranscripts.Count == 1,
-            "The v6 to v7 migration should be idempotent.");
+        Assert(state.SchemaVersion == 8 && state.MeetingTranscripts.Count == 1,
+            "Migration from schema 6 through the current schema should be idempotent.");
     }
 
     private static void MeetingSourcePersistenceAndSnapshot()

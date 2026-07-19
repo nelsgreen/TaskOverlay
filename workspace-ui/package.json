@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node --test lib/calendar-layout.test.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test:calendar-layout": "node --test lib/calendar-layout.test.mjs",
     "test:recording-controls": "node --test lib/meeting-recording-controls.test.mjs",
     "test:recording-selection": "node --test lib/meeting-recording-selection.test.mjs",
     "test:meet-modal": "node --test lib/meet-modal-policy.test.mjs",
