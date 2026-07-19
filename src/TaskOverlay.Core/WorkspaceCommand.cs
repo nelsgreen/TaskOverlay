@@ -1109,16 +1109,14 @@ public static class WorkspaceCommandProcessor
             activeNowCollapsed = collapsedElement.GetBoolean();
         }
 
-        state.WorkspaceSettings = new WorkspaceSettings
-        {
-            ActiveTab = activeTab.Value,
-            SelectedProjectIds = selectedProjectIds,
-            SelectedTaskId = selectedTaskId,
-            SelectedTimelineItemId = selectedTimelineItemId,
-            SelectedWorkstreamId = selectedWorkstreamId,
-            Filter = filter.Value,
-            ActiveNowCollapsed = activeNowCollapsed
-        };
+        var settings = state.WorkspaceSettings ??= new WorkspaceSettings();
+        settings.ActiveTab = activeTab.Value;
+        settings.SelectedProjectIds = selectedProjectIds;
+        settings.SelectedTaskId = selectedTaskId;
+        settings.SelectedTimelineItemId = selectedTimelineItemId;
+        settings.SelectedWorkstreamId = selectedWorkstreamId;
+        settings.Filter = filter.Value;
+        settings.ActiveNowCollapsed = activeNowCollapsed;
         WorkspaceStatePolicy.Normalize(state);
         return WorkspaceCommandResult.Succeeded(commandId);
     }

@@ -4726,6 +4726,8 @@ internal static class Program
         WithTemporaryDirectory(directory =>
         {
             var state = AppState.CreateDefault();
+            state.WorkspaceSettings.WorkdayStartMinutes = 480;
+            state.WorkspaceSettings.WorkdayEndMinutes = 1200;
             var project = state.Projects[0];
             var task = state.Tasks[0];
             task.RemindAtUtc = DateTimeOffset.UtcNow.AddHours(1);
@@ -4761,8 +4763,10 @@ internal static class Program
                 loaded.SelectedProjectIds.SequenceEqual(new[] { project.Id }) &&
                 loaded.SelectedTaskId == task.Id &&
                 loaded.SelectedTimelineItemId == $"remind:{task.Id:N}" &&
-                loaded.Filter == WorkspaceFilter.Active,
-                "Workspace context command should persist through AppStateStore.");
+                loaded.Filter == WorkspaceFilter.Active &&
+                loaded.WorkdayStartMinutes == 480 &&
+                loaded.WorkdayEndMinutes == 1200,
+                "Workspace context command should persist without replacing unrelated settings.");
 
             var invalid = dispatcher.Dispatch(WorkspaceCommandJson(
                 "workspace-context-invalid",
@@ -6518,6 +6522,8 @@ internal static class Program
             Assert(create.Success && Guid.TryParse(create.CreatedMeetingId, out _),
                 "Opening a new MEET should immediately persist a stable meeting id.");
             var meetingId = Guid.Parse(create.CreatedMeetingId!);
+            Assert(state.Meetings.Any(meeting => meeting.Id == meetingId),
+                "Authoritative in-memory state should contain the MEET before modal interaction.");
 
             var afterCreate = store.Load();
             var created = afterCreate.Meetings.Single(meeting => meeting.Id == meetingId);

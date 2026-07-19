@@ -55,6 +55,7 @@ internal static class Program
             ("oversized compact chunks derive from mixed track", OversizedCompactChunksDeriveFromMixedTrack),
             ("imported audio is managed and range bounded", ImportedAudioIsManagedAndRangeBounded),
             ("meeting source commands persist and refresh", MeetingSourceCommandsPersistAndRefresh),
+            ("snapshot failure preserves successful meeting create result", SnapshotFailurePreservesSuccessfulMeetingCreateResult),
             ("transcript recording links persist and repair", TranscriptRecordingLinksPersistAndRepair),
             ("active transcript audio resolution is restricted and resilient", ActiveTranscriptAudioResolutionIsRestrictedAndResilient),
             ("meeting audio byte ranges support seeking", MeetingAudioByteRangesSupportSeeking),
@@ -85,6 +86,29 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    private static Task SnapshotFailurePreservesSuccessfulMeetingCreateResult()
+    {
+        var publishes = 0;
+        var result = WorkspaceCommandResult.Succeeded(
+            "create-meeting",
+            createdMeetingId: Guid.NewGuid().ToString("N"));
+
+        var delivered = WorkspaceCommandDeliveryPolicy.AfterPersistence(
+            result,
+            () =>
+            {
+                publishes++;
+                return false;
+            });
+
+        Assert(delivered.Success &&
+               delivered.CreatedMeetingId == result.CreatedMeetingId &&
+               delivered.WarningCode == "snapshotFailed" &&
+               publishes == 1,
+            "A failed snapshot refresh must preserve the successful create result and createdMeetingId.");
+        return Task.CompletedTask;
     }
 
     private static async Task ManualRecordingCommandLifecycle()
