@@ -236,28 +236,49 @@ item.
   one "Discard unsaved transcript edits?" confirmation. Context-aware AI
   transcript cleanup remains the next separate phase and must create a
   reviewable revision, never silently replace text.
-- Transcript playback uses a same-origin WebView2 media endpoint whose URL
-  contains only the linked recording ID. Every request is re-authorized against
-  the active transcript. Recording linkage resolves in strict priority order:
-  its explicit `RecordingId`, a linked ancestor in `SourceTranscriptId`
-  revision lineage, then a single same-MEET candidate proven by persisted
-  recording/transcription metadata; ambiguous candidates stay unavailable.
-  Generated transcripts persist their known recording link directly. State
-  load promotes a single deterministic legacy association into authoritative
-  transcript metadata, and edited revisions persist the resolved association.
-  Resource authorization still requires finalized valid (or migrated legacy)
-  mixed-track metadata, the
-  exact deterministic managed MEET recording folder, supported M4A/WAV/MP3
-  extensions, and a present non-reparse-point file. The endpoint implements
-  single byte ranges for browser seeking and returns generic unavailable
-  responses for missing or rejected resources. Workspace snapshots contain
-  only `Available` / `Unavailable` / `NotLinked`, the opaque URL, and duration;
-  unavailable audio also carries one bounded reason code rendered as safe
-  product text in Review. Snapshots never contain audio bytes, base64, local
-  filesystem paths, exception text, or internal JSON. Edited
-  revisions reuse their preserved or inherited recording association and
-  segment timings. Playback
-  and auto-scroll state is intentionally ephemeral UI state, not persistence.
+- Connected WPF transcript playback is native-first. React owns playback
+  controls, bounded slider display, transcript rendering, active-segment and
+  speaker/You presentation, and manual-scroll-aware auto-scroll. React sends
+  only recording ID, transcript ID, action, and transcript-relative seconds
+  through the WebView2 bridge. C# re-authorizes the active transcript and
+  recording, resolves the managed mixed-track file, owns NAudio playback via
+  `MediaFoundationReader` / `WaveOutEvent`, and emits safe position, duration,
+  state, and failure events. No filesystem path, audio bytes, base64, internal
+  JSON, exception text, or secrets enter React or Workspace snapshots.
+- Browser `<audio>` and the same-origin media endpoint are development fallback
+  only when the connected WebView2 bridge is unavailable. Production WPF must
+  not depend on browser codec support, endpoint probing, or a browser media
+  failure before native playback starts.
+- `MeetingTranscript.RecordingId` is the durable transcript-to-recording link.
+  Linkage resolves in strict priority order: explicit `RecordingId`, a linked
+  ancestor in `SourceTranscriptId` revision lineage, then one same-MEET
+  candidate proven by persisted recording/transcription metadata. Generated
+  transcripts persist their known link, edited revisions inherit and persist
+  it, and state load promotes only a single deterministic legacy association.
+  Ambiguous candidates remain unavailable and recordings from another MEET are
+  never guessed.
+- Each transcript owns the immutable source-file interval used to generate it:
+  `SourceAudioStartSeconds` and `SourceAudioEndSeconds`. The values are captured
+  when transcription starts, survive save/load/restart, and are inherited by
+  `UserEdited` revisions. Mutable recording processing settings are not the
+  historical source of truth for an existing transcript. Legacy range repair
+  is allowed only for one unambiguous generated-transcript lineage; ambiguous
+  older transcripts safely use full-file playback.
+- Playback time exposed to React is transcript-relative. C# adds the source
+  start for Play/Seek, clamps commands to the transcript range, reports bounded
+  duration and relative position, stops at the source end, and restarts from
+  relative zero when Play is pressed at the end. Range enforcement is not a
+  UI-only guard.
+- Screenshot offsets remain stored relative to the complete recording. Review
+  excludes screenshots outside the active transcript's source range and maps
+  in-range screenshots to `recordingOffset - SourceAudioStartSeconds`.
+- Native playback uses one active session at a time. The session is disposed on
+  transcript change, Workspace close, explicit Stop, or failure. Playback and
+  auto-scroll state remain ephemeral runtime/UI state, not persistence.
+- Safe unavailable states distinguish deterministic linkage, managed-file,
+  mixed-track, format, and playback failures without exposing paths or internal
+  exception details. `BUILD.txt` is mandatory in portable artifacts so manual
+  Windows QA can identify the tested commit and CI run.
 - Screenshots are explicit user-selected Window/Display captures, stored as
   managed PNG artifacts with UTC time and active-recording offset when one is
   available. There is no silent/periodic capture, video, OCR, or multimodal AI
@@ -315,9 +336,9 @@ item.
 - State schema 3 migrates the old single task planned-work fields into one
   linked `TaskWorkSession`, then clears those legacy fields. Missing planned
   work creates no session; malformed legacy values are handled without
-  dropping the task. The migration is covered by synthetic fixtures and is
-  idempotent. The real user state was unavailable in development, so artifact
-  migration must also be verified manually on the user's work computer.
+  dropping the task. The migration is covered by synthetic fixtures, is
+  idempotent, and was also manually accepted against the user's real
+  work-computer state.
 - MEET remains a separate first-class entity and is never represented as a
   task work session.
 
@@ -440,9 +461,9 @@ item.
   are exactly the Workspace snapshot shapes (`Project`, `Section`, `Task`,
   `MeetItem`, `WorkspaceContextSourceSnapshot`, `WorkspaceContextItemSnapshot`)
   - there is no parameter through which the Telegram bot token, the allowed
-    user id, or any other protected setting could reach the generated
-    markdown, because those types are never passed in. This is enforced by
-    the type signatures, not by a runtime redaction step.
+  user id, or any other protected setting could reach the generated
+  markdown, because those types are never passed in. This is enforced by
+  the type signatures, not by a runtime redaction step.
 - Deprecated/superseded ContextItems are excluded by default, same as the
   ContextHUB foundation's existing convention; every section still prints
   ("None recorded.") rather than being silently omitted, so a Context Pack
@@ -576,6 +597,27 @@ item.
   source of truth.
 - No fake controls.
 - Keep PRs bounded, but avoid micro-PRs for tiny UI changes.
+- Windows/runtime-sensitive capabilities include audio/recording, codecs,
+  microphones/output devices, filesystem access, hotkeys, clipboard,
+  screenshots, Windows shell/dialogs, DPI/multiple monitors, and WPF/WebView2
+  drag-and-drop. Prefer native C# ownership for these capabilities; React stays
+  the presentation and command layer. An artificial HTTP endpoint for a local
+  desktop capability is an architecture-review warning sign.
+- Before full implementation of a runtime-sensitive feature, prove the smallest
+  production-path vertical slice in a real Windows artifact. Gate A proves the
+  runtime capability (for playback: file found, audible Play, Pause, Seek).
+  Gate B proves durable data linkage and restart/import/revision compatibility.
+  Gate C adds synchronization and UX polish. Do not build later gates on an
+  unproven Gate A.
+- Two consecutive artifact failures in the same technical layer require an
+  architecture review before another fallback is added.
+- Runtime-sensitive observability must include safe reason codes, readable
+  product messages, diagnostic events, an operation ID where appropriate, and
+  `BUILD.txt`, without exposing local paths or secrets.
+- Testing confidence is layered: unit tests; persistence save/reload/snapshot
+  tests; host integration tests from bridge command to C# service/event; and
+  real Windows artifact QA. Synthetic tests cannot replace the final runtime
+  layer.
 - Modal dialogs never close on an outside/backdrop click. Closing is only
   through an explicit control (Cancel, Close, X) or Escape where a modal
   already supports it. This applies to every shared modal in Workspace
