@@ -56,14 +56,61 @@ export function resizeRange(
   }
 }
 
-export function clipRangeToDay(startMin: number, endMin: number): { startMin: number; endMin: number } {
-  const clippedStart = clamp(startMin, DAY_START_MIN, DAY_END_MIN - MIN_DURATION_MIN)
-  const clippedEnd = clamp(endMin, clippedStart + MIN_DURATION_MIN, DAY_END_MIN)
+export function clipRangeToDay(startMin: number, endMin: number): { startMin: number; endMin: number } | null {
+  const clippedStart = clamp(startMin, DAY_START_MIN, DAY_END_MIN)
+  const clippedEnd = clamp(endMin, DAY_START_MIN, DAY_END_MIN)
+  if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || clippedStart >= clippedEnd) return null
   return { startMin: clippedStart, endMin: clippedEnd }
 }
 
 export function durationFits(startMin: number, durationMin: number): boolean {
-  return startMin >= DAY_START_MIN && startMin + durationMin <= DAY_END_MIN
+  return startMin >= DAY_START_MIN &&
+    startMin < DAY_END_MIN &&
+    durationMin >= MIN_DURATION_MIN &&
+    startMin + durationMin <= DAY_END_MIN
+}
+
+export function effectiveCreationDuration(startMin: number, defaultDurationMin: number): number | null {
+  if (!Number.isFinite(startMin) || !Number.isFinite(defaultDurationMin) || startMin < DAY_START_MIN || startMin >= DAY_END_MIN) {
+    return null
+  }
+  const durationMin = Math.min(defaultDurationMin, DAY_END_MIN - startMin)
+  return durationMin >= MIN_DURATION_MIN ? durationMin : null
+}
+
+export function markerMinute(minute: number): number {
+  return clamp(minute, DAY_START_MIN, DAY_END_MIN)
+}
+
+export function deadlineMarkerMinute(minute: number | null): number {
+  return minute === null ? UNTIMED_DEADLINE_MIN : markerMinute(minute)
+}
+
+export function meetingRangeForDay(
+  startMin: number,
+  durationMin: number,
+  explicitEndMin: number | null,
+): { endMin: number; durationMin: number } | null {
+  if (!Number.isFinite(startMin) || startMin < DAY_START_MIN || startMin >= DAY_END_MIN) return null
+  if (explicitEndMin !== null) {
+    if (!Number.isFinite(explicitEndMin) || explicitEndMin < DAY_START_MIN || explicitEndMin > DAY_END_MIN) return null
+    if (explicitEndMin === startMin) return null
+    return explicitEndMin < startMin
+      ? { endMin: DAY_END_MIN, durationMin: DAY_END_MIN - startMin + explicitEndMin }
+      : { endMin: explicitEndMin, durationMin: explicitEndMin - startMin }
+  }
+  if (!Number.isFinite(durationMin) || durationMin <= 0) return null
+  return { endMin: startMin + durationMin, durationMin }
+}
+
+export interface CalendarNavigation {
+  viewMode: "day" | "week"
+  selectedDate: string
+  key: string
+}
+
+export function calendarNavigation(viewMode: "day" | "week", selectedDate: string): CalendarNavigation {
+  return { viewMode, selectedDate, key: `${viewMode}:${selectedDate}` }
 }
 
 export function initialScrollMinute(

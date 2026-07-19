@@ -14,14 +14,18 @@ import {
   MIN_DURATION_MIN,
   PX_PER_MIN,
   SNAP_MIN,
-  UNTIMED_DEADLINE_MIN,
   WORKDAY_END_MIN,
   WORKDAY_START_MIN,
+  calendarNavigation,
   clamp,
   clipRangeToDay,
+  deadlineMarkerMinute,
   durationFits,
+  effectiveCreationDuration,
   initialScrollMinute,
   initialScrollTop,
+  markerMinute,
+  meetingRangeForDay,
   minuteFromPointer,
   rangeForMove,
   resizeRange,
@@ -74,13 +78,10 @@ function fmtDur(min: number): string {
   return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`
 }
 
-function meetEndMin(meeting: MeetItem): number {
+function meetRange(meeting: MeetItem): { endMin: number; durationMin: number } | null {
   const startMin = toMin(meeting.startTime)
-  if (meeting.endTime) {
-    const endMin = toMin(meeting.endTime)
-    return endMin <= startMin ? DAY_END_MIN : endMin
-  }
-  return startMin + (DURATION_MIN_MAP[meeting.duration] ?? DEFAULT_TASK_DURATION_MIN)
+  const durationMin = DURATION_MIN_MAP[meeting.duration] ?? DEFAULT_MEET_DURATION_MIN
+  return meetingRangeForDay(startMin, durationMin, meeting.endTime ? toMin(meeting.endTime) : null)
 }
 
 function hourLabelClass(hour: number): string {
@@ -98,6 +99,7 @@ interface Block {
   dateKey: string
   startMin: number
   endMin: number
+  moveDurationMin: number
   taskId?: string
   sessionId?: string
   meetId?: string
@@ -189,8 +191,8 @@ interface CalendarViewProps {
   onSelectTask: (taskId: string) => void
   onSelectMeet: (meetId: string) => void
   onPickDay: (dateKey: string) => void
-  onCreateTaskAtSlot: (dateKey: string, startMin: number) => void
-  onCreateMeetAtSlot: (dateKey: string, startMin: number) => void
+  onCreateTaskAtSlot: (dateKey: string, startMin: number, durationMin: number) => void
+  onCreateMeetAtSlot: (dateKey: string, startMin: number, durationMin: number) => void
   onCreateTaskWorkSession: (taskId: string, startUtc: string, endUtc: string) => void
   onUpdateTaskWorkSession: (sessionId: string, startUtc: string, endUtc: string) => void
   onRequestDeleteTaskWorkSession: (sessionId: string) => void
@@ -270,10 +272,13 @@ export function CalendarView({
       const startSlot = localSlotFromIso(session.startUtc)
       if (!startSlot || startSlot.dateKey !== dateKey) return
       const endSlot = localSlotFromIso(session.endUtc)
+      const durationMin = (Date.parse(session.endUtc) - Date.parse(session.startUtc)) / 60_000
+      if (!Number.isFinite(durationMin) || durationMin <= 0) return
       const clipped = clipRangeToDay(
         startSlot.minutes,
         endSlot?.dateKey === dateKey ? endSlot.minutes : DAY_END_MIN,
       )
+      if (!clipped) return
       blocks.push({
         key: `work-${session.id}`,
         kind: "WORK",
@@ -283,6 +288,7 @@ export function CalendarView({
         dateKey,
         startMin: clipped.startMin,
         endMin: clipped.endMin,
+        moveDurationMin: durationMin,
         taskId: task.id,
         sessionId: session.id,
         status: task.status,
@@ -292,7 +298,10 @@ export function CalendarView({
 
     meetItems.forEach((meeting) => {
       if (meeting.date !== dateKey || !inScope(meeting.projectId)) return
-      const clipped = clipRangeToDay(toMin(meeting.startTime), meetEndMin(meeting))
+      const range = meetRange(meeting)
+      if (!range) return
+      const clipped = clipRangeToDay(toMin(meeting.startTime), range.endMin)
+      if (!clipped) return
       blocks.push({
         key: `meet-${meeting.id}`,
         kind: "MEET",
@@ -301,6 +310,7 @@ export function CalendarView({
         dateKey,
         startMin: clipped.startMin,
         endMin: clipped.endMin,
+        moveDurationMin: range.durationMin,
         meetId: meeting.id,
         location: meeting.location,
         hasLink: !!meeting.link,
@@ -317,7 +327,7 @@ export function CalendarView({
           kind: "REMIND",
           title: task.title,
           projectId: task.projectId,
-          min: clamp(toMin(task.reminderTime), DAY_START_MIN, DAY_END_MIN),
+          min: markerMinute(toMin(task.reminderTime)),
           taskId: task.id,
           selected: task.id === selectedTaskId,
         })
@@ -328,9 +338,7 @@ export function CalendarView({
           kind: "DEADLINE",
           title: task.title,
           projectId: task.projectId,
-          min: task.deadlineTime
-            ? clamp(toMin(task.deadlineTime), DAY_START_MIN, DAY_END_MIN)
-            : UNTIMED_DEADLINE_MIN,
+          min: deadlineMarkerMinute(task.deadlineTime ? toMin(task.deadlineTime) : null),
           taskId: task.id,
           selected: task.id === selectedTaskId,
         })
@@ -345,10 +353,12 @@ export function CalendarView({
     taskWorkSessions.forEach((session) => {
       const start = localSlotFromIso(session.startUtc)
       const end = localSlotFromIso(session.endUtc)
-      if (!start || !end || start.dateKey !== today || end.dateKey !== today) return
+      if (!start || !end || start.dateKey !== today) return
+      const clipped = clipRangeToDay(start.minutes, end.dateKey === today ? end.minutes : DAY_END_MIN)
+      if (!clipped) return
       const current = totals.get(session.taskId) ?? { blocks: 0, minutes: 0 }
       current.blocks += 1
-      current.minutes += Math.max(0, end.minutes - start.minutes)
+      current.minutes += clipped.endMin - clipped.startMin
       totals.set(session.taskId, current)
     })
     return totals
@@ -377,18 +387,30 @@ export function CalendarView({
   const hours = Array.from({ length: 25 }, (_, index) => index)
   const displayTitle = (block: Block) => block.title.trim() || (block.kind === "MEET" ? "Untitled MEET" : "Untitled task")
 
+  const scrollNavigation = useMemo(
+    () => calendarNavigation(viewMode, selectedDate),
+    [viewMode, selectedDate],
+  )
+
   useEffect(() => {
     const viewport = scrollViewportRef.current
     if (!viewport) return
     const now = new Date()
     const currentMinute = now.getHours() * 60 + now.getMinutes()
-    const weekContainsToday = weekDayKeys(mondayOfWeekKey(selectedDate)).includes(today)
-    const targetMinute = initialScrollMinute(viewMode, selectedDate, today, weekContainsToday, currentMinute)
+    const currentToday = todayKey()
+    const weekContainsToday = weekDayKeys(mondayOfWeekKey(scrollNavigation.selectedDate)).includes(currentToday)
+    const targetMinute = initialScrollMinute(
+      scrollNavigation.viewMode,
+      scrollNavigation.selectedDate,
+      currentToday,
+      weekContainsToday,
+      currentMinute,
+    )
     const frame = requestAnimationFrame(() => {
       viewport.scrollTop = initialScrollTop(targetMinute, viewport.clientHeight)
     })
     return () => cancelAnimationFrame(frame)
-  }, [viewMode, selectedDate, today])
+  }, [scrollNavigation])
 
   const startPoolDrag = (event: React.DragEvent, taskId: string) => {
     activationGuardRef.current.completeManipulation()
@@ -399,7 +421,7 @@ export function CalendarView({
 
   const startBlockDrag = (event: React.DragEvent, block: Block) => {
     activationGuardRef.current.completeManipulation()
-    const duration = block.endMin - block.startMin
+    const duration = block.moveDurationMin
     if (block.kind === "MEET") {
       if (!block.meetId) return
       dragRef.current = { kind: "MEET", meetId: block.meetId, duration }
@@ -574,9 +596,15 @@ export function CalendarView({
     window.addEventListener("mouseup", onUp)
   }
 
-  const canCreateTaskAtMenu = menu?.kind === "slot" && durationFits(menu.startMin, DEFAULT_TASK_DURATION_MIN)
-  const canCreateMeetAtMenu = menu?.kind === "slot" && durationFits(menu.startMin, DEFAULT_MEET_DURATION_MIN)
-  const canAddSessionAtMenu = menu?.kind === "block" && menu.block.kind === "WORK" && durationFits(menu.block.endMin, DEFAULT_TASK_DURATION_MIN)
+  const taskCreationDuration = menu?.kind === "slot"
+    ? effectiveCreationDuration(menu.startMin, DEFAULT_TASK_DURATION_MIN)
+    : null
+  const meetCreationDuration = menu?.kind === "slot"
+    ? effectiveCreationDuration(menu.startMin, DEFAULT_MEET_DURATION_MIN)
+    : null
+  const addSessionDuration = menu?.kind === "block" && menu.block.kind === "WORK"
+    ? effectiveCreationDuration(menu.block.endMin, DEFAULT_TASK_DURATION_MIN)
+    : null
 
   return (
     <div ref={rootRef} data-cal-root className="flex h-full overflow-hidden bg-background">
@@ -732,13 +760,13 @@ export function CalendarView({
           menu={menu}
           onClose={() => setMenu(null)}
           onCreateTask={() => {
-            if (menu.kind !== "slot" || !canCreateTaskAtMenu) return
-            onCreateTaskAtSlot(menu.dateKey, menu.startMin)
+            if (menu.kind !== "slot" || taskCreationDuration === null) return
+            onCreateTaskAtSlot(menu.dateKey, menu.startMin, taskCreationDuration)
             setMenu(null)
           }}
           onCreateMeet={() => {
-            if (menu.kind !== "slot" || !canCreateMeetAtMenu) return
-            onCreateMeetAtSlot(menu.dateKey, menu.startMin)
+            if (menu.kind !== "slot" || meetCreationDuration === null) return
+            onCreateMeetAtSlot(menu.dateKey, menu.startMin, meetCreationDuration)
             setMenu(null)
           }}
           onOpenBlock={() => {
@@ -748,9 +776,9 @@ export function CalendarView({
             setMenu(null)
           }}
           onAddTaskSession={() => {
-            if (menu.kind !== "block" || menu.block.kind !== "WORK" || !menu.block.taskId || !canAddSessionAtMenu) return
+            if (menu.kind !== "block" || menu.block.kind !== "WORK" || !menu.block.taskId || addSessionDuration === null) return
             const startMin = menu.block.endMin
-            const endMin = startMin + DEFAULT_TASK_DURATION_MIN
+            const endMin = startMin + addSessionDuration
             onCreateTaskWorkSession(
               menu.block.taskId,
               isoFromLocalDateTime(menu.block.dateKey, Math.floor(startMin / 60), startMin % 60),
@@ -770,9 +798,9 @@ export function CalendarView({
             setMenu(null)
           }}
           canSchedule={canSchedule}
-          canCreateTask={!!canCreateTaskAtMenu}
-          canCreateMeet={canSchedule && !createMeetDisabled && !!canCreateMeetAtMenu}
-          canAddTaskSession={!!canAddSessionAtMenu}
+          canCreateTask={taskCreationDuration !== null}
+          canCreateMeet={canSchedule && !createMeetDisabled && meetCreationDuration !== null}
+          canAddTaskSession={addSessionDuration !== null}
         />
       )}
     </div>
@@ -821,7 +849,7 @@ function CalendarContextMenu({
             role="menuitem"
             onClick={onCreateTask}
             disabled={!canCreateTask}
-            title={canCreateTask ? undefined : "A 60-minute task session does not fit before midnight."}
+            title={canCreateTask ? undefined : "At least 15 minutes must remain before midnight."}
             className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             Create task
@@ -831,7 +859,7 @@ function CalendarContextMenu({
             role="menuitem"
             onClick={onCreateMeet}
             disabled={!canCreateMeet}
-            title={canCreateMeet ? undefined : "A 30-minute MEET does not fit before midnight, or creation is unavailable."}
+            title={canCreateMeet ? undefined : "At least 15 minutes must remain before midnight, or creation is unavailable."}
             className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             Create MEET
@@ -849,7 +877,7 @@ function CalendarContextMenu({
                 role="menuitem"
                 onClick={onAddTaskSession}
                 disabled={!canSchedule || !canAddTaskSession}
-                title={canAddTaskSession ? undefined : "There is not enough room for another 60-minute session before midnight."}
+                title={canAddTaskSession ? undefined : "At least 15 minutes must remain before midnight."}
                 className="flex h-7 w-full items-center rounded-md px-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Add another session today
@@ -968,30 +996,38 @@ function DayGrid({
     curStart: number
     curEnd: number
   } | null>(null)
+  const resizingRef = useRef(resizing)
+  const onResizeBlockRef = useRef(onResizeBlock)
+  resizingRef.current = resizing
+  onResizeBlockRef.current = onResizeBlock
+  const resizeActive = resizing !== null
 
   const startResize = (event: React.MouseEvent, block: Block, edge: "top" | "bottom") => {
     event.stopPropagation()
     event.preventDefault()
-    setResizing({ block, edge, startMouseY: event.clientY, origStart: block.startMin, origEnd: block.endMin, curStart: block.startMin, curEnd: block.endMin })
+    const next = { block, edge, startMouseY: event.clientY, origStart: block.startMin, origEnd: block.endMin, curStart: block.startMin, curEnd: block.endMin }
+    resizingRef.current = next
+    setResizing(next)
     document.body.style.cursor = "ns-resize"
     document.body.style.userSelect = "none"
   }
 
   useEffect(() => {
-    if (!resizing) return
+    if (!resizeActive) return
     const onMove = (event: MouseEvent) => {
-      const deltaMin = snapMinute((event.clientY - resizing.startMouseY) / PX_PER_MIN, SNAP_MIN)
-      setResizing((current) => {
-        if (!current) return current
-        const range = resizeRange(current.origStart, current.origEnd, current.edge, deltaMin)
-        return { ...current, curStart: range.startMin, curEnd: range.endMin }
-      })
+      const current = resizingRef.current
+      if (!current) return
+      const deltaMin = snapMinute((event.clientY - current.startMouseY) / PX_PER_MIN, SNAP_MIN)
+      const range = resizeRange(current.origStart, current.origEnd, current.edge, deltaMin)
+      const next = { ...current, curStart: range.startMin, curEnd: range.endMin }
+      resizingRef.current = next
+      setResizing(next)
     }
     const onUp = () => {
-      setResizing((current) => {
-        if (current) onResizeBlock(current.block, current.curStart, current.curEnd)
-        return null
-      })
+      const current = resizingRef.current
+      if (current) onResizeBlockRef.current(current.block, current.curStart, current.curEnd)
+      resizingRef.current = null
+      setResizing(null)
       document.body.style.cursor = ""
       document.body.style.userSelect = ""
     }
@@ -1000,8 +1036,10 @@ function DayGrid({
     return () => {
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
     }
-  }, [resizing, onResizeBlock])
+  }, [resizeActive])
 
   const laidResized = laid.map((block) => resizing && block.key === resizing.block.key
     ? { ...block, startMin: resizing.curStart, endMin: resizing.curEnd }
@@ -1227,30 +1265,38 @@ function WeekGrid({
     curStart: number
     curEnd: number
   } | null>(null)
+  const resizingRef = useRef(resizing)
+  const onResizeBlockRef = useRef(onResizeBlock)
+  resizingRef.current = resizing
+  onResizeBlockRef.current = onResizeBlock
+  const resizeActive = resizing !== null
 
   const startResize = (event: React.MouseEvent, block: Block, dateKey: string, edge: "top" | "bottom") => {
     event.stopPropagation()
     event.preventDefault()
-    setResizing({ block, dateKey, edge, startMouseY: event.clientY, origStart: block.startMin, origEnd: block.endMin, curStart: block.startMin, curEnd: block.endMin })
+    const next = { block, dateKey, edge, startMouseY: event.clientY, origStart: block.startMin, origEnd: block.endMin, curStart: block.startMin, curEnd: block.endMin }
+    resizingRef.current = next
+    setResizing(next)
     document.body.style.cursor = "ns-resize"
     document.body.style.userSelect = "none"
   }
 
   useEffect(() => {
-    if (!resizing) return
+    if (!resizeActive) return
     const onMove = (event: MouseEvent) => {
-      const deltaMin = snapMinute((event.clientY - resizing.startMouseY) / PX_PER_MIN, SNAP_MIN)
-      setResizing((current) => {
-        if (!current) return current
-        const range = resizeRange(current.origStart, current.origEnd, current.edge, deltaMin)
-        return { ...current, curStart: range.startMin, curEnd: range.endMin }
-      })
+      const current = resizingRef.current
+      if (!current) return
+      const deltaMin = snapMinute((event.clientY - current.startMouseY) / PX_PER_MIN, SNAP_MIN)
+      const range = resizeRange(current.origStart, current.origEnd, current.edge, deltaMin)
+      const next = { ...current, curStart: range.startMin, curEnd: range.endMin }
+      resizingRef.current = next
+      setResizing(next)
     }
     const onUp = () => {
-      setResizing((current) => {
-        if (current) onResizeBlock(current.block, current.dateKey, current.curStart, current.curEnd)
-        return null
-      })
+      const current = resizingRef.current
+      if (current) onResizeBlockRef.current(current.block, current.dateKey, current.curStart, current.curEnd)
+      resizingRef.current = null
+      setResizing(null)
       document.body.style.cursor = ""
       document.body.style.userSelect = ""
     }
@@ -1259,8 +1305,10 @@ function WeekGrid({
     return () => {
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
     }
-  }, [resizing, onResizeBlock])
+  }, [resizeActive])
 
   return (
     <div className="relative flex px-4 py-4">
@@ -1293,8 +1341,8 @@ function WeekGrid({
                 type="button"
                 onClick={() => onPickDay(iso)}
                 className={cn(
-                  "sticky top-0 z-30 mb-1 flex h-8 items-center justify-center gap-1.5 rounded-md border bg-background text-[11px] font-semibold transition-colors",
-                  isToday ? "border-primary/50 bg-primary/10 text-foreground" : isSelected ? "border-primary/30 bg-primary/5 text-foreground" : "border-border text-muted-foreground hover:text-foreground",
+                  "sticky top-0 z-30 mb-1 flex h-8 items-center justify-center gap-1.5 rounded-md border bg-card text-[11px] font-semibold shadow-sm transition-colors",
+                  isToday ? "border-primary/50 text-foreground" : isSelected ? "border-primary/30 text-foreground" : "border-border text-muted-foreground hover:text-foreground",
                 )}
               >
                 {formatWeekdayShort(iso)}<span className="tabular-nums">{formatDayNumber(iso)}</span>

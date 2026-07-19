@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { addDaysKey, isoFromLocalDateTime, localSlotFromIso, todayKey } from "@/lib/calendar-date"
+import { DAY_END_MIN, DEFAULT_MEET_DURATION_MIN } from "@/lib/calendar-layout"
 import { buildProjectContextPack } from "@/lib/context-pack-builder"
 import {
   meetDurationFields,
@@ -72,11 +73,15 @@ function createMeetingDraft(
   projectName: string | undefined,
   dateKey?: string,
   startMin?: number,
+  durationMin = DEFAULT_MEET_DURATION_MIN,
 ): MeetItem {
   const now = new Date()
   now.setMinutes(Math.ceil(now.getMinutes() / 30) * 30, 0, 0)
   const pad = (value: number) => String(value).padStart(2, "0")
-  const draftStartMin = startMin ?? (now.getHours() * 60 + now.getMinutes())
+  const draftStartMin = startMin ?? Math.min(
+    now.getHours() * 60 + now.getMinutes(),
+    DAY_END_MIN - DEFAULT_MEET_DURATION_MIN,
+  )
   const date = dateKey ?? `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
   const startTime = `${pad(Math.floor(draftStartMin / 60))}:${pad(draftStartMin % 60)}`
   return {
@@ -86,7 +91,7 @@ function createMeetingDraft(
     titleIsGenerated: true,
     date,
     startTime,
-    duration: "30m",
+    ...meetDurationFields(draftStartMin, durationMin),
   }
 }
 
@@ -721,12 +726,12 @@ export function TaskManager() {
     }
   }
 
-  const handleCreateCalendarTask = (dateKey: string, startMin: number) => {
+  const handleCreateCalendarTask = (dateKey: string, startMin: number, durationMin: number) => {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId || readOnly) return
     const rootSectionId = sections.find((s) => s.projectId === projectId && s.isProjectRoot)?.id ?? `project:${projectId}:root`
     const workSessionStartUtc = isoFromLocalDateTime(dateKey, Math.floor(startMin / 60), startMin % 60)
-    const endMin = startMin + 60
+    const endMin = startMin + durationMin
     const workSessionEndUtc = isoFromLocalDateTime(dateKey, Math.floor(endMin / 60), endMin % 60)
     setCalendarSelectedDate(dateKey)
     setTab("calendar")
@@ -1322,12 +1327,13 @@ export function TaskManager() {
   const handleMoveMeet = (meetId: string, startsAtUtc: string, durationMinutes: number) => {
     const meeting = meetItems.find((m) => m.id === meetId)
     if (!meeting) return
+    const nextDurationMinutes = durationMinutes || meetDurationMinutes(meeting)
     if (connected) {
       bridge.sendMeetingCommand({
         type: "updateMeeting",
         meetingId: meetId,
         startsAtUtc,
-        durationMinutes: durationMinutes || meetDurationMinutes(meeting),
+        durationMinutes: nextDurationMinutes,
       })
     } else if (!bridged) {
       const slot = localSlotFromIso(startsAtUtc)
@@ -1337,6 +1343,7 @@ export function TaskManager() {
             ...m,
             date: slot.dateKey,
             startTime: `${String(Math.floor(slot.minutes / 60)).padStart(2, "0")}:${String(slot.minutes % 60).padStart(2, "0")}`,
+            ...meetDurationFields(slot.minutes, nextDurationMinutes),
           }
         : m))
     }
@@ -1344,13 +1351,13 @@ export function TaskManager() {
     setSelectedTimelineItemId(`meet:${meetId}`)
   }
 
-  const handleCreateMeeting = (dateKey?: string, startMin?: number) => {
+  const handleCreateMeeting = (dateKey?: string, startMin?: number, durationMin = DEFAULT_MEET_DURATION_MIN) => {
     const projectId = selectedProjectIds[0] ?? projects[0]?.id
     if (!projectId) return
     if (readOnly) return
     if (connected && meetingCreateGuardRef.current?.isCreateBlocked()) return
     const projectName = projects.find((project) => project.id === projectId)?.name
-    const draft = createMeetingDraft(crypto.randomUUID(), projectId, projectName, dateKey, startMin)
+    const draft = createMeetingDraft(crypto.randomUUID(), projectId, projectName, dateKey, startMin, durationMin)
     if (dateKey) setCalendarSelectedDate(dateKey)
     setTab("calendar")
     if (connected) {
@@ -1583,7 +1590,7 @@ export function TaskManager() {
             onToggleProject={toggleProject}
             onSelectAll={selectAllProjects}
           />
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className={cn("min-h-0 flex-1", tab === "calendar" ? "overflow-hidden" : "overflow-y-auto")}>
             {tab === "tree" && (
               <div className="flex min-h-full flex-col">
                 {multi && (
