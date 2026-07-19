@@ -19,6 +19,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { isoFromLocalDateTime } from "@/lib/calendar-date"
+import { Select as FieldSelect } from "@/components/ui/select"
 import { statusConfig } from "./status-badge"
 import { TaskContextBlock } from "./task-context-block"
 
@@ -1547,16 +1548,12 @@ function Select({
   options: { value: string; label: string }[]
 }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-primary/60"
-    >
+    <FieldSelect value={value} onChange={(e) => onChange(e.target.value)}>
       {options.map((o) => (
         <option key={o.value} value={o.value}>
           {o.label}
         </option>
       ))}
-    </select>
+    </FieldSelect>
   )
 }

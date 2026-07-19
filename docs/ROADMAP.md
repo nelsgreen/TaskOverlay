@@ -13,11 +13,19 @@ Product/backend feature work is paused while this bounded PR sequence lands
 the one already accepted in the signed-off spec's handoff notes
 (rev. 4, https://claude.ai/code/artifact/8042b7b0-1759-40a3-afdf-1b12285466e3):
 
-1. PR-1 token foundation - implemented (this PR): canonical semantic tokens,
-   Light/Dark value sets, Neutral/Warm accent profiles, `data-theme`/
-   `data-accent` root wiring, compatibility aliases.
-2. Field primitives - Default / Read-only / Disabled.
-3. Button and action primitives, including the recording variant.
+1. PR-1 token foundation - implemented: canonical semantic tokens, Light/Dark
+   value sets, Neutral/Warm accent profiles, `data-theme`/`data-accent` root
+   wiring, compatibility aliases.
+2. Field primitives - Editable / Read-only / Disabled - implemented and in
+   review (this PR): shared `Input`/`Textarea`/`Select` under
+   `components/ui/`, driven by native `readOnly`/`disabled` attributes, with
+   a handful of low-risk callers migrated to prove all three states across
+   all four theme x accent combinations. Behavior-sensitive fields
+   (date/time, MEET transcript editing, custom "select trigger" pickers) and
+   the read-only-workspace `<fieldset disabled>` pattern in Task/MEET
+   Details and ContextHUB remain deferred (see DECISIONS.md "Design
+   System").
+3. Button and action primitives, including the recording variant - next.
 4. Remaining shared primitives (Tabs/Segment, StatusBadge/MetadataBadge,
    Empty/Loading/Error/Saved states, Panel/ModalShell/DetailsSection).
 5. Component and shell migrations onto the new primitives.

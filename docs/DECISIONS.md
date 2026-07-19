@@ -680,6 +680,67 @@ item.
   features are paused. Any deviation from rev. 4 (a different token value,
   a new token, a different default) requires an explicit product decision
   recorded here first, not an implementation-time judgment call.
+- PR-2 (field state primitives) is implemented: shared `Input`, `Textarea`,
+  and `Select` under `workspace-ui/components/ui/`, plus a shared
+  `fieldStateClasses` helper (`components/ui/field.ts`) implementing the
+  canonical spec's §05 Editable / Read-only / Disabled contract in one
+  place. State is driven entirely by the native `readOnly` / `disabled`
+  attributes via `:read-only` / `:disabled`, not a separate variant prop, so
+  every existing and future caller gets the right look for free from
+  standard HTML usage. **Read-only must never be represented as disabled**:
+  read-only keeps `--field-readonly` background, a softened `--border`, and
+  full-contrast `--text` (readable, selectable, copyable, still
+  `focus-visible`able); disabled uses dedicated `--field-disabled` /
+  `--border-disabled` / `--text-disabled` tokens plus `cursor-not-allowed`
+  and `pointer-events-none` - never generic opacity, and never the same
+  background/border/text token as read-only. `focus-visible:border-primary`
+  (not `border-accent`) is deliberate: PR-1 renamed legacy shadcn
+  `--accent`/`bg-accent` to a neutral hover-surface tint, so `--primary` is
+  the alias resolving to the canonical brand/interaction `--accent`. Focus
+  ring uses the canonical `--focus-ring` token (accent-derived), confirmed
+  via computed-style verification to differ correctly by accent profile
+  (Neutral vs Warm) while field background/border/text tokens stay
+  identical between profiles in the same theme - accent affects only the
+  interaction role, never field surfaces, in all four theme x accent
+  combinations.
+- Native `<select>` has no `readonly` HTML attribute (per spec, `readonly`
+  only applies to text-editable inputs/textareas), so the shared `Select`
+  primitive only has meaningful Editable/Disabled states; this is a
+  documented platform limitation, not a gap in the primitive.
+- Migrated callers (small, low-risk, chosen to prove all three states
+  without touching autosave-critical or bridge-mutation-critical fields):
+  `context-pack-modal.tsx`'s already-`readOnly` export-preview textarea,
+  `linked-task-picker.tsx`'s search input (also removed one of the two
+  byte-identical duplicated `inputClass` constants found in the audit),
+  `workspace-header.tsx`'s global search input (proves Editable + Disabled
+  together via its existing `searchDisabled` gating), and the internal
+  `<select>` inside `details-panel.tsx`'s file-local `Select` helper
+  (imported as `FieldSelect` to avoid a name collision with that helper;
+  the helper's own `value`/`onChange`/`options` API and its two Location/
+  Project call sites are unchanged).
+- Deliberately deferred, not migrated in this PR (behavior-sensitive or
+  broader than a primitive-foundation PR should touch): the third
+  `inputClass`-style constant in `meet-details-panel.tsx` (different
+  padding/focus-ring-color, MEET-specific); every date/time/datetime-local
+  field in `details-panel.tsx`, `meet-details-panel.tsx`, and
+  `meeting-assistant-section.tsx`; the transcript-editing fields in
+  `meet-sources-review.tsx`; and every custom non-native "select trigger"
+  (`linked-task-picker.tsx`'s own modal-launching button,
+  `calendar-view.tsx`/`tree-view.tsx` context menus) - these are pickers/
+  menus, not `<select>` replacements, and are out of scope by design.
+- Identified but explicitly not fixed in this PR: `meet-details-panel.tsx`
+  and `context-hub-view.tsx` wrap their entire edit forms in
+  `<fieldset disabled={readOnly}>`, and `details-panel.tsx` uses four
+  `<fieldset disabled={locked}>` wrappers (Reminder/Deadline/Location/
+  Steps) plus a directly-`disabled` title input - all four make a
+  read-only workspace natively `disabled`, so text becomes unselectable/
+  uncopyable instead of read-only. Fixing this needs per-field `readOnly`
+  (fieldset has no `readonly` attribute; individual inputs/textareas would
+  need it while `<select>`s and buttons inside the same form correctly stay
+  `disabled`), which is a broader, more behavior-sensitive change than this
+  primitive-foundation PR is scoped for - deferred to the view-migration
+  PRs (PR-7/8) once Task Details / MEET Details are otherwise being
+  touched.
 
 ## Process
 
