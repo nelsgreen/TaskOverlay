@@ -45,7 +45,10 @@ export function TaskRow({
         }
       }}
       className={cn(
-        "group relative flex items-center gap-2 rounded-lg border py-1.5 pr-2 transition-colors",
+        "group relative flex items-center gap-2 rounded-lg border py-1.5 pr-2 outline-none transition-colors",
+        // Keyboard focus is its own state - a ring, never a reuse of hover or
+        // selected fills - so Tab-navigation stays visible on top of either.
+        "focus-visible:ring-2 focus-visible:ring-ring",
         selected
           ? "border-row-selected-border bg-row-selected"
           : "border-transparent hover:border-border hover:bg-accent/40",

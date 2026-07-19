@@ -6,6 +6,28 @@ the backlog into a full release plan.
 The WPF application is the sole TaskOverlay product. Its source lives at the
 repository root and portable downloads use `TaskOverlay_Windows_Portable`.
 
+## Design System Integration (active gate)
+
+Product/backend feature work is paused while this bounded PR sequence lands
+(see DECISIONS.md "Design System" for the freeze rationale). The sequence is
+the one already accepted in the signed-off spec's handoff notes
+(rev. 4, https://claude.ai/code/artifact/8042b7b0-1759-40a3-afdf-1b12285466e3):
+
+1. PR-1 token foundation - implemented (this PR): canonical semantic tokens,
+   Light/Dark value sets, Neutral/Warm accent profiles, `data-theme`/
+   `data-accent` root wiring, compatibility aliases.
+2. Field primitives - Default / Read-only / Disabled.
+3. Button and action primitives, including the recording variant.
+4. Remaining shared primitives (Tabs/Segment, StatusBadge/MetadataBadge,
+   Empty/Loading/Error/Saved states, Panel/ModalShell/DetailsSection).
+5. Component and shell migrations onto the new primitives.
+6. Workspace view migrations (Tree, Status, Timeline, Calendar,
+   Workstreams, ContextHUB).
+7. MEET Details, Sources, and Review migrations, including retiring
+   `.meet-shell`.
+8. Final cross-surface acceptance across all four theme x accent
+   combinations.
+
 ## Immediate
 
 1. Planning Pool filters: Active / Unscheduled / Today / All - implemented.

@@ -2,11 +2,45 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:is([data-theme="dark"] *));
 
 @theme inline {
   --font-sans: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+
+  /* canonical semantic tokens — direct Tailwind utilities (bg-surface, text-text-muted, ...) */
+  --color-bg-app: var(--bg-app);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-field: var(--field);
+  --color-field-readonly: var(--field-readonly);
+  --color-field-disabled: var(--field-disabled);
+  --color-border-disabled: var(--border-disabled);
+  --color-text-disabled: var(--text-disabled);
+  --color-accent-ink: var(--accent-ink);
+  --color-selection: var(--selection);
+  --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
+  --color-recording: var(--recording);
+  --color-recording-soft: var(--recording-soft);
+  --color-recording-line: var(--recording-line);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-sem-todo: var(--sem-todo);
+  --color-sem-focus: var(--sem-focus);
+  --color-sem-wait: var(--sem-wait);
+  --color-sem-done: var(--sem-done);
+  --color-sem-remind: var(--sem-remind);
+  --color-sem-meet: var(--sem-meet);
+  --color-sem-panel: var(--sem-panel);
+  --color-sem-deadline: var(--sem-deadline);
+  --color-sem-now: var(--sem-now);
+
+  /* compatibility aliases — existing components keep using these utility names */
   --color-status-todo: var(--status-todo);
   --color-status-focus: var(--status-focus);
   --color-status-wait: var(--status-wait);
@@ -36,7 +70,14 @@
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
+  /* NOTE: legacy `bg-accent` / `--accent` meant "neutral hover-surface tint" in every
+     existing component (20+ usages), which collides with the canonical spec's
+     `--accent` (the brand/interaction color, §06 of the design spec). To adopt the
+     canonical name faithfully without repainting every hover state, the Tailwind
+     `accent` utility is repointed to a renamed alias, `--surface-hover`, instead of
+     the literal `--accent` custom property. See DECISIONS.md for the retained-alias
+     record. */
+  --color-accent: var(--surface-hover);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -58,200 +99,239 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
+/* ============================================================
+ * TaskOverlay Design System v1 — canonical semantic tokens
+ * (rev. 4, signed off: https://claude.ai/code/artifact/8042b7b0-1759-40a3-afdf-1b12285466e3)
+ *
+ * One semantic token model, two value sets (Light / Dark), switched via
+ * `data-theme` on <html>. Accent is a second, theme-independent dimension —
+ * Neutral (initial) / Warm — switched via `data-accent`. Values are taken
+ * verbatim from the signed-off spec; nothing here is invented.
+ * ============================================================ */
+
+/* ---------- LIGHT value set (also the unattributed :root fallback) ---------- */
+:root,
+:root[data-theme="light"] {
   color-scheme: light;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+
+  --bg-app: oklch(0.965 0.003 240);
+  --surface: oklch(0.99 0.002 240);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.94 0.004 240);
+  --border: oklch(0.875 0.005 240);
+  --border-strong: oklch(0.78 0.008 240);
+  --text: oklch(0.22 0.012 240);
+  --text-muted: oklch(0.48 0.012 240);
+  --text-faint: oklch(0.63 0.01 240);
+
+  /* field states — three distinct roles (D3 / §05) */
+  --field: oklch(1 0 0);
+  --field-readonly: oklch(0.955 0.003 240);
+  --field-disabled: oklch(0.925 0.004 240);
+  --border-disabled: oklch(0.895 0.004 240);
+  --text-disabled: oklch(0.60 0.008 240);
+
+  /* interaction accent — Neutral profile (initial), §06 */
+  --accent: oklch(0.25 0.006 250);
+  --accent-ink: oklch(0.985 0.002 250);
+  --selection: oklch(0.25 0.006 250);
+
+  --destructive: oklch(0.53 0.20 15);
+  --warning: oklch(0.60 0.13 80);
+  --warning-ink: oklch(0.38 0.10 80);
+  --recording: oklch(0.56 0.19 20); /* independent of --destructive, D10 */
+
+  --sem-todo: oklch(0.50 0.02 240);
+  --sem-focus: oklch(0.55 0.15 155);
+  --sem-wait: oklch(0.52 0.12 215);
+  --sem-done: oklch(0.62 0.01 240);
+  --sem-remind: oklch(0.58 0.14 72);
+  --sem-meet: oklch(0.51 0.17 296);
+  --sem-panel: oklch(0.48 0.15 262);
+  --sem-deadline: oklch(0.55 0.21 25);
+  --sem-now: oklch(0.55 0.11 195);
+
+  --shadow-1: 0 4px 12px -4px oklch(0.2 0.01 240 / 0.14);
+  --shadow-3: 0 24px 48px -12px oklch(0.2 0.01 240 / 0.28);
+  --scrim: oklch(0.35 0.01 240 / 0.45);
+}
+
+/* ---------- DARK value set ---------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-app: oklch(0.185 0.004 250);
+  --surface: oklch(0.225 0.005 250);
+  --surface-raised: oklch(0.265 0.006 250);
+  --surface-sunken: oklch(0.155 0.004 250);
+  --border: oklch(1 0 0 / 13%);
+  --border-strong: oklch(1 0 0 / 26%);
+  --text: oklch(0.93 0.005 250);
+  --text-muted: oklch(0.68 0.008 250);
+  --text-faint: oklch(0.50 0.008 250);
+
+  --field: oklch(0.165 0.004 250);
+  --field-readonly: oklch(0.195 0.004 250);
+  --field-disabled: oklch(0.225 0.005 250);
+  --border-disabled: oklch(1 0 0 / 9%);
+  --text-disabled: oklch(0.48 0.008 250);
+
+  --accent: oklch(0.90 0.005 250);
+  --accent-ink: oklch(0.19 0.008 250);
+  --selection: oklch(0.90 0.005 250);
+
+  --destructive: oklch(0.66 0.17 15);
+  --warning: oklch(0.74 0.12 80);
+  --warning-ink: oklch(0.80 0.11 80);
+  --recording: oklch(0.68 0.17 20);
+
+  --sem-todo: oklch(0.68 0.01 240);
+  --sem-focus: oklch(0.72 0.15 155);
+  --sem-wait: oklch(0.70 0.13 215);
+  --sem-done: oklch(0.55 0.008 240);
+  --sem-remind: oklch(0.75 0.14 72);
+  --sem-meet: oklch(0.67 0.15 296);
+  --sem-panel: oklch(0.63 0.13 262);
+  --sem-deadline: oklch(0.64 0.19 25);
+  --sem-now: oklch(0.71 0.10 195);
+
+  --shadow-1: 0 4px 12px -4px oklch(0 0 0 / 0.45);
+  --shadow-3: 0 24px 48px -12px oklch(0 0 0 / 0.65);
+  --scrim: oklch(0 0 0 / 0.55);
+}
+
+/* ---------- accent profiles (§06) — Neutral (base values above) · Warm ----------
+ * Theme-independent dimension: overrides only --accent / --accent-ink / --selection.
+ * Never recolors backgrounds, surfaces, panels, modals, or any status/domain
+ * semantic (FOCUS, MEET, REMIND, warning, recording, destructive stay untouched). */
+:root[data-theme="light"][data-accent="warm"] {
+  --accent: oklch(0.35 0.030 88);
+  --accent-ink: oklch(0.99 0.006 88);
+  --selection: oklch(0.30 0.012 88);
+}
+:root[data-theme="dark"][data-accent="warm"] {
+  --accent: oklch(0.82 0.028 88);
+  --accent-ink: oklch(0.22 0.020 88);
+  --selection: oklch(0.87 0.012 88);
+}
+/* neutral-profile fallback before the theme-init script runs (matches base values) */
+:root[data-accent="warm"]:not([data-theme="dark"]) {
+  --accent: oklch(0.35 0.030 88);
+  --accent-ink: oklch(0.99 0.006 88);
+  --selection: oklch(0.30 0.012 88);
+}
+
+:root {
+  --font-ui: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+
+  /* focus ring + soft/line derivatives are formulas over the base tokens above,
+     not independently authored colors — same color-mix ratios the spec's own
+     component CSS uses (badges: 11% fill / 30% ring; buttons: 10% fill / 32% ring). */
+  --focus-ring: 0 0 0 3px color-mix(in oklch, var(--accent) 32%, transparent);
+  --focus-ring-error: 0 0 0 3px color-mix(in oklch, var(--destructive) 25%, transparent);
+  --recording-soft: color-mix(in oklch, var(--recording) 11%, transparent);
+  --recording-line: color-mix(in oklch, var(--recording) 30%, transparent);
+  --destructive-soft: color-mix(in oklch, var(--destructive) 11%, transparent);
+
+  /* ============================================================
+   * Compatibility aliases — existing components/utilities keep working
+   * unchanged. Each maps an old shadcn/production variable name onto the
+   * canonical token above it is standing in for. Retained deliberately
+   * (see DECISIONS.md "PR-1 token foundation") rather than rewriting every
+   * consumer; PR-2+ component migrations may retire these one at a time.
+   * ============================================================ */
+  --background: var(--bg-app);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --popover: var(--surface-raised);
+  --popover-foreground: var(--text);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-ink);
+  --secondary: var(--surface-sunken);
+  --secondary-foreground: var(--text);
+  --muted: var(--surface-sunken);
+  --muted-foreground: var(--text-muted);
+  /* legacy shadcn "accent" = neutral hover-surface tint, renamed to avoid
+     colliding with the canonical brand --accent (see @theme inline note above).
+     .meet-shell overrides this instead of --accent to keep its violet hover tint.
+     Uses --surface-raised (not --surface-sunken): a hover cue must read as
+     slightly LIFTED/lighter than the resting surface in both themes, never as
+     a darker/sunken/pressed state (QA: Tree row hover was darkening, reading
+     as pressed/disabled instead of hovered). */
+  --surface-hover: var(--surface-raised);
+  --accent-foreground: var(--text);
+  --input: var(--border-strong);
+  --ring: var(--accent);
+  --status-todo: var(--sem-todo);
+  --status-focus: var(--sem-focus);
+  --status-wait: var(--sem-wait);
+  --status-done: var(--sem-done);
+  --status-remind: var(--sem-remind);
+  --status-meet: var(--sem-meet);
+  --status-panel: var(--sem-panel);
+  --status-deadline: var(--sem-deadline);
+  --now-marker: var(--sem-now);
+  --row-selected: color-mix(in oklch, var(--selection) 14%, var(--surface));
+  --row-selected-border: color-mix(in oklch, var(--selection) 45%, var(--border));
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: var(--accent-ink);
+  --sidebar-accent: var(--surface-sunken);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--accent);
+
+  /* Charts are not part of the canonical model and are currently unused in the
+     Workspace UI; left as pre-existing flat values rather than themed. */
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
+
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  color-scheme: dark;
-
-  /* Surfaces — true near-black, no blue cast */
-  --background: oklch(0.155 0.003 240);
-  --foreground: oklch(0.94 0.006 240);
-  --card: oklch(0.195 0.004 240);
-  --card-foreground: oklch(0.94 0.006 240);
-  --popover: oklch(0.21 0.005 240);
-  --popover-foreground: oklch(0.94 0.006 240);
-
-  /* Brand / primary = FOCUS green */
-  --primary: oklch(0.72 0.15 155);
-  --primary-foreground: oklch(0.14 0.04 155);
-
-  /* Neutrals */
-  --secondary: oklch(0.25 0.004 240);
-  --secondary-foreground: oklch(0.94 0.006 240);
-  --muted: oklch(0.24 0.004 240);
-  --muted-foreground: oklch(0.60 0.006 240);
-  --accent: oklch(0.27 0.005 240);
-  --accent-foreground: oklch(0.94 0.006 240);
-
-  /* Semantic */
-  --destructive: oklch(0.60 0.21 22);
-  --border: oklch(1 0 0 / 7%);
-  --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.72 0.15 155);
-
-  /* Charts */
-  --chart-1: oklch(0.72 0.15 155);
-  --chart-2: oklch(0.68 0.14 220);
-  --chart-3: oklch(0.76 0.14 75);
-  --chart-4: oklch(0.62 0.006 240);
-  --chart-5: oklch(0.24 0.004 240);
-
-  /* Sidebar — slightly lighter than background */
-  --sidebar: oklch(0.175 0.004 240);
-  --sidebar-foreground: oklch(0.94 0.006 240);
-  --sidebar-primary: oklch(0.72 0.15 155);
-  --sidebar-primary-foreground: oklch(0.14 0.04 155);
-  --sidebar-accent: oklch(0.25 0.004 240);
-  --sidebar-accent-foreground: oklch(0.94 0.006 240);
-  --sidebar-border: oklch(1 0 0 / 7%);
-  --sidebar-ring: oklch(0.72 0.15 155);
-
-  /* ─── Semantic status palette ─── */
-  /* TODO — neutral gray */
-  --status-todo: oklch(0.66 0.006 240);
-  /* FOCUS — green */
-  --status-focus: oklch(0.72 0.16 155);
-  /* WAIT — cyan/blue */
-  --status-wait: oklch(0.70 0.14 215);
-  /* DONE — muted, strike-through */
-  --status-done: oklch(0.50 0.004 240);
-  /* REMIND — amber */
-  --status-remind: oklch(0.76 0.15 72);
-  /* MEET — violet/purple, meetings */
-  --status-meet: oklch(0.65 0.16 296);
-  /* PANEL — indigo, pinned visibility (distinct from MEET violet) */
-  --status-panel: oklch(0.60 0.14 262);
-  /* DEADLINE — red accent */
-  --status-deadline: oklch(0.60 0.21 22);
-  /* Selected row — muted blue-gray */
-  --row-selected: oklch(0.28 0.03 240);
-  --row-selected-border: oklch(0.45 0.06 240);
-  /* Now marker — calm teal/cyan, not an alarm color */
-  --now-marker: oklch(0.72 0.10 195);
 }
 
 /*
  * MEET visual foundation (phase 1 — shell + Details).
- * These overrides are scoped to `.meet-shell` (the MEET modal only) and never
- * touch Task, Calendar, ContextHUB, Settings, or Overlay screens. They resolve
- * the low-contrast complaints on the user's work monitor: softer charcoal
- * surfaces, clearly visible neutral borders, near-white foreground, readable
- * metadata, and a restrained violet accent. Existing semantic utilities used
- * inside the modal (bg-sidebar, border-border, text-muted-foreground,
- * text-status-meet, …) inherit these values automatically, so Sources and
- * Review gain the same legibility without a content redesign.
+ * Scoped to `.meet-shell` (the MEET modal only); never touches Task, Calendar,
+ * ContextHUB, Settings, or Overlay screens. Retained as-is for PR-1 (slated for
+ * removal in PR-8 per DECISIONS.md/NOTES.md); the only change is retargeting
+ * the hover-tint override from the old `--accent` name to its renamed
+ * `--surface-hover` alias so it keeps producing the same violet hover tint now
+ * that `--accent` means the canonical brand/interaction color.
  */
 .meet-shell {
-  /*
-   * Layered charcoal hierarchy (visual-QA correction): the surface levels must
-   * separate by luminance before borders or accents are involved —
-   *   shell chrome (header/tabs/footer)  0.19
-   *   content columns (work surface)     0.215  (--meet-content)
-   *   sections / cards                   0.245
-   *   selected transcript                0.30   (--meet-selected-surface)
-   * with inputs as darker 0.16 insets so they stay distinct from their card.
-   */
-  --background: oklch(0.16 0.004 260);  /* inset: inputs, tab strip */
-  --sidebar: oklch(0.19 0.004 260);     /* shell chrome: header / footer */
-  --meet-content: oklch(0.215 0.004 260); /* content columns */
-  --card: oklch(0.245 0.005 260);       /* sections / cards */
+  --background: oklch(0.16 0.004 260);
+  --sidebar: oklch(0.19 0.004 260);
+  --meet-content: oklch(0.215 0.004 260);
+  --card: oklch(0.245 0.005 260);
   --popover: oklch(0.245 0.005 260);
   --muted: oklch(0.25 0.004 260);
   --secondary: oklch(0.28 0.004 260);
   --secondary-foreground: oklch(0.965 0.004 260);
-  --accent: oklch(0.30 0.015 296);      /* hover — faint violet tint */
+  --surface-hover: oklch(0.30 0.015 296); /* was --accent — see header note */
   --accent-foreground: oklch(0.965 0.004 260);
 
-  /* Text — near-white primary, readable neutral metadata */
   --foreground: oklch(0.965 0.004 260);
   --card-foreground: oklch(0.965 0.004 260);
   --popover-foreground: oklch(0.965 0.004 260);
   --sidebar-foreground: oklch(0.965 0.004 260);
   --muted-foreground: oklch(0.75 0.006 260);
 
-  /* Borders — clearly visible neutral gray (global is 7%, invisible here) */
   --border: oklch(1 0 0 / 16%);
   --sidebar-border: oklch(1 0 0 / 16%);
   --input: oklch(1 0 0 / 20%);
 
-  /* Focus + selection — restrained violet, light-neutral selected boundary */
   --ring: oklch(0.82 0.06 296);
   --sidebar-ring: oklch(0.82 0.06 296);
   --meet-border-strong: oklch(1 0 0 / 32%);
-  --meet-active: oklch(0.95 0.004 260);       /* near-white active underline */
-  --meet-selected: oklch(0.65 0.16 296 / 16%); /* subtle violet selected tint */
-  --meet-selected-surface: oklch(0.30 0.005 260); /* active transcript card */
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not(.light) {
-    color-scheme: dark;
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
-  }
+  --meet-active: oklch(0.95 0.004 260);
+  --meet-selected: oklch(0.65 0.16 296 / 16%);
+  --meet-selected-surface: oklch(0.30 0.005 260);
 }
 
 @layer base {
