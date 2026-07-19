@@ -7,7 +7,7 @@ namespace TaskOverlay.Core;
 
 public sealed class AppState
 {
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public List<TaskItem> Tasks { get; set; } = new();
@@ -534,6 +534,10 @@ public sealed class TreeManagerSettings
 
 public sealed class WorkspaceSettings
 {
+    public const int DefaultWorkdayStartMinutes = 9 * 60;
+    public const int DefaultWorkdayEndMinutes = 18 * 60;
+    public const int WorkdayIncrementMinutes = 15;
+
     public WorkspaceTab ActiveTab { get; set; } = WorkspaceTab.Tree;
     public List<Guid> SelectedProjectIds { get; set; } = new();
     public Guid? SelectedTaskId { get; set; }
@@ -541,6 +545,35 @@ public sealed class WorkspaceSettings
     public string? SelectedWorkstreamId { get; set; }
     public WorkspaceFilter Filter { get; set; } = WorkspaceFilter.All;
     public bool ActiveNowCollapsed { get; set; }
+    public int WorkdayStartMinutes { get; set; } = DefaultWorkdayStartMinutes;
+    public int WorkdayEndMinutes { get; set; } = DefaultWorkdayEndMinutes;
+
+    public bool NormalizeWorkingHours()
+    {
+        if (IsValidWorkingHours(WorkdayStartMinutes, WorkdayEndMinutes))
+        {
+            return false;
+        }
+
+        WorkdayStartMinutes = DefaultWorkdayStartMinutes;
+        WorkdayEndMinutes = DefaultWorkdayEndMinutes;
+        return true;
+    }
+
+    public static bool IsValidWorkingHours(int startMinutes, int endMinutes) =>
+        startMinutes >= 0 &&
+        endMinutes <= 24 * 60 &&
+        startMinutes < endMinutes &&
+        endMinutes - startMinutes >= WorkdayIncrementMinutes &&
+        startMinutes % WorkdayIncrementMinutes == 0 &&
+        endMinutes % WorkdayIncrementMinutes == 0;
+
+    public static (int StartMinutes, int EndMinutes) ResolveWorkingHours(
+        WorkspaceSettings? settings) =>
+        settings is not null &&
+        IsValidWorkingHours(settings.WorkdayStartMinutes, settings.WorkdayEndMinutes)
+            ? (settings.WorkdayStartMinutes, settings.WorkdayEndMinutes)
+            : (DefaultWorkdayStartMinutes, DefaultWorkdayEndMinutes);
 }
 
 public enum WorkspaceTab

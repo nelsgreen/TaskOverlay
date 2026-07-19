@@ -20,6 +20,7 @@ internal sealed record MeetingRecordingFormatOption(
 internal sealed record MeetingLanguageOption(
     MeetingTranscriptLanguage Value,
     string Label);
+internal sealed record WorkdayTimeOption(int Minutes, string Label);
 
 public partial class SettingsView : UserControl
 {
@@ -62,6 +63,10 @@ public partial class SettingsView : UserControl
         _updatingControls = true;
         InitializeComponent();
         ModeListBox.ItemsSource = OverlayModeDisplay.UserModes;
+        WorkdayStartComboBox.ItemsSource = BuildWorkdayTimeOptions(includeMidnightEnd: false);
+        WorkdayEndComboBox.ItemsSource = BuildWorkdayTimeOptions(includeMidnightEnd: true)
+            .Where(option => option.Minutes > 0)
+            .ToArray();
         HotkeyItems.ItemsSource = BuildHotkeyItems();
         MeetingRecordingPolicyComboBox.ItemsSource =
             new[]
@@ -152,6 +157,7 @@ public partial class SettingsView : UserControl
                 _state.OverlaySettings.WorkingWindowWidth;
             WorkingWindowHeightSlider.Value =
                 _state.OverlaySettings.WorkingWindowHeight;
+            UpdateWorkingHoursControls();
             UpdateValueLabels();
             UpdateBackupControls();
             UpdateTelegramControls();
@@ -161,6 +167,62 @@ public partial class SettingsView : UserControl
         {
             _updatingControls = false;
         }
+    }
+
+    private static IReadOnlyList<WorkdayTimeOption> BuildWorkdayTimeOptions(
+        bool includeMidnightEnd)
+    {
+        var finalMinute = includeMidnightEnd ? 24 * 60 : 24 * 60 - 15;
+        return Enumerable.Range(0, finalMinute / 15 + 1)
+            .Select(index => index * 15)
+            .Select(minutes => new WorkdayTimeOption(
+                minutes,
+                minutes == 24 * 60
+                    ? "24:00"
+                    : $"{minutes / 60:00}:{minutes % 60:00}"))
+            .ToArray();
+    }
+
+    private void UpdateWorkingHoursControls()
+    {
+        var workingHours = WorkspaceSettings.ResolveWorkingHours(_state.WorkspaceSettings);
+        WorkdayStartComboBox.SelectedValue = workingHours.StartMinutes;
+        WorkdayEndComboBox.SelectedValue = workingHours.EndMinutes;
+        WorkingHoursValidationText.Text = string.Empty;
+        WorkingHoursValidationText.Visibility = Visibility.Collapsed;
+    }
+
+    private void WorkingHoursComboBox_OnSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_updatingControls ||
+            WorkdayStartComboBox.SelectedValue is not int startMinutes ||
+            WorkdayEndComboBox.SelectedValue is not int endMinutes)
+        {
+            return;
+        }
+
+        if (!WorkspaceSettings.IsValidWorkingHours(startMinutes, endMinutes))
+        {
+            WorkingHoursValidationText.Text =
+                "Workday start must be earlier than workday end by at least 15 minutes.";
+            WorkingHoursValidationText.Visibility = Visibility.Visible;
+            return;
+        }
+
+        WorkingHoursValidationText.Text = string.Empty;
+        WorkingHoursValidationText.Visibility = Visibility.Collapsed;
+        var settings = _state.WorkspaceSettings;
+        if (settings.WorkdayStartMinutes == startMinutes &&
+            settings.WorkdayEndMinutes == endMinutes)
+        {
+            return;
+        }
+
+        settings.WorkdayStartMinutes = startMinutes;
+        settings.WorkdayEndMinutes = endMinutes;
+        _actions.SaveWorkingHoursSettings();
     }
 
     private void ModeListBox_OnSelectionChanged(

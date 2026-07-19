@@ -58,6 +58,13 @@ public static class StateMigrator
                     // states whose origin value they cannot deserialize.
                     state.SchemaVersion = 7;
                     break;
+                case 7:
+                    // Schema 8 adds authoritative global working hours. Property
+                    // initializers supply 09:00-18:00 when schema-7 JSON omits them.
+                    state.WorkspaceSettings ??= new WorkspaceSettings();
+                    state.WorkspaceSettings.NormalizeWorkingHours();
+                    state.SchemaVersion = 8;
+                    break;
                 default:
                     throw new InvalidDataException(
                         $"Unsupported schema version: {state.SchemaVersion}.");
@@ -222,6 +229,17 @@ public static class StateMigrator
         if (state.TelegramCapture is null)
         {
             state.TelegramCapture = new TelegramCaptureSettings();
+            changed = true;
+        }
+
+        if (state.WorkspaceSettings is null)
+        {
+            state.WorkspaceSettings = new WorkspaceSettings();
+            changed = true;
+        }
+
+        if (state.WorkspaceSettings.NormalizeWorkingHours())
+        {
             changed = true;
         }
 

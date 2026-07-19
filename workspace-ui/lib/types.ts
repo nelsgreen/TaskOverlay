@@ -390,7 +390,7 @@ export interface ProjectScope {
 }
 
 export interface WorkspaceSnapshotContract {
-  schemaVersion: 5
+  schemaVersion: 6
   generatedAtUtc: string
   mode: "readonly" | "connected"
   projects: WorkspaceProjectSnapshot[]
@@ -409,6 +409,8 @@ export interface WorkspaceSnapshotContract {
   contextItems?: WorkspaceContextItemSnapshot[]
   activeNow: WorkspaceActiveNowSnapshot[]
   timelineItems: WorkspaceTimelineSnapshot[]
+  workdayStartMinutes: number
+  workdayEndMinutes: number
   context: WorkspaceContextSnapshot
 }
 
@@ -581,6 +583,12 @@ export type WorkspaceContextCommand = {
   selectedWorkstreamId: string | null
   filter: TreeFilter
   activeNowCollapsed: boolean
+}
+
+export type WorkspaceWorkingHoursCommand = {
+  type: "updateWorkingHours"
+  workdayStartMinutes: number
+  workdayEndMinutes: number
 }
 
 export type WorkspaceMeetingCommand =
@@ -780,6 +788,7 @@ export type WorkspaceCommand =
   | WorkspaceTaskCommand
   | WorkspaceSectionCommand
   | WorkspaceContextCommand
+  | WorkspaceWorkingHoursCommand
   | WorkspaceCreateTaskCommand
   | WorkspaceCreateSectionCommand
   | WorkspaceMeetingCommand

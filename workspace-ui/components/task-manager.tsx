@@ -30,7 +30,12 @@ import { cn } from "@/lib/utils"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { addDaysKey, isoFromLocalDateTime, localSlotFromIso, todayKey } from "@/lib/calendar-date"
-import { DAY_END_MIN, DEFAULT_MEET_DURATION_MIN } from "@/lib/calendar-layout"
+import {
+  DAY_END_MIN,
+  DEFAULT_MEET_DURATION_MIN,
+  DEFAULT_WORKDAY_END_MIN,
+  DEFAULT_WORKDAY_START_MIN,
+} from "@/lib/calendar-layout"
 import { buildProjectContextPack } from "@/lib/context-pack-builder"
 import {
   meetDurationFields,
@@ -164,6 +169,8 @@ export function TaskManager() {
   const tasks = bridge.data?.tasks ?? mockTasks
   const taskWorkSessions = bridge.data?.taskWorkSessions ?? mockTaskWorkSessions
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
+  const workdayStartMinutes = bridge.data?.workdayStartMinutes ?? DEFAULT_WORKDAY_START_MIN
+  const workdayEndMinutes = bridge.data?.workdayEndMinutes ?? DEFAULT_WORKDAY_END_MIN
   const meetingRecordings = bridge.data?.meetingRecordings ?? []
   const meetingTranscripts = bridge.data?.meetingTranscripts ?? []
   const meetingScreenshots = bridge.data?.meetingScreenshots ?? []
@@ -1735,6 +1742,8 @@ export function TaskManager() {
                 selectedMeetId={selectedMeetId}
                 showDone={calendarShowDone}
                 canSchedule={connected || !bridged}
+                workdayStartMinutes={workdayStartMinutes}
+                workdayEndMinutes={workdayEndMinutes}
                 createMeetDisabled={meetingCreatePhase !== "idle"}
                 onSelectTask={selectTask}
                 onSelectMeet={selectMeet}

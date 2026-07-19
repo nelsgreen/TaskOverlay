@@ -1282,6 +1282,7 @@ public partial class App : System.Windows.Application
             RefreshTaskPresentations,
             new SettingsWindowActions(
                 SetOverlayMode,
+                SaveWorkingHoursSettings,
                 () => OpenFolder(_diagnostics?.LogsDirectory),
                 () => OpenFolder(_stateStore?.StateDirectory),
                 ResetSavedWindowPositions,
@@ -1441,6 +1442,20 @@ public partial class App : System.Windows.Application
     {
         PersistState();
         _telegramPollingService?.SyncWithSettings();
+    }
+
+    private void SaveWorkingHoursSettings()
+    {
+        if (_state is null ||
+            !WorkspaceSettings.IsValidWorkingHours(
+                _state.WorkspaceSettings.WorkdayStartMinutes,
+                _state.WorkspaceSettings.WorkdayEndMinutes))
+        {
+            return;
+        }
+
+        PersistState();
+        _workspaceWindow?.RefreshFromExternalChange();
     }
 
     private TelegramPollingSnapshot GetTelegramPollingSnapshot()
