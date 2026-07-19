@@ -9,7 +9,9 @@ Active product scope:
 - WPF is the sole TaskOverlay product.
 - Correct solution: `TaskOverlay.sln`.
 - Correct executable: `TaskOverlay.exe`.
-- Correct development artifact: `TaskOverlay_Windows_Portable`.
+- Correct development artifact: `TaskOverlay_Windows_Portable`; every portable
+  package must include `BUILD.txt` with commit, branch/PR head, CI run (or
+  `local`), and UTC build time.
 - Runtime state: `%APPDATA%\TaskOverlayV2\state.json`.
 - Logs: `%APPDATA%\TaskOverlayV2\logs`.
 - `AppState` / `state.json` is the desktop source of truth.
@@ -464,8 +466,8 @@ Product direction:
     rendering, per-session drag/resize/delete, and Calendar context actions
     are implemented;
   - schema-2 single planned work migrates to one session in schema 3 with
-    synthetic malformed/partial/idempotency fixtures; real user-state
-    migration still requires artifact QA on the user's work computer;
+    synthetic malformed/partial/idempotency fixtures; migration against the
+    user's real work-computer state also passed manual artifact QA;
   - Task Details showing linked sessions/history and total duration remains a
     follow-up; Day and Week already show all blocks under the same task title;
   - blocks are time/work metadata, not task status - status stays TODO /
@@ -627,12 +629,22 @@ Product direction:
     transcript and parent revision), activates it, and leaves the original
     imported/provider artifacts untouched, while prior analysis surfaces as
     stale with explicit re-analysis only;
-  - transcript-synchronized local audio playback - done: Review shows the
-    active transcript's managed recording through a restricted WebView2 media
-    endpoint, timestamp clicks seek and play, playback highlights the active
-    segment and current speaker (including You), and optional auto-scroll
-    pauses after deliberate manual scrolling. Remaining editor follow-ups:
-    segment add/delete/split/merge and timestamp editing;
+  - transcript-synchronized local audio playback - done and manually accepted
+    in PR #72 (`d52b212e74946be52b12d7d957b949b5705a54be`): connected WPF uses
+    native C# playback through NAudio (`MediaFoundationReader` /
+    `WaveOutEvent`), while React owns controls, transcript synchronization,
+    active segment/speaker/You presentation, and auto-scroll. The bridge
+    carries opaque IDs, actions, relative seconds, and safe state only.
+    `RecordingId` linkage covers generated/imported transcripts, retries,
+    `UserEdited` revisions, and deterministic unambiguous legacy repair.
+    Transcript-owned `SourceAudioStartSeconds` / `SourceAudioEndSeconds` are
+    persisted and inherited by revisions; C# maps relative seeks, reports
+    bounded duration/position, and stops at the range end. Screenshots outside
+    the range are excluded and in-range offsets are projected relative to the
+    transcript. Manual artifact QA confirmed audible native playback and
+    bounded stopping. Browser `<audio>` remains development fallback only;
+  - remaining editor follow-ups: segment add/delete/split/merge and timestamp
+    editing;
   - Russian-first transcription with project glossary/technical anglicisms;
     AI cleanup must create a reviewable revision, never silently replace text;
   - analysis prompt enrichment from the MEET project and approved ContextHUB
@@ -1021,6 +1033,11 @@ Product direction:
   expands by default when linked with clearer "Link existing context"
   wording and a compact accent linked-count indicator, and every shared
   Workspace modal stops closing on an outside/backdrop click.
+- PR #72 transcript-synchronized MEET playback is merged and manually accepted:
+  native C# playback is audible, transcript-owned bounded playback stops at the
+  source-range boundary, and the accepted production path no longer depends on
+  browser decoding or endpoint probing. Do not reopen this work without a new
+  reproducible regression.
 - Long Go v1 history in prompts is obsolete for WPF v2 planning.
 
 ## Needs Clarification
