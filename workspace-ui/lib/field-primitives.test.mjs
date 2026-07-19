@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { fieldStateClasses } from "../components/ui/field.ts"
+import { fieldStateClasses, selectStateClasses } from "../components/ui/field.ts"
 
 const input = readFileSync(new URL("../components/ui/input.tsx", import.meta.url), "utf8")
 const textarea = readFileSync(new URL("../components/ui/textarea.tsx", import.meta.url), "utf8")
@@ -11,40 +11,30 @@ const linkedTaskPicker = readFileSync(new URL("../components/linked-task-picker.
 const workspaceHeader = readFileSync(new URL("../components/workspace-header.tsx", import.meta.url), "utf8")
 const detailsPanel = readFileSync(new URL("../components/details-panel.tsx", import.meta.url), "utf8")
 
-test("editable state uses the canonical field/border/text tokens and a restrained hover", () => {
-  assert.match(fieldStateClasses, /\bbg-field\b/)
-  assert.match(fieldStateClasses, /\bborder-border-strong\b/)
-  assert.match(fieldStateClasses, /\btext-text\b/)
-  assert.match(fieldStateClasses, /\bplaceholder:text-text-faint\b/)
-  assert.match(fieldStateClasses, /\bhover:border-\[/)
+test("editable state (shared by both contracts) uses the canonical field/border/text tokens and a restrained hover", () => {
+  for (const classes of [fieldStateClasses, selectStateClasses]) {
+    assert.match(classes, /\bbg-field\b/)
+    assert.match(classes, /\bborder-border-strong\b/)
+    assert.match(classes, /\btext-text\b/)
+    assert.match(classes, /\bhover:border-\[/)
+    assert.match(classes, /\bfocus-visible:border-primary\b/)
+    assert.match(classes, /focus-visible:shadow-\[var\(--focus-ring\)\]/)
+  }
 })
 
-test("focus-visible uses the canonical accent alias and focus-ring token, not a hardcoded color", () => {
-  assert.match(fieldStateClasses, /\bfocus-visible:border-primary\b/)
-  assert.match(fieldStateClasses, /focus-visible:shadow-\[var\(--focus-ring\)\]/)
-})
-
-test("read-only is styled distinctly from editable and never as disabled", () => {
+test("Input/Textarea's fieldStateClasses includes the read-only contract, distinct from editable and disabled", () => {
   assert.match(fieldStateClasses, /\bread-only:bg-field-readonly\b/)
   assert.match(fieldStateClasses, /\bread-only:border-border\b(?!-)/)
-  // Read-only must not fall back to generic opacity dimming anywhere in the contract.
-  assert.equal(fieldStateClasses.includes("opacity"), false)
-  // Focus and hover while read-only are explicit two-pseudo-class overrides,
-  // so they out-specificity the plain single-pseudo-class rules regardless
+  assert.match(fieldStateClasses, /\bread-only:cursor-default\b/)
+  // Two-pseudo-class compounds so read-only always out-specificities the
+  // plain single-pseudo-class hover/focus-visible rules above, regardless
   // of generated stylesheet order.
   assert.match(fieldStateClasses, /\bread-only:hover:border-border\b(?!-)/)
   assert.match(fieldStateClasses, /\bread-only:focus-visible:border-border-strong\b/)
-})
-
-test("disabled is styled distinctly from read-only and blocks native interaction", () => {
-  assert.match(fieldStateClasses, /\bdisabled:bg-field-disabled\b/)
-  assert.match(fieldStateClasses, /\bdisabled:border-border-disabled\b/)
-  assert.match(fieldStateClasses, /\bdisabled:text-text-disabled\b/)
-  assert.match(fieldStateClasses, /\bdisabled:cursor-not-allowed\b/)
-  assert.match(fieldStateClasses, /\bdisabled:pointer-events-none\b/)
-})
-
-test("read-only and disabled never share a background, border, or text token", () => {
+  // No opacity dimming anywhere, and read-only keeps full-contrast text
+  // (no dedicated read-only text-color override).
+  assert.equal(fieldStateClasses.includes("opacity"), false)
+  assert.equal(/read-only:text-/.test(fieldStateClasses), false)
   assert.notEqual(
     fieldStateClasses.match(/read-only:bg-(\S+)/)[1],
     fieldStateClasses.match(/disabled:bg-(\S+)/)[1],
@@ -53,14 +43,37 @@ test("read-only and disabled never share a background, border, or text token", (
     fieldStateClasses.match(/read-only:border-(\S+)/)[1],
     fieldStateClasses.match(/disabled:border-(\S+)/)[1],
   )
-  // Read-only keeps full-contrast text (no dedicated read-only text-color
-  // override); disabled is the only state that dims text.
-  assert.equal(/read-only:text-/.test(fieldStateClasses), false)
 })
 
-test("the shared contract never uses a task-status, MEET, warning, recording, or destructive color as a generic field color", () => {
-  for (const forbidden of ["sem-todo", "sem-focus", "sem-wait", "sem-done", "sem-remind", "sem-meet", "sem-panel", "sem-deadline", "sem-now", "recording", "destructive", "warning"]) {
-    assert.equal(fieldStateClasses.includes(forbidden), false, `fieldStateClasses must not reference --${forbidden}`)
+test("Select's selectStateClasses has no read-only selector or class of any kind", () => {
+  // `<select>` has no HTML `readonly` attribute, but unlike `:read-write`,
+  // `:read-only` still matches elements that don't support the attribute at
+  // all - so an enabled, interactive <select> would wrongly pick up any
+  // `read-only:*` rule if it were present. selectStateClasses must contain
+  // none, in any form (class name, compound, or bare pseudo-class).
+  assert.equal(/read-only/.test(selectStateClasses), false)
+  assert.equal(/:read-only/.test(selectStateClasses), false)
+})
+
+test("disabled is styled distinctly from read-only/editable in both contracts, and relies on native disabled semantics rather than pointer-events-none", () => {
+  for (const classes of [fieldStateClasses, selectStateClasses]) {
+    assert.match(classes, /\bdisabled:bg-field-disabled\b/)
+    assert.match(classes, /\bdisabled:border-border-disabled\b/)
+    assert.match(classes, /\bdisabled:text-text-disabled\b/)
+    assert.match(classes, /\bdisabled:cursor-not-allowed\b/)
+    // A disabled element already blocks focus/editing/pointer interaction
+    // natively. `pointer-events-none` would additionally exclude it from
+    // hit-testing, which prevents `cursor-not-allowed` from ever being
+    // shown (the browser falls through to whatever is behind it instead).
+    assert.equal(classes.includes("pointer-events-none"), false)
+  }
+})
+
+test("the shared contracts never use a task-status, MEET, warning, recording, or destructive color as a generic field color", () => {
+  for (const classes of [fieldStateClasses, selectStateClasses]) {
+    for (const forbidden of ["sem-todo", "sem-focus", "sem-wait", "sem-done", "sem-remind", "sem-meet", "sem-panel", "sem-deadline", "sem-now", "recording", "destructive", "warning"]) {
+      assert.equal(classes.includes(forbidden), false, `must not reference --${forbidden}`)
+    }
   }
 })
 
@@ -71,10 +84,13 @@ test("no primitive hardcodes a literal color instead of a canonical token", () =
   }
 })
 
-test("Input, Textarea, and Select all consume the one shared state contract (no per-component duplication)", () => {
-  assert.match(input, /fieldStateClasses/)
-  assert.match(textarea, /fieldStateClasses/)
-  assert.match(select, /fieldStateClasses/)
+test("Input and Textarea use the read-only-capable fieldStateClasses; Select uses the read-only-free selectStateClasses", () => {
+  assert.match(input, /import \{ fieldStateClasses \} from '\.\/field'/)
+  assert.match(textarea, /import \{ fieldStateClasses \} from '\.\/field'/)
+  // select.tsx's doc comment may name fieldStateClasses in prose (explaining
+  // why it must NOT be used) - what matters is it never imports/consumes it.
+  assert.equal(/import \{[^}]*\bfieldStateClasses\b[^}]*\} from '\.\/field'/.test(select), false)
+  assert.match(select, /import \{ selectStateClasses \} from '\.\/field'/)
 })
 
 test("Input and Textarea forward native props after the merged className, so readOnly/disabled/onChange/value always reach the element", () => {
