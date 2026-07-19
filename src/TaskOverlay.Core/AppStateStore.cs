@@ -59,6 +59,10 @@ public sealed class AppStateStore
             StateMigrator.Migrate(state);
             var stateRepaired = StateMigrator.RepairCurrentState(state);
             stateRepaired |= new MeetingRecordingService(state).RecoverInterrupted();
+            stateRepaired |= new MeetingTranscriptRecordingLinker(state, StateDirectory)
+                .RepairMissingLinks() > 0;
+            stateRepaired |= new MeetingTranscriptRecordingLinker(state, StateDirectory)
+                .RepairMissingAudioRanges() > 0;
             Validate(state);
             if (sourceSchemaVersion != state.SchemaVersion || stateRepaired)
             {
@@ -404,6 +408,10 @@ public sealed class AppStateStore
                 transcript.SourceTranscriptId is Guid sourceTranscriptId &&
                 (sourceTranscriptId == Guid.Empty || sourceTranscriptId == transcript.Id) ||
                 transcript.ParentRevisionId == Guid.Empty ||
+                transcript.SourceAudioStartSeconds is < 0 ||
+                transcript.SourceAudioEndSeconds is <= 0 ||
+                transcript.SourceAudioStartSeconds is double transcriptStart &&
+                transcript.SourceAudioEndSeconds is double transcriptEnd && transcriptEnd <= transcriptStart ||
                 transcript.Origin == MeetingTranscriptOrigin.UserEdited &&
                 (transcript.SourceTranscriptId is null || transcript.ParentRevisionId is null) ||
                 transcript.Speakers is null ||

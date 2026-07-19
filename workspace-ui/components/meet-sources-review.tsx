@@ -3,6 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
+  activeTranscriptSegmentIndex,
+  captureSafeMediaFailureState,
+  isNativeAudioPlaybackEvent,
+  mediaPlaybackFailureLabel,
+  postNativeAudioPlaybackCommand,
+  projectNativeTranscriptPlayback,
+  projectTranscriptScreenshots,
+  probeTranscriptAudioEndpoint,
+  selectTranscriptPlaybackMode,
+  shouldAutoScrollTranscript,
+  transcriptAudioUnavailableLabel,
+  transcriptSpeakerLabel,
+} from "@/lib/meet-transcript-audio"
+import {
   Bot,
   Camera,
   Check,
@@ -444,7 +458,7 @@ export function MeetingReviewWorkspace({
                 onCancel={() => requestExit()}
               />
             ) : activeTranscript ? (
-              <TranscriptContent transcript={activeTranscript} screenshots={meetScreenshots} send={send} />
+              <TranscriptPlayback transcript={activeTranscript} screenshots={meetScreenshots} send={send} />
             ) : (
               <EmptySource text="Review will use the explicitly active transcript." />
             )}
@@ -1014,7 +1028,7 @@ function NeutralNotice({ message, onDismiss }: { message: string; onDismiss?: ()
   )
 }
 
-function TranscriptContent({
+function TranscriptPlayback({
   transcript,
   screenshots,
   send,
@@ -1023,15 +1037,320 @@ function TranscriptContent({
   screenshots: MeetingScreenshotSnapshot[]
   send: (command: WorkspaceMeetingAssistantCommand) => boolean
 }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const segmentRefs = useRef(new Map<number, HTMLDivElement>())
+  const programmaticScrollRef = useRef(false)
+  const lastManualScrollAtRef = useRef<number | null>(null)
+  const previousActiveIndexRef = useRef<number | null>(null)
+  const [activeSegmentIndex, setActiveSegmentIndex] = useState<number | null>(null)
+  const [audioDuration, setAudioDuration] = useState(transcript.audio.durationSeconds)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [autoScroll, setAutoScroll] = useState(true)
+  const [runtimeUnavailable, setRuntimeUnavailable] = useState<string | null>(null)
+  const [nativePosition, setNativePosition] = useState(0)
+  const [nativeCommandPending, setNativeCommandPending] = useState(false)
+  const [nativeSessionReady, setNativeSessionReady] = useState(false)
+  const [playbackEnvironment, setPlaybackEnvironment] = useState<
+    "Detecting" | "Connected" | "Browser"
+  >("Detecting")
+  const playbackMode = playbackEnvironment === "Detecting" ? null :
+    selectTranscriptPlaybackMode({
+      hasWebViewBridge: playbackEnvironment === "Connected",
+      audioStatus: transcript.audio.status,
+      recordingId: transcript.recordingId,
+      audioUrl: transcript.audio.url,
+    })
+  const audioAvailable = (playbackMode === "Native" || playbackMode === "Browser") &&
+    !runtimeUnavailable
+  const browserSourceStart = transcript.audio.startSeconds ?? 0
+  const browserSourceEnd = transcript.audio.endSeconds ??
+    browserSourceStart + transcript.audio.durationSeconds
+
+  useEffect(() => {
+    setPlaybackEnvironment(window.chrome?.webview ? "Connected" : "Browser")
+  }, [])
+
+  useEffect(() => {
+    setActiveSegmentIndex(null)
+    setAudioDuration(transcript.audio.durationSeconds)
+    setIsPlaying(false)
+    setRuntimeUnavailable(null)
+    setNativePosition(0)
+    setNativeCommandPending(false)
+    setNativeSessionReady(false)
+    previousActiveIndexRef.current = null
+    lastManualScrollAtRef.current = null
+  }, [transcript.id, transcript.audio.url, transcript.audio.durationSeconds])
+
+  useEffect(() => {
+    const changed = previousActiveIndexRef.current !== activeSegmentIndex
+    previousActiveIndexRef.current = activeSegmentIndex
+    if (activeSegmentIndex == null || !shouldAutoScrollTranscript({
+      enabled: autoScroll,
+      isPlaying,
+      activeSegmentChanged: changed,
+      nowMs: Date.now(),
+      lastManualScrollAtMs: lastManualScrollAtRef.current,
+    })) return
+
+    const element = segmentRefs.current.get(activeSegmentIndex)
+    if (!element) return
+    programmaticScrollRef.current = true
+    element.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    window.setTimeout(() => { programmaticScrollRef.current = false }, 350)
+  }, [activeSegmentIndex, autoScroll, isPlaying])
+
+  useEffect(() => {
+    const firstSegment = segmentRefs.current.values().next().value as HTMLDivElement | undefined
+    let scrollContainer = firstSegment?.parentElement ?? null
+    while (scrollContainer) {
+      const style = window.getComputedStyle(scrollContainer)
+      if (scrollContainer.scrollHeight > scrollContainer.clientHeight &&
+          ["auto", "scroll"].includes(style.overflowY)) break
+      scrollContainer = scrollContainer.parentElement
+    }
+    if (!scrollContainer) return
+
+    const onScroll = () => {
+      if (isPlaying && !programmaticScrollRef.current) {
+        lastManualScrollAtRef.current = Date.now()
+      }
+    }
+    scrollContainer.addEventListener("scroll", onScroll, { passive: true })
+    return () => scrollContainer?.removeEventListener("scroll", onScroll)
+  }, [isPlaying, transcript.id])
+
+  useEffect(() => {
+    const webview = window.chrome?.webview
+    const recordingId = transcript.recordingId
+    if (playbackMode !== "Native" || !webview || !recordingId) return
+    const onMessage = (event: { data: unknown }) => {
+      if (!isNativeAudioPlaybackEvent(event.data) ||
+          event.data.recordingId !== recordingId ||
+          event.data.transcriptId !== transcript.id) return
+      const projection = projectNativeTranscriptPlayback(
+        event.data,
+        transcript.segments,
+        transcript.audio.durationSeconds,
+      )
+      setNativeCommandPending(false)
+      setNativeSessionReady(event.data.state !== "Failed")
+      setNativePosition(projection.positionSeconds)
+      setAudioDuration(projection.durationSeconds)
+      setIsPlaying(projection.isPlaying)
+      setActiveSegmentIndex(projection.activeSegmentIndex)
+      if (projection.failureReason) setRuntimeUnavailable(projection.failureReason)
+    }
+    webview.addEventListener("message", onMessage)
+    return () => {
+      webview.removeEventListener("message", onMessage)
+      postNativeAudioPlaybackCommand({
+        action: "stop",
+        recordingId,
+        transcriptId: transcript.id,
+      })
+    }
+  }, [playbackMode, transcript.id, transcript.recordingId])
+
+  const updateActiveSegment = () => {
+    const player = audioRef.current
+    if (!player) return
+    if (player.currentTime >= browserSourceEnd) {
+      player.pause()
+      player.currentTime = browserSourceEnd
+    }
+    setActiveSegmentIndex(activeTranscriptSegmentIndex(
+      transcript.segments,
+      Math.max(0, player.currentTime - browserSourceStart),
+      audioDuration,
+    ))
+  }
+
+  const seekToSegment = async (startSeconds: number | null) => {
+    if (startSeconds == null || !audioAvailable) return
+    if (playbackMode === "Native" && transcript.recordingId) {
+      setNativePosition(startSeconds)
+      const posted = postNativeAudioPlaybackCommand({
+        action: "play",
+        recordingId: transcript.recordingId,
+        transcriptId: transcript.id,
+        positionSeconds: startSeconds,
+      })
+      if (posted) setNativeCommandPending(true)
+      else setRuntimeUnavailable("Native playback command failed")
+      return
+    }
+    const player = audioRef.current
+    if (!player) return
+    try {
+      player.currentTime = browserSourceStart + startSeconds
+      await player.play()
+      updateActiveSegment()
+    } catch {
+      setRuntimeUnavailable("Unknown playback failure")
+      setIsPlaying(false)
+    }
+  }
+
+  const activeSegment = transcript.segments.find((segment) =>
+    segment.index === activeSegmentIndex)
+  const nowSpeaking = transcriptSpeakerLabel(activeSegment, transcript.speakers)
+
+  return (
+    <div className="space-y-2">
+      {audioAvailable && playbackMode === "Browser" && (
+        <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card/95 px-2.5 py-2 shadow-sm backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <audio
+              ref={audioRef}
+              src={transcript.audio.url ?? undefined}
+              controls
+              preload="metadata"
+              aria-label="Transcript recording"
+              className="h-8 min-w-0 flex-1"
+              onLoadedMetadata={(event) => {
+                event.currentTarget.currentTime = browserSourceStart
+                updateActiveSegment()
+              }}
+              onTimeUpdate={updateActiveSegment}
+              onSeeked={updateActiveSegment}
+              onPlay={() => { setIsPlaying(true); updateActiveSegment() }}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => { setIsPlaying(false); setActiveSegmentIndex(null) }}
+              onError={(event) => {
+                const media = event.currentTarget
+                const safeState = captureSafeMediaFailureState(media)
+                setIsPlaying(false)
+                void probeTranscriptAudioEndpoint(transcript.audio.url ?? "")
+                  .then((probe) => {
+                    setRuntimeUnavailable(mediaPlaybackFailureLabel(safeState, probe))
+                  })
+              }}
+            />
+            <label className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={autoScroll}
+                onChange={(event) => setAutoScroll(event.target.checked)}
+                className="size-3 accent-[var(--status-meet)]"
+              />
+              Auto-scroll
+            </label>
+          </div>
+          <p className="min-h-4 text-[10px] text-muted-foreground" aria-live="polite">
+            {isPlaying && nowSpeaking ? <>Now speaking: <strong className="text-foreground">{nowSpeaking}</strong></> : " "}
+          </p>
+        </div>
+      )}
+      {audioAvailable && playbackMode === "Native" && transcript.recordingId && (
+        <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card/95 px-2.5 py-2 shadow-sm backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={nativeCommandPending}
+              className="rounded border border-border px-2 py-1 text-[10px] text-foreground"
+              onClick={() => {
+                const action = isPlaying ? "pause" : "play"
+                const posted = postNativeAudioPlaybackCommand({
+                  action,
+                  recordingId: transcript.recordingId!,
+                  transcriptId: transcript.id,
+                  positionSeconds: nativePosition,
+                })
+                if (posted && action === "play") setNativeCommandPending(true)
+                if (!posted) setRuntimeUnavailable("Native playback command failed")
+              }}
+            >
+              {nativeCommandPending ? "Loading…" : isPlaying ? "Pause" : "Play"}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(audioDuration, 0.1)}
+              step={0.1}
+              value={Math.min(nativePosition, Math.max(audioDuration, 0.1))}
+              disabled={!nativeSessionReady || nativeCommandPending}
+              aria-label="Transcript recording position"
+              className="min-w-0 flex-1 accent-[var(--status-meet)]"
+              onChange={(event) => {
+                const positionSeconds = Number(event.currentTarget.value)
+                setNativePosition(positionSeconds)
+                const posted = postNativeAudioPlaybackCommand({
+                  action: "seek",
+                  recordingId: transcript.recordingId!,
+                  transcriptId: transcript.id,
+                  positionSeconds,
+                })
+                if (!posted) setRuntimeUnavailable("Native playback command failed")
+              }}
+            />
+            <label className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={autoScroll}
+                onChange={(event) => setAutoScroll(event.target.checked)}
+                className="size-3 accent-[var(--status-meet)]"
+              />
+              Auto-scroll
+            </label>
+          </div>
+          <p className="min-h-4 text-[10px] text-muted-foreground" aria-live="polite">
+            {isPlaying && nowSpeaking ? <>Now speaking: <strong className="text-foreground">{nowSpeaking}</strong></> : " "}
+          </p>
+        </div>
+      )}
+        {(transcript.audio.status === "Unavailable" || runtimeUnavailable) && (
+          <div className="rounded border border-border px-2.5 py-1.5 text-[10px] text-muted-foreground" role="status">
+            Audio unavailable: {runtimeUnavailable
+              ? runtimeUnavailable
+              : transcriptAudioUnavailableLabel(transcript.audio.unavailableReason)}
+          </div>
+      )}
+      <TranscriptContent
+        transcript={transcript}
+        screenshots={screenshots}
+        send={send}
+        activeSegmentIndex={activeSegmentIndex}
+        audioAvailable={audioAvailable}
+        onSeekSegment={(startSeconds) => void seekToSegment(startSeconds)}
+        registerSegment={(index, element) => {
+          if (element) segmentRefs.current.set(index, element)
+          else segmentRefs.current.delete(index)
+        }}
+      />
+    </div>
+  )
+}
+
+function TranscriptContent({
+  transcript,
+  screenshots,
+  send,
+  activeSegmentIndex,
+  audioAvailable,
+  onSeekSegment,
+  registerSegment,
+}: {
+  transcript: MeetingTranscriptSnapshot
+  screenshots: MeetingScreenshotSnapshot[]
+  send: (command: WorkspaceMeetingAssistantCommand) => boolean
+  activeSegmentIndex: number | null
+  audioAvailable: boolean
+  onSeekSegment: (startSeconds: number | null) => void
+  registerSegment: (index: number, element: HTMLDivElement | null) => void
+}) {
   const displaySpeakerName = (segment: MeetingTranscriptSnapshot["segments"][number]) => {
     const speaker = segment.speakerId
       ? transcript.speakers.find((candidate) => candidate.speakerId === segment.speakerId)
       : null
     return speaker?.isCurrentUser ? "You" : segment.speakerName
   }
-  const inlineScreenshots = screenshots.filter((screenshot) =>
-    screenshot.recordingId === transcript.recordingId &&
-    screenshot.offsetFromRecordingStartSeconds != null)
+  const inlineScreenshots = projectTranscriptScreenshots(
+    screenshots,
+    transcript.recordingId,
+    transcript.audio.startSeconds ?? 0,
+    transcript.audio.endSeconds ?? transcript.audio.durationSeconds,
+  )
   const rows = [
     ...transcript.segments.map((segment) => ({
       kind: "segment" as const,
@@ -1042,7 +1361,7 @@ function TranscriptContent({
     ...inlineScreenshots.map((screenshot) => ({
       kind: "screenshot" as const,
       key: `screenshot:${screenshot.id}`,
-      at: screenshot.offsetFromRecordingStartSeconds ?? Number.MAX_SAFE_INTEGER,
+      at: screenshot.transcriptOffsetSeconds,
       screenshot,
     })),
   ].sort((left, right) => left.at - right.at)
@@ -1054,10 +1373,25 @@ function TranscriptContent({
   return (
     <div className="space-y-2">
       {rows.map((row) => row.kind === "segment" ? (
-        <div key={row.key} className="grid grid-cols-[auto_minmax(0,1fr)] gap-2 text-[12px] leading-relaxed">
-          <span className="w-14 pt-0.5 font-mono text-[10px] text-muted-foreground">
+        <div
+          key={row.key}
+          ref={(element) => registerSegment(row.segment.index, element)}
+          className={cn(
+            "grid grid-cols-[auto_minmax(0,1fr)] gap-2 rounded px-1 py-0.5 text-[12px] leading-relaxed transition-colors",
+            activeSegmentIndex === row.segment.index && "bg-status-meet/10 ring-1 ring-inset ring-status-meet/35",
+          )}
+        >
+          <button
+            type="button"
+            disabled={!audioAvailable || row.segment.startSeconds == null}
+            onClick={() => onSeekSegment(row.segment.startSeconds)}
+            className="w-14 self-start pt-0.5 text-left font-mono text-[10px] text-muted-foreground outline-none enabled:hover:text-status-meet enabled:focus-visible:ring-2 enabled:focus-visible:ring-status-meet/50 disabled:cursor-default"
+            aria-label={row.segment.startSeconds == null
+              ? "Untimed transcript segment"
+              : `Play transcript from ${formatOffset(row.segment.startSeconds)}`}
+          >
             {row.segment.startSeconds == null ? "" : formatOffset(row.segment.startSeconds)}
-          </span>
+          </button>
           <p className="min-w-0 whitespace-pre-wrap text-foreground">
             {displaySpeakerName(row.segment) && (
               <strong className="mr-1.5 text-status-meet">{displaySpeakerName(row.segment)}:</strong>

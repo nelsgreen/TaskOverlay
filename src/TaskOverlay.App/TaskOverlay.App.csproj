@@ -43,4 +43,12 @@
            Text="Workspace static export is missing. Run 'pnpm --dir workspace-ui install --frozen-lockfile' and 'pnpm --dir workspace-ui build' before building TaskOverlay." />
   </Target>
 
+  <Target Name="WritePortableBuildIdentity"
+          AfterTargets="Publish"
+          Condition="'$(PublishDir)' != ''">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\build\Write-BuildIdentity.ps1&quot; -OutputPath &quot;$(PublishDir)BUILD.txt&quot;" />
+    <Error Condition="!Exists('$(PublishDir)BUILD.txt')"
+           Text="Portable BUILD.txt identity file is missing." />
+  </Target>
+
 </Project>

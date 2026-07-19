@@ -1149,6 +1149,8 @@ public partial class App : System.Windows.Application
         {
             _workspaceWindow = new WorkspaceWindow(
                 _state,
+                _stateStore?.StateDirectory ??
+                throw new InvalidOperationException("State directory is unavailable."),
                 PersistWorkspaceState,
                 RefreshTaskPresentations,
                 _meetingAssistantCommandHandler is null

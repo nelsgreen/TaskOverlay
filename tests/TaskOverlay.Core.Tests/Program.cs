@@ -8097,6 +8097,8 @@ internal static class Program
                 "3\n00:00:04,000 --> 00:00:05,000\nC: Third point\n\n" +
                 "4\n00:00:05,000 --> 00:00:06,000\nA: Follow-up\n");
             var parent = service.Import(meeting.Id, srtPath, "SRT import", now);
+            parent.SourceAudioStartSeconds = 180;
+            parent.SourceAudioEndSeconds = 240;
             var parentNormalized = service.Load(parent);
             string SpeakerId(string label) => parentNormalized.Speakers
                 .Single(speaker => speaker.OriginalLabel == label).SpeakerId;
@@ -8135,6 +8137,7 @@ internal static class Program
                    revision.Origin == MeetingTranscriptOrigin.UserEdited &&
                    revision.SourceTranscriptId == parent.Id &&
                    revision.ParentRevisionId == parentRevisionBefore &&
+                   revision.SourceAudioStartSeconds == 180 && revision.SourceAudioEndSeconds == 240 &&
                    revision.RevisionId != parentRevisionBefore &&
                    revision.CreatedAtUtc == now.AddMinutes(5),
                 "A saved user revision should become active with full provenance.");
@@ -8193,6 +8196,7 @@ internal static class Program
             Assert(reloaded.SchemaVersion == AppState.CurrentSchemaVersion &&
                    reloaded.MeetingTranscripts.Count == 3 &&
                    reloadedRevision.SourceTranscriptId == revision.Id &&
+                   reloadedRevision.SourceAudioStartSeconds == 180 && reloadedRevision.SourceAudioEndSeconds == 240 &&
                    reloaded.Meetings.Single(item => item.Id == meeting.Id).ActiveTranscriptId == second.Id &&
                    reloaded.MeetingAnalyses.Single().TranscriptRevisionId == parentRevisionBefore,
                 "User revisions, provenance, and analysis bindings must survive an AppState round-trip.");

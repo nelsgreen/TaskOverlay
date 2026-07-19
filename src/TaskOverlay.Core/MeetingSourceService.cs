@@ -458,10 +458,18 @@ public sealed class MeetingTranscriptService
         }
 
         var timestamp = now ?? DateTimeOffset.UtcNow;
+        var recordingLink = new MeetingTranscriptRecordingLinker(
+            _state,
+            _storage.StateDirectory).Resolve(parent);
+        var resolvedRecordingId = parent.RecordingId ??
+                                  (recordingLink.Reason ==
+                                   MeetingTranscriptRecordingLinkReason.Linked
+                                      ? recordingLink.RecordingId
+                                      : null);
         var revision = new MeetingTranscript
         {
             MeetId = parent.MeetId,
-            RecordingId = parent.RecordingId,
+            RecordingId = resolvedRecordingId,
             Origin = MeetingTranscriptOrigin.UserEdited,
             Format = MeetingTranscriptFormat.NormalizedJson,
             Provider = "User",
@@ -469,6 +477,8 @@ public sealed class MeetingTranscriptService
             OriginalFileName = parent.OriginalFileName,
             SourceTranscriptId = parent.Id,
             ParentRevisionId = parent.RevisionId,
+            SourceAudioStartSeconds = parent.SourceAudioStartSeconds,
+            SourceAudioEndSeconds = parent.SourceAudioEndSeconds,
             HasTimestamps = normalized.HasTimestamps,
             HasSpeakerLabels = finalSpeakers.Count > 0,
             Speakers = finalSpeakers.Select(CloneSpeaker).ToList(),
@@ -509,7 +519,7 @@ public sealed class MeetingTranscriptService
         {
             TranscriptId = revision.Id,
             RevisionId = revision.RevisionId,
-            RecordingId = normalized.RecordingId,
+            RecordingId = resolvedRecordingId ?? Guid.Empty,
             Provider = normalized.Provider,
             Model = normalized.Model,
             Language = normalized.Language,

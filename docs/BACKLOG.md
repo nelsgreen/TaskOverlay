@@ -626,9 +626,13 @@ Product direction:
     transcript version (new managed artifact, provenance to the source
     transcript and parent revision), activates it, and leaves the original
     imported/provider artifacts untouched, while prior analysis surfaces as
-    stale with explicit re-analysis only. Remaining editor follow-ups:
-    segment add/delete/split/merge, timestamp editing, and
-    timestamp-to-source-audio playback;
+    stale with explicit re-analysis only;
+  - transcript-synchronized local audio playback - done: Review shows the
+    active transcript's managed recording through a restricted WebView2 media
+    endpoint, timestamp clicks seek and play, playback highlights the active
+    segment and current speaker (including You), and optional auto-scroll
+    pauses after deliberate manual scrolling. Remaining editor follow-ups:
+    segment add/delete/split/merge and timestamp editing;
   - Russian-first transcription with project glossary/technical anglicisms;
     AI cleanup must create a reviewable revision, never silently replace text;
   - analysis prompt enrichment from the MEET project and approved ContextHUB

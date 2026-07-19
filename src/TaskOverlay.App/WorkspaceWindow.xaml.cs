@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using TaskOverlay.Core;
 
@@ -31,10 +33,14 @@ public partial class WorkspaceWindow : Window
     private readonly Func<MeetingRecordingPolicy>? _defaultRecordingPolicyLoader;
     private readonly Func<IReadOnlyList<WorkspaceMeetingOperationSnapshot>>?
         _meetingOperationLoader;
+    private readonly MeetingAudioResourceResolver _meetingAudioResolver;
+    private readonly MeetingNativeAudioPlaybackService _nativeAudioPlayback = new();
+    private readonly DispatcherTimer _nativeAudioTimer;
     private bool _initialized;
 
     public WorkspaceWindow(
         AppState state,
+        string stateDirectory,
         Action saveState,
         Action stateChanged,
         Func<string, CancellationToken, Task<WorkspaceCommandResult?>>?
@@ -50,6 +56,10 @@ public partial class WorkspaceWindow : Window
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _diagnostic = diagnostic;
+        _meetingAudioResolver = new MeetingAudioResourceResolver(
+            _state,
+            stateDirectory,
+            diagnostic);
         _commandDispatcher = new WorkspaceCommandDispatcher(
             _state,
             saveState,
@@ -63,6 +73,11 @@ public partial class WorkspaceWindow : Window
         _defaultRecordingPolicyLoader = defaultRecordingPolicyLoader;
         _meetingOperationLoader = meetingOperationLoader;
         InitializeComponent();
+        _nativeAudioTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(200),
+            DispatcherPriority.Background,
+            (_, _) => SendNativeAudioSnapshot(),
+            Dispatcher);
     }
 
     private async void WorkspaceWindow_OnLoaded(
@@ -104,6 +119,9 @@ public partial class WorkspaceWindow : Window
                 WorkspaceHostName,
                 workspaceDirectory,
                 CoreWebView2HostResourceAccessKind.DenyCors);
+            core.AddWebResourceRequestedFilter(
+                $"https://{WorkspaceHostName}{MeetingAudioResourceResolver.ResourcePathPrefix}*",
+                CoreWebView2WebResourceContext.All);
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreDefaultContextMenusEnabled = false;
             core.Settings.IsStatusBarEnabled = false;
@@ -115,7 +133,9 @@ public partial class WorkspaceWindow : Window
             core.NavigationStarting += CoreWebView2_OnNavigationStarting;
             core.NavigationCompleted += CoreWebView2_OnNavigationCompleted;
             core.WebMessageReceived += CoreWebView2_OnWebMessageReceived;
+            core.WebResourceRequested += CoreWebView2_OnWebResourceRequested;
             core.Navigate($"https://{WorkspaceHostName}/index.html");
+            _nativeAudioTimer.Start();
         }
         catch (WebView2RuntimeNotFoundException)
         {
@@ -183,6 +203,11 @@ public partial class WorkspaceWindow : Window
             return;
         }
 
+        if (TryHandleNativeAudioCommand(e.WebMessageAsJson))
+        {
+            return;
+        }
+
         if (IsSnapshotRequest(e.WebMessageAsJson))
         {
             TrySendSnapshot("client retry");
@@ -219,6 +244,238 @@ public partial class WorkspaceWindow : Window
         }
 
         TrySendMessage(result);
+    }
+
+    private void CoreWebView2_OnWebResourceRequested(
+        object? sender,
+        CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        var method = e.Request.Method?.Trim().ToUpperInvariant() ?? string.Empty;
+        var rangeHeader = e.Request.Headers.GetHeader("Range");
+        var hasRange = !string.IsNullOrWhiteSpace(rangeHeader);
+        if (!_meetingAudioResolver.TryResolveRequest(e.Request.Uri, out var resource))
+        {
+            e.Response = CreateAudioResponse(
+                Stream.Null,
+                new MeetingAudioHttpResponsePlan(
+                    404, "Not Found", "text/plain", 0, 0, 0, null,
+                    IncludeBody: false,
+                    AcceptRanges: false,
+                    IsAllowedMethod: method is "GET" or "HEAD"));
+            ReportAudioRequest(method, hasRange, 404, "text/plain", 0, null);
+            return;
+        }
+
+        try
+        {
+            var plan = MeetingAudioHttpResponsePolicy.Create(
+                method,
+                rangeHeader,
+                resource.Length,
+                resource.ContentType);
+            Stream body = Stream.Null;
+            if (plan.IncludeBody)
+            {
+                var file = OpenAudioFile(resource.FilePath);
+                body = plan.BodyStart == 0 && plan.BodyLength == resource.Length
+                    ? file
+                    : new BoundedReadStream(file, plan.BodyStart, plan.BodyLength);
+            }
+
+            e.Response = CreateAudioResponse(body, plan);
+            ReportAudioRequest(
+                method,
+                hasRange,
+                plan.StatusCode,
+                plan.ContentType,
+                plan.BodyLength,
+                resource.RecordingId);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            e.Response = CreateAudioResponse(
+                Stream.Null,
+                new MeetingAudioHttpResponsePlan(
+                    404, "Not Found", "text/plain", 0, 0, 0, null,
+                    IncludeBody: false,
+                    AcceptRanges: false,
+                    IsAllowedMethod: true));
+            ReportAudioRequest(method, hasRange, 404, "text/plain", 0, resource.RecordingId);
+        }
+    }
+
+    private CoreWebView2WebResourceResponse CreateAudioResponse(
+        Stream content,
+        MeetingAudioHttpResponsePlan plan)
+    {
+        var headers = $"Content-Type: {plan.ContentType}\r\n" +
+                      $"Content-Length: {plan.HeaderContentLength}\r\n" +
+                      "Cache-Control: no-store";
+        if (plan.AcceptRanges)
+        {
+            headers += "\r\nAccept-Ranges: bytes";
+        }
+        if (!plan.IsAllowedMethod)
+        {
+            headers += "\r\nAllow: GET, HEAD";
+        }
+        if (!string.IsNullOrWhiteSpace(plan.ContentRange))
+        {
+            headers += $"\r\nContent-Range: {plan.ContentRange}";
+        }
+
+        return WorkspaceWebView.CoreWebView2.Environment.CreateWebResourceResponse(
+            content,
+            plan.StatusCode,
+            plan.ReasonPhrase,
+            headers);
+    }
+
+    private void ReportAudioRequest(
+        string method,
+        bool hasRange,
+        int statusCode,
+        string contentType,
+        long responseLength,
+        Guid? recordingId) =>
+        _diagnostic?.Invoke(
+            MeetingAudioRequestDiagnostic.Format(
+                method,
+                hasRange,
+                statusCode,
+                contentType,
+                responseLength,
+                recordingId),
+            null);
+
+    private static FileStream OpenAudioFile(string path) => new(
+        path,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.Read | FileShare.Delete,
+        64 * 1024,
+        FileOptions.SequentialScan);
+
+    private bool TryHandleNativeAudioCommand(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("messageType", out var messageType) ||
+                messageType.GetString() != "meetingAudioPlaybackCommand")
+            {
+                return false;
+            }
+
+            var recordingId = Guid.Empty;
+            var transcriptId = Guid.Empty;
+            if (!TryReadGuid(root, "recordingId", out recordingId) ||
+                !TryReadGuid(root, "transcriptId", out transcriptId) ||
+                !root.TryGetProperty("action", out var actionValue))
+            {
+                SendNativeAudioFailure(recordingId, transcriptId);
+                return true;
+            }
+
+            var action = actionValue.GetString();
+            var position = root.TryGetProperty("positionSeconds", out var positionValue) &&
+                           positionValue.TryGetDouble(out var parsedPosition)
+                ? parsedPosition
+                : 0;
+            var handled = action switch
+            {
+                "play" => TryStartNativeAudio(recordingId, transcriptId, position),
+                "pause" => _nativeAudioPlayback.Pause(recordingId, transcriptId),
+                "seek" => _nativeAudioPlayback.Seek(recordingId, transcriptId, position),
+                "stop" => StopNativeAudio(),
+                _ => false
+            };
+            if (!handled)
+            {
+                SendNativeAudioFailure(recordingId, transcriptId);
+            }
+            else
+            {
+                SendNativeAudioSnapshot();
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private bool TryStartNativeAudio(
+        Guid recordingId,
+        Guid transcriptId,
+        double positionSeconds)
+    {
+        var activeTranscript = _state.MeetingTranscripts.SingleOrDefault(item =>
+            item.Id == transcriptId &&
+            item.MeetId is Guid meetingId &&
+            _state.Meetings.SingleOrDefault(meeting => meeting.Id == meetingId)
+                ?.ActiveTranscriptId == transcriptId);
+        return activeTranscript is not null &&
+               _meetingAudioResolver.ResolveTranscriptLink(activeTranscript).RecordingId == recordingId &&
+               _meetingAudioResolver.TryResolveRecording(recordingId, out var resource) &&
+               _nativeAudioPlayback.Play(
+                   resource,
+                   transcriptId,
+                   positionSeconds,
+                   _meetingAudioResolver.ResolveTranscriptAudioRange(
+                       activeTranscript,
+                       resource.DurationSeconds));
+    }
+
+    private bool StopNativeAudio()
+    {
+        _nativeAudioPlayback.Stop();
+        return true;
+    }
+
+    private void SendNativeAudioSnapshot()
+    {
+        var snapshot = _nativeAudioPlayback.Snapshot();
+        if (snapshot.RecordingId is null || snapshot.TranscriptId is null)
+        {
+            return;
+        }
+
+        TrySendMessage(new
+        {
+            schemaVersion = 1,
+            messageType = "meetingAudioPlaybackEvent",
+            recordingId = snapshot.RecordingId.Value.ToString("N"),
+            transcriptId = snapshot.TranscriptId.Value.ToString("N"),
+            state = snapshot.State.ToString(),
+            positionSeconds = snapshot.PositionSeconds,
+            durationSeconds = snapshot.DurationSeconds,
+            failureReason = snapshot.FailureReason
+        });
+    }
+
+    private void SendNativeAudioFailure(Guid recordingId, Guid transcriptId) =>
+        TrySendMessage(new
+        {
+            schemaVersion = 1,
+            messageType = "meetingAudioPlaybackEvent",
+            recordingId = recordingId.ToString("N"),
+            transcriptId = transcriptId.ToString("N"),
+            state = MeetingNativeAudioPlaybackState.Failed.ToString(),
+            positionSeconds = 0,
+            durationSeconds = 0,
+            failureReason = "Native playback unavailable"
+        });
+
+    private static bool TryReadGuid(JsonElement root, string propertyName, out Guid value)
+    {
+        value = Guid.Empty;
+        return root.TryGetProperty(propertyName, out var property) &&
+               property.ValueKind == JsonValueKind.String &&
+               Guid.TryParseExact(property.GetString(), "N", out value);
     }
 
     private static bool IsSnapshotRequest(string json)
@@ -266,7 +523,9 @@ public partial class WorkspaceWindow : Window
             screenshotThumbnailLoader: _screenshotThumbnailLoader,
             defaultMeetingRecordingPolicy: _defaultRecordingPolicyLoader?.Invoke() ??
                                            MeetingRecordingPolicy.Manual,
-            meetingOperations: _meetingOperationLoader?.Invoke());
+            meetingOperations: _meetingOperationLoader?.Invoke(),
+            meetingAudioLoader: _meetingAudioResolver.Describe);
+
         SendMessage(snapshot);
     }
 
@@ -312,12 +571,15 @@ public partial class WorkspaceWindow : Window
 
     private void WorkspaceWindow_OnClosed(object? sender, EventArgs e)
     {
+        _nativeAudioTimer.Stop();
+        _nativeAudioPlayback.Dispose();
         if (WorkspaceWebView.CoreWebView2 is { } core)
         {
             core.NewWindowRequested -= CoreWebView2_OnNewWindowRequested;
             core.NavigationStarting -= CoreWebView2_OnNavigationStarting;
             core.NavigationCompleted -= CoreWebView2_OnNavigationCompleted;
             core.WebMessageReceived -= CoreWebView2_OnWebMessageReceived;
+            core.WebResourceRequested -= CoreWebView2_OnWebResourceRequested;
         }
 
         WorkspaceWebView.Dispose();

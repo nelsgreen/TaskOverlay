@@ -173,8 +173,31 @@ public sealed record WorkspaceMeetingTranscriptSnapshot(
     IReadOnlyList<WorkspaceTranscriptSegmentSnapshot> Segments,
     IReadOnlyList<WorkspaceTranscriptSpeakerSnapshot> Speakers,
     IReadOnlyList<string> Warnings,
+    WorkspaceTranscriptAudioSnapshot Audio,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
+
+public sealed record WorkspaceTranscriptAudioSnapshot(
+    string Status,
+    string? Url,
+    double DurationSeconds,
+    string? UnavailableReason = null,
+    Guid? RecordingId = null,
+    double? StartSeconds = null,
+    double? EndSeconds = null)
+{
+    public const string NotLinked = "NotLinked";
+    public const string Available = "Available";
+    public const string Unavailable = "Unavailable";
+    public const string NoRecordingLinked = "NoRecordingLinked";
+    public const string MultipleRecordingsMatch = "MultipleRecordingsMatch";
+    public const string RecordingMissing = "RecordingMissing";
+    public const string DifferentMeeting = "DifferentMeeting";
+    public const string ManagedAudioUnavailable = "ManagedAudioUnavailable";
+    public const string ManagedAudioFileMissing = "ManagedAudioFileMissing";
+    public const string MixedTrackUnavailable = "MixedTrackUnavailable";
+    public const string UnsupportedAudioFormat = "UnsupportedAudioFormat";
+}
 
 public sealed record WorkspaceTranscriptSegmentSnapshot(
     int Index,
@@ -327,7 +350,8 @@ public static class WorkspaceSnapshotFactory
         Func<MeetingTranscript, MeetingTranscriptSnapshotContent?>? meetingTranscriptLoader = null,
         Func<MeetingScreenshot, string?>? screenshotThumbnailLoader = null,
         MeetingRecordingPolicy defaultMeetingRecordingPolicy = MeetingRecordingPolicy.Manual,
-        IReadOnlyList<WorkspaceMeetingOperationSnapshot>? meetingOperations = null)
+        IReadOnlyList<WorkspaceMeetingOperationSnapshot>? meetingOperations = null,
+        Func<MeetingTranscript, WorkspaceTranscriptAudioSnapshot?>? meetingAudioLoader = null)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -565,6 +589,20 @@ public static class WorkspaceSnapshotFactory
             {
                 var content = meetingTranscriptLoader?.Invoke(transcript);
                 var normalized = content?.Transcript;
+                var isActive = meetingById[transcript.MeetId!.Value].ActiveTranscriptId ==
+                               transcript.Id;
+                var audio = isActive
+                    ? meetingAudioLoader?.Invoke(transcript) ??
+                      new WorkspaceTranscriptAudioSnapshot(
+                          transcript.RecordingId is null
+                              ? WorkspaceTranscriptAudioSnapshot.NotLinked
+                              : WorkspaceTranscriptAudioSnapshot.Unavailable,
+                          null,
+                          0)
+                    : new WorkspaceTranscriptAudioSnapshot(
+                        WorkspaceTranscriptAudioSnapshot.NotLinked,
+                        null,
+                        0);
                 var mappings = transcript.Speakers ?? new List<TranscriptSpeaker>();
                 var speakers = mappings
                     .Where(speaker => !string.IsNullOrWhiteSpace(speaker.SpeakerId))
@@ -586,7 +624,11 @@ public static class WorkspaceSnapshotFactory
                 return new WorkspaceMeetingTranscriptSnapshot(
                     FormatId(transcript.Id),
                     FormatId(transcript.MeetId!.Value),
-                    transcript.RecordingId is Guid recordingId ? FormatId(recordingId) : null,
+                    audio.RecordingId is Guid resolvedRecordingId
+                        ? FormatId(resolvedRecordingId)
+                        : transcript.RecordingId is Guid recordingId
+                            ? FormatId(recordingId)
+                            : null,
                     transcript.Origin.ToString(),
                     transcript.Format.ToString(),
                     transcript.Provider,
@@ -595,7 +637,7 @@ public static class WorkspaceSnapshotFactory
                     transcript.ImportedAtUtc,
                     transcript.HasTimestamps,
                     transcript.HasSpeakerLabels,
-                    meetingById[transcript.MeetId.Value].ActiveTranscriptId == transcript.Id,
+                    isActive,
                     FormatId(transcript.RevisionId),
                     transcript.SourceTranscriptId is Guid sourceTranscriptId
                         ? FormatId(sourceTranscriptId)
@@ -614,6 +656,7 @@ public static class WorkspaceSnapshotFactory
                         speaker.DisplayName,
                         speaker.IsCurrentUser)).ToList(),
                     transcript.ImportWarnings ?? new List<string>(),
+                    audio,
                     transcript.CreatedAtUtc,
                     transcript.UpdatedAtUtc);
             })
