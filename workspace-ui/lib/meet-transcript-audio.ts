@@ -52,6 +52,53 @@ export interface NativeAudioPlaybackEvent {
   failureReason: string | null
 }
 
+export type TranscriptPlaybackMode = "Native" | "Browser" | "Unavailable"
+
+export interface NativeTranscriptPlaybackProjection {
+  positionSeconds: number
+  durationSeconds: number
+  isPlaying: boolean
+  activeSegmentIndex: number | null
+  failureReason: string | null
+}
+
+export function selectTranscriptPlaybackMode(input: {
+  hasWebViewBridge: boolean
+  audioStatus: string
+  recordingId: string | null
+  audioUrl: string | null
+}): TranscriptPlaybackMode {
+  if (input.audioStatus !== "Available") return "Unavailable"
+  if (input.hasWebViewBridge) {
+    return input.recordingId ? "Native" : "Unavailable"
+  }
+  return input.audioUrl ? "Browser" : "Unavailable"
+}
+
+export function projectNativeTranscriptPlayback(
+  event: NativeAudioPlaybackEvent,
+  segments: TimedTranscriptSegment[],
+  snapshotDurationSeconds: number,
+): NativeTranscriptPlaybackProjection {
+  const positionSeconds = Math.max(0, event.positionSeconds)
+  const durationSeconds = event.durationSeconds > 0
+    ? event.durationSeconds
+    : Math.max(0, snapshotDurationSeconds)
+  return {
+    positionSeconds,
+    durationSeconds,
+    isPlaying: event.state === "Playing",
+    activeSegmentIndex: activeTranscriptSegmentIndex(
+      segments,
+      positionSeconds,
+      durationSeconds,
+    ),
+    failureReason: event.state === "Failed"
+      ? event.failureReason ?? "Native playback unavailable"
+      : null,
+  }
+}
+
 export function isNativeAudioPlaybackEvent(value: unknown): value is NativeAudioPlaybackEvent {
   if (!value || typeof value !== "object") return false
   const event = value as Partial<NativeAudioPlaybackEvent>
@@ -140,7 +187,11 @@ export async function probeTranscriptAudioEndpoint(
       contentRange: response.headers.get("Content-Range"),
       acceptRanges: response.headers.get("Accept-Ranges"),
     })
-    await response.body?.cancel()
+    try {
+      await response.body?.cancel()
+    } catch {
+      // The response classification is already complete; cleanup is best effort.
+    }
     return result
   } catch {
     return "EndpointUnavailable"

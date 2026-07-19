@@ -8,8 +8,10 @@ import {
   mediaPlaybackFailureLabel,
   isNativeAudioPlaybackEvent,
   postNativeAudioPlaybackCommand,
+  projectNativeTranscriptPlayback,
   probeTranscriptAudioEndpoint,
   resolveSegmentIntervals,
+  selectTranscriptPlaybackMode,
   seekTranscriptSegment,
   shouldAutoScrollTranscript,
   transcriptAudioUnavailableLabel,
@@ -188,6 +190,116 @@ test("endpoint probe validates only the bounded range response headers", async (
   assert.equal(result, "Available")
   assert.equal(request.init.method, "GET")
   assert.equal(request.init.headers.Range, "bytes=0-15")
+
+  const cleanupFailureResult = await probeTranscriptAudioEndpoint(
+    "https://taskoverlay.workspace/__meeting-audio/id",
+    async () => ({
+      status: 206,
+      headers: new Headers({
+        "Content-Type": "audio/mp4",
+        "Content-Length": "16",
+        "Content-Range": "bytes 0-15/2048",
+        "Accept-Ranges": "bytes",
+      }),
+      body: { cancel: async () => { throw new Error("synthetic cleanup failure") } },
+    }),
+  )
+  assert.equal(cleanupFailureResult, "Available",
+    "Best-effort body cleanup must not overwrite an already valid probe result.")
+})
+
+test("connected Workspace selects native playback without browser media or probing", async () => {
+  const connected = {
+    hasWebViewBridge: true,
+    audioStatus: "Available",
+    recordingId: "a".repeat(32),
+    audioUrl: "https://taskoverlay.workspace/__meeting-audio/opaque",
+  }
+  const connectedMode = selectTranscriptPlaybackMode(connected)
+  assert.equal(connectedMode, "Native")
+  assert.equal(selectTranscriptPlaybackMode({ ...connected, audioUrl: null }), "Native")
+  assert.equal(selectTranscriptPlaybackMode({
+    ...connected,
+    hasWebViewBridge: false,
+  }), "Browser")
+  assert.equal(selectTranscriptPlaybackMode({
+    ...connected,
+    hasWebViewBridge: false,
+    audioUrl: null,
+  }), "Unavailable")
+  assert.equal(selectTranscriptPlaybackMode({
+    ...connected,
+    recordingId: null,
+  }), "Unavailable")
+  let browserFetchCalls = 0
+  if (connectedMode === "Browser") {
+    await probeTranscriptAudioEndpoint(connected.audioUrl, async () => {
+      browserFetchCalls += 1
+      throw new Error("synthetic rejected fetch")
+    })
+  }
+  assert.equal(browserFetchCalls, 0,
+    "Connected native mode must not depend on a browser fetch or its result.")
+  assert.equal(mediaPlaybackFailureLabel({
+    errorCode: 2,
+    networkState: 3,
+    readyState: 0,
+    canPlayMp4: "",
+    canPlayAac: "",
+  }, "EndpointUnavailable"), "Audio request failed")
+  assert.equal(connectedMode, "Native",
+    "A browser network error cannot alter connected native mode.")
+
+  const source = fs.readFileSync(
+    new URL("../components/meet-sources-review.tsx", import.meta.url),
+    "utf8",
+  )
+  assert.match(source, /audioAvailable && playbackMode === "Native"/)
+  assert.match(source, /audioAvailable && playbackMode === "Browser"/)
+  assert.ok(!source.includes("nativeFallback"))
+  assert.ok(source.includes('"Native playback command failed"'))
+  assert.ok(source.includes('"Loading…"'))
+  assert.ok(source.includes('action: "stop"'),
+    "Changing transcripts must clean up the connected native session.")
+})
+
+test("native events project position, playback state, active segment, and speaker safely", () => {
+  const playing = projectNativeTranscriptPlayback({
+    schemaVersion: 1,
+    messageType: "meetingAudioPlaybackEvent",
+    recordingId: "a".repeat(32),
+    transcriptId: "b".repeat(32),
+    state: "Playing",
+    positionSeconds: 5.5,
+    durationSeconds: 14,
+    failureReason: null,
+  }, segments, 12)
+  assert.deepEqual(playing, {
+    positionSeconds: 5.5,
+    durationSeconds: 14,
+    isPlaying: true,
+    activeSegmentIndex: 1,
+    failureReason: null,
+  })
+  assert.equal(transcriptSpeakerLabel(segments[playing.activeSegmentIndex], [{
+    speakerId: "b",
+    displayName: "Beatrice",
+    originalLabel: "Bea",
+    isCurrentUser: true,
+  }]), "You")
+
+  const failed = projectNativeTranscriptPlayback({
+    schemaVersion: 1,
+    messageType: "meetingAudioPlaybackEvent",
+    recordingId: "a".repeat(32),
+    transcriptId: "b".repeat(32),
+    state: "Failed",
+    positionSeconds: 0,
+    durationSeconds: 0,
+    failureReason: "Native playback unavailable",
+  }, segments, 14)
+  assert.equal(failed.failureReason, "Native playback unavailable")
+  assert.ok(!JSON.stringify(failed).includes("\\"))
 })
 
 test("native fallback commands and events carry only IDs, seconds, and safe state", () => {
@@ -203,6 +315,12 @@ test("native fallback commands and events carry only IDs, seconds, and safe stat
       transcriptId: "b".repeat(32),
       positionSeconds: 12.5,
     }), true)
+    assert.equal(postNativeAudioPlaybackCommand({
+      action: "seek",
+      recordingId: "a".repeat(32),
+      transcriptId: "b".repeat(32),
+      positionSeconds: 9,
+    }), true)
   } finally {
     globalThis.window = previousWindow
   }
@@ -213,7 +331,27 @@ test("native fallback commands and events carry only IDs, seconds, and safe stat
     recordingId: "a".repeat(32),
     transcriptId: "b".repeat(32),
     positionSeconds: 12.5,
+  }, {
+    schemaVersion: 1,
+    messageType: "meetingAudioPlaybackCommand",
+    action: "seek",
+    recordingId: "a".repeat(32),
+    transcriptId: "b".repeat(32),
+    positionSeconds: 9,
   }])
+  globalThis.window = {
+    chrome: { webview: { postMessage: () => { throw new Error("synthetic post failure") } } },
+  }
+  try {
+    assert.equal(postNativeAudioPlaybackCommand({
+      action: "play",
+      recordingId: "a".repeat(32),
+      transcriptId: "b".repeat(32),
+      positionSeconds: 0,
+    }), false)
+  } finally {
+    globalThis.window = previousWindow
+  }
   const safeEvent = {
     schemaVersion: 1,
     messageType: "meetingAudioPlaybackEvent",

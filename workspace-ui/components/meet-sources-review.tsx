@@ -8,7 +8,9 @@ import {
   isNativeAudioPlaybackEvent,
   mediaPlaybackFailureLabel,
   postNativeAudioPlaybackCommand,
+  projectNativeTranscriptPlayback,
   probeTranscriptAudioEndpoint,
+  selectTranscriptPlaybackMode,
   seekTranscriptSegment,
   shouldAutoScrollTranscript,
   transcriptAudioUnavailableLabel,
@@ -1045,20 +1047,34 @@ function TranscriptPlayback({
   const [isPlaying, setIsPlaying] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
   const [runtimeUnavailable, setRuntimeUnavailable] = useState<string | null>(null)
-  const [nativeFallback, setNativeFallback] = useState(false)
   const [nativePosition, setNativePosition] = useState(0)
-  const snapshotAudioAvailable = transcript.audio.status === "Available" &&
-    Boolean(transcript.audio.url)
-  const audioAvailable = snapshotAudioAvailable && !runtimeUnavailable
-  const browserAudioAvailable = audioAvailable && !nativeFallback
+  const [nativeCommandPending, setNativeCommandPending] = useState(false)
+  const [nativeSessionReady, setNativeSessionReady] = useState(false)
+  const [playbackEnvironment, setPlaybackEnvironment] = useState<
+    "Detecting" | "Connected" | "Browser"
+  >("Detecting")
+  const playbackMode = playbackEnvironment === "Detecting" ? null :
+    selectTranscriptPlaybackMode({
+      hasWebViewBridge: playbackEnvironment === "Connected",
+      audioStatus: transcript.audio.status,
+      recordingId: transcript.recordingId,
+      audioUrl: transcript.audio.url,
+    })
+  const audioAvailable = (playbackMode === "Native" || playbackMode === "Browser") &&
+    !runtimeUnavailable
+
+  useEffect(() => {
+    setPlaybackEnvironment(window.chrome?.webview ? "Connected" : "Browser")
+  }, [])
 
   useEffect(() => {
     setActiveSegmentIndex(null)
     setAudioDuration(transcript.audio.durationSeconds)
     setIsPlaying(false)
     setRuntimeUnavailable(null)
-    setNativeFallback(false)
     setNativePosition(0)
+    setNativeCommandPending(false)
+    setNativeSessionReady(false)
     previousActiveIndexRef.current = null
     lastManualScrollAtRef.current = null
   }, [transcript.id, transcript.audio.url, transcript.audio.durationSeconds])
@@ -1104,23 +1120,23 @@ function TranscriptPlayback({
   useEffect(() => {
     const webview = window.chrome?.webview
     const recordingId = transcript.recordingId
-    if (!webview || !recordingId) return
+    if (playbackMode !== "Native" || !webview || !recordingId) return
     const onMessage = (event: { data: unknown }) => {
       if (!isNativeAudioPlaybackEvent(event.data) ||
           event.data.recordingId !== recordingId ||
           event.data.transcriptId !== transcript.id) return
-      setNativePosition(Math.max(0, event.data.positionSeconds))
-      if (event.data.durationSeconds > 0) setAudioDuration(event.data.durationSeconds)
-      setIsPlaying(event.data.state === "Playing")
-      if (event.data.state === "Failed") {
-        setRuntimeUnavailable(event.data.failureReason ?? "Native playback unavailable")
-        return
-      }
-      setActiveSegmentIndex(activeTranscriptSegmentIndex(
+      const projection = projectNativeTranscriptPlayback(
+        event.data,
         transcript.segments,
-        event.data.positionSeconds,
-        event.data.durationSeconds || transcript.audio.durationSeconds,
-      ))
+        transcript.audio.durationSeconds,
+      )
+      setNativeCommandPending(false)
+      setNativeSessionReady(event.data.state !== "Failed")
+      setNativePosition(projection.positionSeconds)
+      setAudioDuration(projection.durationSeconds)
+      setIsPlaying(projection.isPlaying)
+      setActiveSegmentIndex(projection.activeSegmentIndex)
+      if (projection.failureReason) setRuntimeUnavailable(projection.failureReason)
     }
     webview.addEventListener("message", onMessage)
     return () => {
@@ -1131,7 +1147,7 @@ function TranscriptPlayback({
         transcriptId: transcript.id,
       })
     }
-  }, [transcript.id, transcript.recordingId])
+  }, [playbackMode, transcript.id, transcript.recordingId])
 
   const updateActiveSegment = () => {
     const player = audioRef.current
@@ -1146,14 +1162,16 @@ function TranscriptPlayback({
 
   const seekToSegment = async (startSeconds: number | null) => {
     if (startSeconds == null || !audioAvailable) return
-    if (nativeFallback && transcript.recordingId) {
+    if (playbackMode === "Native" && transcript.recordingId) {
       setNativePosition(startSeconds)
-      postNativeAudioPlaybackCommand({
+      const posted = postNativeAudioPlaybackCommand({
         action: "play",
         recordingId: transcript.recordingId,
         transcriptId: transcript.id,
         positionSeconds: startSeconds,
       })
+      if (posted) setNativeCommandPending(true)
+      else setRuntimeUnavailable("Native playback command failed")
       return
     }
     const player = audioRef.current
@@ -1173,7 +1191,7 @@ function TranscriptPlayback({
 
   return (
     <div className="space-y-2">
-      {browserAudioAvailable && (
+      {audioAvailable && playbackMode === "Browser" && (
         <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card/95 px-2.5 py-2 shadow-sm backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <audio
@@ -1200,13 +1218,6 @@ function TranscriptPlayback({
                 setIsPlaying(false)
                 void probeTranscriptAudioEndpoint(transcript.audio.url ?? "")
                   .then((probe) => {
-                    if (probe === "Available" &&
-                        (safeState.errorCode === 3 || safeState.errorCode === 4) &&
-                        transcript.recordingId) {
-                      setNativeFallback(true)
-                      setRuntimeUnavailable(null)
-                      return
-                    }
                     setRuntimeUnavailable(mediaPlaybackFailureLabel(safeState, probe))
                   })
               }}
@@ -1226,20 +1237,26 @@ function TranscriptPlayback({
           </p>
         </div>
       )}
-      {audioAvailable && nativeFallback && transcript.recordingId && (
+      {audioAvailable && playbackMode === "Native" && transcript.recordingId && (
         <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card/95 px-2.5 py-2 shadow-sm backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <button
               type="button"
+              disabled={nativeCommandPending}
               className="rounded border border-border px-2 py-1 text-[10px] text-foreground"
-              onClick={() => postNativeAudioPlaybackCommand({
-                action: isPlaying ? "pause" : "play",
-                recordingId: transcript.recordingId!,
-                transcriptId: transcript.id,
-                positionSeconds: nativePosition,
-              })}
+              onClick={() => {
+                const action = isPlaying ? "pause" : "play"
+                const posted = postNativeAudioPlaybackCommand({
+                  action,
+                  recordingId: transcript.recordingId!,
+                  transcriptId: transcript.id,
+                  positionSeconds: nativePosition,
+                })
+                if (posted && action === "play") setNativeCommandPending(true)
+                if (!posted) setRuntimeUnavailable("Native playback command failed")
+              }}
             >
-              {isPlaying ? "Pause" : "Play"}
+              {nativeCommandPending ? "Loading…" : isPlaying ? "Pause" : "Play"}
             </button>
             <input
               type="range"
@@ -1247,17 +1264,19 @@ function TranscriptPlayback({
               max={Math.max(audioDuration, 0.1)}
               step={0.1}
               value={Math.min(nativePosition, Math.max(audioDuration, 0.1))}
+              disabled={!nativeSessionReady || nativeCommandPending}
               aria-label="Transcript recording position"
               className="min-w-0 flex-1 accent-[var(--status-meet)]"
               onChange={(event) => {
                 const positionSeconds = Number(event.currentTarget.value)
                 setNativePosition(positionSeconds)
-                postNativeAudioPlaybackCommand({
-                  action: "play",
+                const posted = postNativeAudioPlaybackCommand({
+                  action: "seek",
                   recordingId: transcript.recordingId!,
                   transcriptId: transcript.id,
                   positionSeconds,
                 })
+                if (!posted) setRuntimeUnavailable("Native playback command failed")
               }}
             />
             <label className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
