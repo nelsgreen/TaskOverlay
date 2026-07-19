@@ -255,8 +255,12 @@
   --muted-foreground: var(--text-muted);
   /* legacy shadcn "accent" = neutral hover-surface tint, renamed to avoid
      colliding with the canonical brand --accent (see @theme inline note above).
-     .meet-shell overrides this instead of --accent to keep its violet hover tint. */
-  --surface-hover: var(--surface-sunken);
+     .meet-shell overrides this instead of --accent to keep its violet hover tint.
+     Uses --surface-raised (not --surface-sunken): a hover cue must read as
+     slightly LIFTED/lighter than the resting surface in both themes, never as
+     a darker/sunken/pressed state (QA: Tree row hover was darkening, reading
+     as pressed/disabled instead of hovered). */
+  --surface-hover: var(--surface-raised);
   --accent-foreground: var(--text);
   --input: var(--border-strong);
   --ring: var(--accent);

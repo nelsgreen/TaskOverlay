@@ -170,6 +170,13 @@ export function TreeView({
         if (sectionTasks.length === 0 && filter !== "all") return null
         const attentionInSection = sectionTasks.filter(isAttention).length
         const collapsed = collapsedSections.has(section.id)
+        // `selectedSectionId` doubles as contextual-parent tracking (set to the
+        // selected task's section) and as direct section selection (clicking the
+        // section header itself). Only the latter should render as "selected" -
+        // a section must stay neutral while it merely contains the selected task,
+        // so it never competes with the task row's own selected treatment.
+        const taskSelectedInSection = selectedTaskId != null && sectionTasks.some((t) => t.id === selectedTaskId)
+        const directlySelected = !taskSelectedInSection && selectedSectionId === section.id
 
         return (
           <section key={section.id} onContextMenu={(e) => openSectionMenu(e, section)}>
@@ -180,7 +187,9 @@ export function TreeView({
               }}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent/40",
-                selectedSectionId === section.id && "bg-row-selected",
+                // Weak, structurally distinct neutral treatment - never the
+                // warm/beige task-selected fill (--row-selected).
+                directlySelected && "bg-surface-sunken",
               )}
             >
               <ChevronDown
