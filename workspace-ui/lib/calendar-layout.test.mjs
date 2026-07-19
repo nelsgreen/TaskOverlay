@@ -3,11 +3,11 @@ import test from "node:test"
 import {
   DAY_END_MIN,
   DAY_START_MIN,
+  DEFAULT_WORKDAY_END_MIN,
+  DEFAULT_WORKDAY_START_MIN,
   GRID_HEIGHT,
   MIN_DURATION_MIN,
   PX_PER_MIN,
-  WORKDAY_END_MIN,
-  WORKDAY_START_MIN,
   calendarNavigation,
   clampStartForDuration,
   clipRangeToDay,
@@ -19,16 +19,18 @@ import {
   markerMinute,
   meetingRangeForDay,
   minuteFromPointer,
+  normalizeWorkingHours,
   rangeForMove,
   resizeRange,
+  workdayBandGeometry,
 } from "./calendar-layout.ts"
 import { isoFromLocalDateTime, localSlotFromIso } from "./calendar-date.ts"
 
 test("full-day and workday constants stay independent", () => {
   assert.equal(DAY_START_MIN, 0)
   assert.equal(DAY_END_MIN, 1440)
-  assert.equal(WORKDAY_START_MIN, 540)
-  assert.equal(WORKDAY_END_MIN, 1080)
+  assert.equal(DEFAULT_WORKDAY_START_MIN, 540)
+  assert.equal(DEFAULT_WORKDAY_END_MIN, 1080)
   assert.equal(GRID_HEIGHT, Math.round(1440 * PX_PER_MIN))
 })
 
@@ -98,6 +100,21 @@ test("initial scroll policy uses now only for the visible current day or week", 
   assert.equal(initialScrollMinute("day", "2026-07-20", "2026-07-19", false, 750), 540)
   assert.equal(initialScrollMinute("week", "2026-07-14", "2026-07-19", true, 750), 750)
   assert.equal(initialScrollMinute("week", "2026-07-21", "2026-07-19", false, 750), 540)
+  assert.equal(initialScrollMinute("day", "2026-07-20", "2026-07-19", false, 750, 480, 1200), 480)
+  assert.equal(initialScrollMinute("week", "2026-07-21", "2026-07-19", false, 750, 480, 1200), 480)
+  assert.equal(initialScrollMinute("day", "2026-07-19", "2026-07-19", false, 750, 480, 1200), 750)
+})
+
+test("work band uses supplied validated settings without changing full-day bounds", () => {
+  assert.deepEqual(normalizeWorkingHours(480, 1200), { startMin: 480, endMin: 1200 })
+  assert.deepEqual(workdayBandGeometry(480, 1200), {
+    top: 480 * PX_PER_MIN,
+    height: 720 * PX_PER_MIN,
+  })
+  assert.deepEqual(normalizeWorkingHours(1200, 480), { startMin: 540, endMin: 1080 })
+  assert.deepEqual(normalizeWorkingHours(487, 1200), { startMin: 540, endMin: 1080 })
+  assert.equal(DAY_START_MIN, 0)
+  assert.equal(DAY_END_MIN, 1440)
 })
 
 test("initial scroll places the target near one quarter of the viewport", () => {
@@ -115,6 +132,11 @@ test("initial scroll navigation identity ignores snapshots, selections, and cloc
   assert.equal(first.key, afterClockTick.key)
   assert.notEqual(first.key, calendarNavigation("day", "2026-07-14").key)
   assert.notEqual(first.key, calendarNavigation("week", "2026-07-21").key)
+  assert.notEqual(first.key, calendarNavigation("week", "2026-07-14", 480, 1200).key)
+  assert.equal(
+    calendarNavigation("week", "2026-07-14", 480, 1200).key,
+    calendarNavigation("week", "2026-07-14", 480, 1200).key,
+  )
 })
 
 test("quick durations are enabled only when the exact duration fits", () => {

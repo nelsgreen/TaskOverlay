@@ -84,6 +84,51 @@
                         Style="{StaticResource AppCardStyle}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource AppSectionLabelStyle}"
+                                   Text="WORKING HOURS" />
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource AppSectionLabelStyle}"
+                                           Text="WORKDAY STARTS" />
+                                <ComboBox x:Name="WorkdayStartComboBox"
+                                          Margin="0,5,0,0"
+                                          MinHeight="28"
+                                          DisplayMemberPath="Label"
+                                          SelectedValuePath="Minutes"
+                                          SelectionChanged="WorkingHoursComboBox_OnSelectionChanged" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource AppSectionLabelStyle}"
+                                           Text="WORKDAY ENDS" />
+                                <ComboBox x:Name="WorkdayEndComboBox"
+                                          Margin="0,5,0,0"
+                                          MinHeight="28"
+                                          DisplayMemberPath="Label"
+                                          SelectedValuePath="Minutes"
+                                          SelectionChanged="WorkingHoursComboBox_OnSelectionChanged" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Margin="0,7,0,0"
+                                   Style="{StaticResource AppSubtitleStyle}"
+                                   Text="Highlights the Calendar work band and sets the initial scroll for non-current dates. Scheduling remains available all day."
+                                   TextWrapping="Wrap" />
+                        <TextBlock x:Name="WorkingHoursValidationText"
+                                   Margin="0,7,0,0"
+                                   Foreground="#FFDB646A"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Visibility="Collapsed" />
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,12,0,0"
+                        Style="{StaticResource AppCardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource AppSectionLabelStyle}"
                                    Text="MEET RECORDING &amp; ASSISTANT" />
                         <CheckBox x:Name="AutomaticMeetingRecordingCheckBox"
                                   Margin="0,10,0,0"

@@ -24,6 +24,8 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceContextItemSnapshot> ContextItems,
     IReadOnlyList<WorkspaceActiveNowSnapshot> ActiveNow,
     IReadOnlyList<WorkspaceTimelineItemSnapshot> TimelineItems,
+    int WorkdayStartMinutes,
+    int WorkdayEndMinutes,
     WorkspaceContextSnapshot Context);
 
 public sealed record WorkspaceContextSnapshot(
@@ -337,7 +339,7 @@ public sealed record WorkspaceTimelineItemSnapshot(
 
 public static class WorkspaceSnapshotFactory
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
     public const string ReadOnlyMode = "readonly";
     public const string ConnectedMode = "connected";
 
@@ -818,6 +820,7 @@ public static class WorkspaceSnapshotFactory
             .ThenBy(item => item.Id, StringComparer.Ordinal)
             .ToList();
         var settings = state.WorkspaceSettings ?? new WorkspaceSettings();
+        var workingHours = WorkspaceSettings.ResolveWorkingHours(settings);
         var context = new WorkspaceContextSnapshot(
             ToWorkspaceTab(settings.ActiveTab),
             settings.SelectedProjectIds?
@@ -855,6 +858,8 @@ public static class WorkspaceSnapshotFactory
             contextItems,
             activeNow,
             timelineItems,
+            workingHours.StartMinutes,
+            workingHours.EndMinutes,
             context);
     }
 

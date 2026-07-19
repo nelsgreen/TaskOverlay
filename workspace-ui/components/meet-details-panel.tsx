@@ -25,7 +25,7 @@ import { MeetingAutosaveQueue, type MeetSaveMode, type MeetSaveStatus } from "@/
 import type { MeetEditableField } from "@/lib/meeting-edit"
 import { applyMeetingTitleInput, generatedTitleForMeeting } from "@/lib/meeting-title"
 import {
-  isUntouchedNewMeeting,
+  closeMeetEditor,
   shouldCloseMeetModal,
   type MeetModalCloseReason,
 } from "@/lib/meet-modal-policy"
@@ -61,7 +61,6 @@ interface Props {
   ) => Promise<void>
   onDelete: (id: string) => Promise<boolean>
   onClose: () => void
-  isNewlyCreated?: boolean
   onOpenLinkedTask?: (taskId: string) => void
   focusTitle?: boolean
   onTitleFocused?: () => void
@@ -162,7 +161,6 @@ export function MeetDetailsModal({
   onPersist,
   onDelete,
   onClose,
-  isNewlyCreated = false,
   onOpenLinkedTask,
   focusTitle = false,
   onTitleFocused,
@@ -218,7 +216,6 @@ export function MeetDetailsModal({
     return true
   }, [confirmLeaveTranscriptEditor])
   const [saveStatus, setSaveStatus] = useState<MeetSaveStatus>("saved")
-  const sessionBaseRef = useRef<MeetItem | null>(meet)
   const draftRef = useRef<MeetItem | null>(meet)
   const titleInputRef = useRef<HTMLInputElement>(null)
   const sourceCommandSentRef = useRef(false)
@@ -269,39 +266,11 @@ export function MeetDetailsModal({
   const requestClose = useCallback(async (reason: MeetModalCloseReason) => {
     if (!shouldCloseMeetModal(reason)) return false
     if (!confirmLeaveTranscriptEditor(() => { void requestCloseAfterDiscardRef.current?.(reason) })) return false
-    if (!await flushAutosave()) return false
-
-    const current = draftRef.current
-    const initial = sessionBaseRef.current
-    if (isNewlyCreated && current && initial && isUntouchedNewMeeting({
-      initial,
-      current,
-      hasRecordingOrSource:
-        sourceCommandSentRef.current ||
-        meetingRecordings.some((recording) => recording.meetingId === current.id) ||
-        meetingTranscripts.some((transcript) => transcript.meetingId === current.id) ||
-        meetingScreenshots.some((screenshot) => screenshot.meetingId === current.id),
-      hasContextLink:
-        contextCommandSentRef.current ||
-        contextSources.some((source) => source.linkedMeetingIds.includes(current.id)) ||
-        contextItems.some((item) => item.linkedMeetingIds.includes(current.id)),
-    })) {
-      if (!await onDelete(current.id)) return false
-    }
-
-    onClose()
-    return true
+    return closeMeetEditor(reason, flushAutosave, onClose)
   }, [
     confirmLeaveTranscriptEditor,
-    contextItems,
-    contextSources,
     flushAutosave,
-    isNewlyCreated,
-    meetingRecordings,
-    meetingScreenshots,
-    meetingTranscripts,
     onClose,
-    onDelete,
   ])
   requestCloseAfterDiscardRef.current = requestClose
 

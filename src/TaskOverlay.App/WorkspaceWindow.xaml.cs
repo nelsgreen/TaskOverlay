@@ -233,15 +233,9 @@ public partial class WorkspaceWindow : Window
                 "Workspace command could not be applied.");
         }
 
-        if (result.Success)
-        {
-            if (!TrySendSnapshot("command"))
-            {
-                result = result.WithWarning(
-                    "snapshotFailed",
-                    "Changes were saved, but Workspace could not refresh its state.");
-            }
-        }
+        result = WorkspaceCommandDeliveryPolicy.AfterPersistence(
+            result,
+            () => TrySendSnapshot("command"));
 
         TrySendMessage(result);
     }
@@ -591,5 +585,24 @@ public partial class WorkspaceWindow : Window
         LoadingPanel.Visibility = Visibility.Collapsed;
         ErrorMessageText.Text = message;
         ErrorPanel.Visibility = Visibility.Visible;
+    }
+}
+
+internal static class WorkspaceCommandDeliveryPolicy
+{
+    public static WorkspaceCommandResult AfterPersistence(
+        WorkspaceCommandResult result,
+        Func<bool> publishSnapshot)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(publishSnapshot);
+        if (!result.Success || publishSnapshot())
+        {
+            return result;
+        }
+
+        return result.WithWarning(
+            "snapshotFailed",
+            "Changes were saved, but Workspace could not refresh its state.");
     }
 }

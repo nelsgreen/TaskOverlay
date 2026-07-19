@@ -14,8 +14,6 @@ import {
   MIN_DURATION_MIN,
   PX_PER_MIN,
   SNAP_MIN,
-  WORKDAY_END_MIN,
-  WORKDAY_START_MIN,
   calendarNavigation,
   clamp,
   clipRangeToDay,
@@ -24,6 +22,7 @@ import {
   effectiveCreationDuration,
   initialScrollMinute,
   initialScrollTop,
+  workdayBandGeometry,
   markerMinute,
   meetingRangeForDay,
   minuteFromPointer,
@@ -187,6 +186,8 @@ interface CalendarViewProps {
   selectedMeetId: string | null
   showDone: boolean
   canSchedule: boolean
+  workdayStartMinutes: number
+  workdayEndMinutes: number
   createMeetDisabled?: boolean
   onSelectTask: (taskId: string) => void
   onSelectMeet: (meetId: string) => void
@@ -214,6 +215,8 @@ export function CalendarView({
   selectedMeetId,
   showDone,
   canSchedule,
+  workdayStartMinutes,
+  workdayEndMinutes,
   createMeetDisabled = false,
   onSelectTask,
   onSelectMeet,
@@ -388,8 +391,8 @@ export function CalendarView({
   const displayTitle = (block: Block) => block.title.trim() || (block.kind === "MEET" ? "Untitled MEET" : "Untitled task")
 
   const scrollNavigation = useMemo(
-    () => calendarNavigation(viewMode, selectedDate),
-    [viewMode, selectedDate],
+    () => calendarNavigation(viewMode, selectedDate, workdayStartMinutes, workdayEndMinutes),
+    [viewMode, selectedDate, workdayStartMinutes, workdayEndMinutes],
   )
 
   useEffect(() => {
@@ -405,6 +408,8 @@ export function CalendarView({
       currentToday,
       weekContainsToday,
       currentMinute,
+      scrollNavigation.workdayStartMin,
+      scrollNavigation.workdayEndMin,
     )
     const frame = requestAnimationFrame(() => {
       viewport.scrollTop = initialScrollTop(targetMinute, viewport.clientHeight)
@@ -711,6 +716,8 @@ export function CalendarView({
             projectMap={projectMap}
             sectionMap={sectionMap}
             canSchedule={canSchedule}
+            workdayStartMinutes={workdayStartMinutes}
+            workdayEndMinutes={workdayEndMinutes}
             ghost={ghost}
             newBlock={newBlock}
             gridRef={dayGridRef}
@@ -738,6 +745,8 @@ export function CalendarView({
             buildDay={buildDay}
             projectMap={projectMap}
             canSchedule={canSchedule}
+            workdayStartMinutes={workdayStartMinutes}
+            workdayEndMinutes={workdayEndMinutes}
             weekGhost={weekGhost}
             onColumnDragOver={onColumnDragOver}
             onColumnDrop={onColumnDrop}
@@ -899,14 +908,12 @@ function CalendarContextMenu({
   )
 }
 
-function WorkdayBand() {
+function WorkdayBand({ startMin, endMin }: { startMin: number; endMin: number }) {
+  const geometry = workdayBandGeometry(startMin, endMin)
   return (
     <div
       className="pointer-events-none absolute inset-x-0 border-y border-border/20 bg-muted/10"
-      style={{
-        top: WORKDAY_START_MIN * PX_PER_MIN,
-        height: (WORKDAY_END_MIN - WORKDAY_START_MIN) * PX_PER_MIN,
-      }}
+      style={geometry}
     />
   )
 }
@@ -920,6 +927,8 @@ function DayGrid({
   projectMap,
   sectionMap,
   canSchedule,
+  workdayStartMinutes,
+  workdayEndMinutes,
   ghost,
   newBlock,
   gridRef,
@@ -946,6 +955,8 @@ function DayGrid({
   projectMap: Map<string, Project>
   sectionMap: Map<string, Section>
   canSchedule: boolean
+  workdayStartMinutes: number
+  workdayEndMinutes: number
   ghost: { startMin: number; endMin: number } | null
   newBlock: { taskId: string; dateKey: string; startMin: number } | null
   gridRef: React.RefObject<HTMLDivElement | null>
@@ -1068,7 +1079,7 @@ function DayGrid({
         onDragLeave={onDayDragLeave}
         onDrop={onDayDrop}
       >
-        <WorkdayBand />
+        <WorkdayBand startMin={workdayStartMinutes} endMin={workdayEndMinutes} />
         {hours.map((hour) => <div key={hour} className="pointer-events-none absolute inset-x-0 border-t border-border/40" style={{ top: hour * 60 * PX_PER_MIN }} />)}
         {hours.slice(0, -1).map((hour) => <div key={`${hour}h`} className="pointer-events-none absolute inset-x-0 border-t border-dashed border-border/20" style={{ top: (hour * 60 + 30) * PX_PER_MIN }} />)}
 
@@ -1087,7 +1098,7 @@ function DayGrid({
         )}
 
         {isEmpty && !ghost && (
-          <div className="pointer-events-none absolute inset-x-0 flex flex-col items-center justify-center gap-1.5 text-center" style={{ top: WORKDAY_START_MIN * PX_PER_MIN, height: (WORKDAY_END_MIN - WORKDAY_START_MIN) * PX_PER_MIN }}>
+          <div className="pointer-events-none absolute inset-x-0 flex flex-col items-center justify-center gap-1.5 text-center" style={workdayBandGeometry(workdayStartMinutes, workdayEndMinutes)}>
             <p className="text-sm font-medium text-muted-foreground">Nothing planned on this day</p>
             <p className="max-w-xs text-[11px] text-muted-foreground/70">{canSchedule ? "Drag a task from the Planning pool onto any time of day." : "Planned work, reminders and deadlines land here."}</p>
           </div>
@@ -1214,6 +1225,8 @@ function WeekGrid({
   buildDay,
   projectMap,
   canSchedule,
+  workdayStartMinutes,
+  workdayEndMinutes,
   weekGhost,
   onColumnDragOver,
   onColumnDrop,
@@ -1235,6 +1248,8 @@ function WeekGrid({
   buildDay: (dateKey: string) => { blocks: Block[]; markers: Marker[] }
   projectMap: Map<string, Project>
   canSchedule: boolean
+  workdayStartMinutes: number
+  workdayEndMinutes: number
   weekGhost: { dayIso: string; startMin: number; endMin: number } | null
   onColumnDragOver: (event: React.DragEvent, dayIso: string) => void
   onColumnDrop: (event: React.DragEvent, dayIso: string) => void
@@ -1321,7 +1336,7 @@ function WeekGrid({
       </div>
 
       {!weekHasItems && (
-        <div className="pointer-events-none absolute inset-x-0 flex flex-col items-center gap-1.5 text-center" style={{ left: 64, top: 36 + WORKDAY_START_MIN * PX_PER_MIN + 120 }}>
+        <div className="pointer-events-none absolute inset-x-0 flex flex-col items-center gap-1.5 text-center" style={{ left: 64, top: 36 + workdayBandGeometry(workdayStartMinutes, workdayEndMinutes).top + 120 }}>
           <p className="text-sm font-medium text-muted-foreground">Nothing planned this week</p>
           <p className="text-[11px] text-muted-foreground/70">Drag a task onto any day and time, or pick a day to plan.</p>
         </div>
@@ -1354,7 +1369,7 @@ function WeekGrid({
                 onDragOver={(event) => onColumnDragOver(event, iso)}
                 onDrop={(event) => onColumnDrop(event, iso)}
               >
-                <WorkdayBand />
+                <WorkdayBand startMin={workdayStartMinutes} endMin={workdayEndMinutes} />
                 {hours.map((hour) => <div key={hour} className="pointer-events-none absolute inset-x-0 border-t border-border/30" style={{ top: hour * 60 * PX_PER_MIN }} />)}
                 {isToday && <div className="pointer-events-none absolute inset-x-0 z-20 h-px bg-now-marker" style={{ top: nowMin * PX_PER_MIN }} />}
                 {weekGhost?.dayIso === iso && (

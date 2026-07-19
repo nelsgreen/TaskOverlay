@@ -386,19 +386,22 @@ Product direction:
 ## Scheduling, Calendar, And Timeline
 
 - Work schedule settings:
-  - start/end;
-  - working days;
-  - timezone display;
+  - configurable global start/end is implemented through authoritative
+    `AppState` / `state.json` settings, with 15-minute increments and a default
+    of 09:00-18:00;
+  - working days, separate Friday hours, lunch/break periods, timezone display,
+    and per-date exceptions remain later scope;
 - Calendar legibility and schedule range:
   - retain violet as the MEET entity signal and add a project-color marker in
     All Projects view; exact treatment remains to be designed;
   - keep task and MEET titles visible in short blocks, including 45-minute
     blocks, hiding secondary metadata first;
-  - allow scrolling beyond 18:00, potentially through the full day; working
-    hours guide planning but are not a hard visibility boundary;
+  - Day and Week use an implemented 00:00-24:00 canvas; working hours are only
+    a visual band and initial-scroll anchor, never a scheduling boundary;
   - different schedules by weekday remain later work.
   - later lunch/break and Friday schedule;
-  - defaults Mon-Fri 09:00-18:00.
+  - global start/end defaults to 09:00-18:00; working-day selection remains
+    later scope.
 - Deadline:
   - optional date/date+time;
   - separate from REMIND;
@@ -435,7 +438,7 @@ Product direction:
     default;
   - scheduling indicators are implemented from real work sessions:
     Unscheduled / Scheduled today / N blocks today / Total today;
-  - later filters: Active / Unscheduled / Today / All;
+  - filters Active / Unscheduled / Today / All are implemented;
   - clearing a block removes the planned block, not the task.
 - Calendar empty-slot context menu (implemented; preserve connected behavior):
   - right-click an empty area of Day/Week view opens Create task / Create
@@ -488,6 +491,8 @@ Product direction:
     click and keyboard activation still open Details.
 - Duration chips / resize handles:
   - 15/30/45/60/90/120.
+- Calendar off-screen event indicators at the top/bottom viewport edges for
+  hidden task sessions, MEET, reminders, and deadlines remain future UX work.
 - Gantt-like future planning view.
 - Timeline and Calendar have different jobs:
   - Timeline = attention/risk horizon;

@@ -174,6 +174,11 @@ public static class WorkspaceCommandProcessor
                 return DeleteTaskWorkSession(state, payload, commandId);
             }
 
+            if (type == "updateWorkingHours")
+            {
+                return UpdateWorkingHours(state, payload, commandId);
+            }
+
             if (type == "renameSection")
             {
                 return RenameSection(state, payload, commandId, now ?? DateTimeOffset.UtcNow);
@@ -324,6 +329,31 @@ public static class WorkspaceCommandProcessor
         return treeService.MarkStatus(taskId, status.Value, timestamp)
             ? WorkspaceCommandResult.Succeeded(commandId)
             : Fail(commandId, "mutationRejected", "Task status could not be updated.");
+    }
+
+    private static WorkspaceCommandResult UpdateWorkingHours(
+        AppState state,
+        JsonElement payload,
+        string commandId)
+    {
+        if (!payload.TryGetProperty("workdayStartMinutes", out var startElement) ||
+            startElement.ValueKind != JsonValueKind.Number ||
+            !startElement.TryGetInt32(out var startMinutes) ||
+            !payload.TryGetProperty("workdayEndMinutes", out var endElement) ||
+            endElement.ValueKind != JsonValueKind.Number ||
+            !endElement.TryGetInt32(out var endMinutes) ||
+            !WorkspaceSettings.IsValidWorkingHours(startMinutes, endMinutes))
+        {
+            return Fail(
+                commandId,
+                "invalidWorkingHours",
+                "Working hours must be aligned to 15 minutes within one day, with start earlier than end.");
+        }
+
+        state.WorkspaceSettings ??= new WorkspaceSettings();
+        state.WorkspaceSettings.WorkdayStartMinutes = startMinutes;
+        state.WorkspaceSettings.WorkdayEndMinutes = endMinutes;
+        return WorkspaceCommandResult.Succeeded(commandId);
     }
 
     private static WorkspaceCommandResult UpdatePin(
@@ -1079,16 +1109,14 @@ public static class WorkspaceCommandProcessor
             activeNowCollapsed = collapsedElement.GetBoolean();
         }
 
-        state.WorkspaceSettings = new WorkspaceSettings
-        {
-            ActiveTab = activeTab.Value,
-            SelectedProjectIds = selectedProjectIds,
-            SelectedTaskId = selectedTaskId,
-            SelectedTimelineItemId = selectedTimelineItemId,
-            SelectedWorkstreamId = selectedWorkstreamId,
-            Filter = filter.Value,
-            ActiveNowCollapsed = activeNowCollapsed
-        };
+        var settings = state.WorkspaceSettings ??= new WorkspaceSettings();
+        settings.ActiveTab = activeTab.Value;
+        settings.SelectedProjectIds = selectedProjectIds;
+        settings.SelectedTaskId = selectedTaskId;
+        settings.SelectedTimelineItemId = selectedTimelineItemId;
+        settings.SelectedWorkstreamId = selectedWorkstreamId;
+        settings.Filter = filter.Value;
+        settings.ActiveNowCollapsed = activeNowCollapsed;
         WorkspaceStatePolicy.Normalize(state);
         return WorkspaceCommandResult.Succeeded(commandId);
     }

@@ -1,8 +1,8 @@
 export const DAY_START_MIN = 0
 export const DAY_END_MIN = 24 * 60
-export const WORKDAY_START_MIN = 9 * 60
-export const WORKDAY_END_MIN = 18 * 60
-export const UNTIMED_DEADLINE_MIN = WORKDAY_END_MIN
+export const DEFAULT_WORKDAY_START_MIN = 9 * 60
+export const DEFAULT_WORKDAY_END_MIN = 18 * 60
+export const UNTIMED_DEADLINE_MIN = 18 * 60
 export const SNAP_MIN = 15
 export const MIN_DURATION_MIN = 15
 export const DEFAULT_TASK_DURATION_MIN = 60
@@ -63,6 +63,31 @@ export function clipRangeToDay(startMin: number, endMin: number): { startMin: nu
   return { startMin: clippedStart, endMin: clippedEnd }
 }
 
+export function normalizeWorkingHours(
+  startMin: number,
+  endMin: number,
+): { startMin: number; endMin: number } {
+  const valid = Number.isInteger(startMin) &&
+    Number.isInteger(endMin) &&
+    startMin >= DAY_START_MIN &&
+    endMin <= DAY_END_MIN &&
+    startMin < endMin &&
+    endMin - startMin >= SNAP_MIN &&
+    startMin % SNAP_MIN === 0 &&
+    endMin % SNAP_MIN === 0
+  return valid
+    ? { startMin, endMin }
+    : { startMin: DEFAULT_WORKDAY_START_MIN, endMin: DEFAULT_WORKDAY_END_MIN }
+}
+
+export function workdayBandGeometry(startMin: number, endMin: number): { top: number; height: number } {
+  const normalized = normalizeWorkingHours(startMin, endMin)
+  return {
+    top: normalized.startMin * PX_PER_MIN,
+    height: (normalized.endMin - normalized.startMin) * PX_PER_MIN,
+  }
+}
+
 export function durationFits(startMin: number, durationMin: number): boolean {
   return startMin >= DAY_START_MIN &&
     startMin < DAY_END_MIN &&
@@ -106,11 +131,24 @@ export function meetingRangeForDay(
 export interface CalendarNavigation {
   viewMode: "day" | "week"
   selectedDate: string
+  workdayStartMin: number
+  workdayEndMin: number
   key: string
 }
 
-export function calendarNavigation(viewMode: "day" | "week", selectedDate: string): CalendarNavigation {
-  return { viewMode, selectedDate, key: `${viewMode}:${selectedDate}` }
+export function calendarNavigation(
+  viewMode: "day" | "week",
+  selectedDate: string,
+  workdayStartMin = DEFAULT_WORKDAY_START_MIN,
+  workdayEndMin = DEFAULT_WORKDAY_END_MIN,
+): CalendarNavigation {
+  return {
+    viewMode,
+    selectedDate,
+    workdayStartMin,
+    workdayEndMin,
+    key: `${viewMode}:${selectedDate}:${workdayStartMin}-${workdayEndMin}`,
+  }
 }
 
 export function initialScrollMinute(
@@ -119,9 +157,12 @@ export function initialScrollMinute(
   today: string,
   weekContainsToday: boolean,
   currentMinute: number,
+  workdayStartMin = DEFAULT_WORKDAY_START_MIN,
+  workdayEndMin = DEFAULT_WORKDAY_END_MIN,
 ): number {
   const showCurrentTime = viewMode === "day" ? selectedDate === today : weekContainsToday
-  return showCurrentTime ? clamp(currentMinute, DAY_START_MIN, DAY_END_MIN) : WORKDAY_START_MIN
+  const workingHours = normalizeWorkingHours(workdayStartMin, workdayEndMin)
+  return showCurrentTime ? clamp(currentMinute, DAY_START_MIN, DAY_END_MIN) : workingHours.startMin
 }
 
 export function initialScrollTop(targetMinute: number, viewportHeight: number): number {

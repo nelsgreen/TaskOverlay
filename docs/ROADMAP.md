@@ -8,10 +8,10 @@ repository root and portable downloads use `TaskOverlay_Windows_Portable`.
 
 ## Immediate
 
-1. Planning Pool filters: Active / Unscheduled / Today / All (the real
-   per-task scheduling indicators are implemented).
+1. Planning Pool filters: Active / Unscheduled / Today / All - implemented.
 2. Task Details work-session history and total-duration summary.
-3. Working hours / evening deadline presets.
+3. Configurable global workday start/end - implemented. Evening deadline
+   presets remain later scope.
 4. Calendar visual links for deadline/reminder markers.
 5. FUCKUP marker MVP.
 6. Global Ctrl+Z later, as architecture-level work - not a quick add-on.
@@ -60,14 +60,17 @@ never a direct mutation without explicit user confirmation (see DECISIONS
 
 ## Scheduling / Planning
 
-1. Work schedule settings.
+1. Global workday start/end and full-day 00:00-24:00 Calendar canvas -
+   implemented. Working days, Friday hours, breaks, timezone, and exceptions
+   remain later work-schedule scope.
 2. Deadline polish.
 3. Calendar/Timeline MVP.
 4. Timeline Now marker.
 5. Calendar day/week planner.
 6. Planning pool - tasks, not blocks - implemented; tasks remain until DONE
    and real scheduling indicators show Unscheduled / Scheduled today / N
-   blocks today / Total today. Active/Unscheduled/Today/All filters remain.
+   blocks today / Total today. Active/Unscheduled/Today/All filters are
+   implemented.
 7. Duration chips/resize, MEET resize, and adjacent shared-boundary handles -
    implemented; preserve for task/task, MEET/MEET, and task/MEET.
 8. Calendar empty-slot context menu - implemented with connected Create task /

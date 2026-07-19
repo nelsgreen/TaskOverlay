@@ -31,8 +31,10 @@ import type {
   WorkspaceSnapshotContract,
   WorkspaceTaskCommand,
   WorkspaceTaskWorkSessionCommand,
+  WorkspaceWorkingHoursCommand,
 } from "@/lib/types"
 import { dateKeyFromIso } from "@/lib/calendar-date"
+import { normalizeWorkingHours } from "@/lib/calendar-layout"
 
 interface WebViewMessageEvent {
   data: unknown
@@ -68,6 +70,8 @@ export interface WorkspaceData {
   meetingOperations: MeetingOperationSnapshot[]
   activeMeetingRecordingId: string | null
   defaultMeetingRecordingPolicy: "Manual" | "AutoRecord"
+  workdayStartMinutes: number
+  workdayEndMinutes: number
   contextSources: WorkspaceContextSourceSnapshot[]
   contextItems: WorkspaceContextItemSnapshot[]
   context: WorkspaceContextSnapshot
@@ -91,6 +95,7 @@ export interface WorkspaceBridgeState {
   sendCreateTask(input: Omit<WorkspaceCreateTaskCommand, "type">): boolean
   sendCreateSection(input: Omit<WorkspaceCreateSectionCommand, "type">): boolean
   sendWorkspaceContext(command: Omit<WorkspaceContextCommand, "type">): boolean
+  sendWorkingHoursCommand(command: WorkspaceWorkingHoursCommand): boolean
   sendMeetingCommand(command: WorkspaceMeetingCommand): boolean
   sendMeetingCommandTracked(command: WorkspaceMeetingCommand): Promise<WorkspaceCommandResult>
   requestSnapshot(): boolean
@@ -270,6 +275,9 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
   const sendTaskWorkSessionCommand = useCallback((command: WorkspaceTaskWorkSessionCommand): boolean =>
     postCommand(command), [postCommand])
 
+  const sendWorkingHoursCommand = useCallback((command: WorkspaceWorkingHoursCommand): boolean =>
+    postCommand(command), [postCommand])
+
   const sendContextHubCommand = useCallback((command: WorkspaceContextHubCommand): boolean =>
     postCommand(command), [postCommand])
 
@@ -317,6 +325,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
     sendCreateTask,
     sendCreateSection,
     sendWorkspaceContext,
+    sendWorkingHoursCommand,
     sendMeetingCommand,
     sendMeetingCommandTracked,
     requestSnapshot,
@@ -348,7 +357,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
 function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceSnapshotContract>
-  return candidate.schemaVersion === 5 &&
+  return candidate.schemaVersion === 6 &&
     (candidate.mode === "readonly" || candidate.mode === "connected") &&
     typeof candidate.generatedAtUtc === "string" &&
     Array.isArray(candidate.projects) &&
@@ -365,6 +374,8 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
       typeof candidate.activeMeetingRecordingId === "string") &&
     Array.isArray(candidate.activeNow) &&
     Array.isArray(candidate.timelineItems) &&
+    typeof candidate.workdayStartMinutes === "number" &&
+    typeof candidate.workdayEndMinutes === "number" &&
     isWorkspaceContext(candidate.context)
 }
 
@@ -396,6 +407,10 @@ function createCommandId(): string {
 }
 
 function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceData {
+  const workingHours = normalizeWorkingHours(
+    snapshot.workdayStartMinutes,
+    snapshot.workdayEndMinutes,
+  )
   const projects = snapshot.projects.map((project) => ({
     id: project.id,
     name: project.name,
@@ -429,6 +444,8 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
     defaultMeetingRecordingPolicy: snapshot.defaultMeetingRecordingPolicy === "AutoRecord"
       ? "AutoRecord"
       : "Manual",
+    workdayStartMinutes: workingHours.startMin,
+    workdayEndMinutes: workingHours.endMin,
     // Snapshot rows are used as-is (ids already snapshot-format); ?? [] keeps
     // a host built before ContextHUB from breaking the whole snapshot.
     contextSources: snapshot.contextSources ?? [],
