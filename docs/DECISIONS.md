@@ -659,6 +659,27 @@ item.
   recording-variant (PR-3), remaining primitives (PR-4..6), and view migration
   with dual-theme x dual-accent acceptance (PR-7/8). `.meet-shell` remains in
   place and unmigrated; it is still slated for removal in PR-8.
+- PR-1 was integrated onto main (through PR #76, working hours/full-day
+  Calendar) with no production conflicts: main's changes touched
+  Calendar/MEET/Task Manager component logic and C# working-hours
+  persistence, none of which overlap PR-1's `app/globals.css` /
+  `app/layout.tsx` token wiring. Audited after merge: no hardcoded `.dark`
+  root class was reintroduced, no code depends on the old "hover-surface"
+  meaning of literal `--accent`, and the existing `dark:` Tailwind usage
+  still resolves under `[data-theme="dark"]`. No corrective changes were
+  needed.
+- **Integration freeze, effective for the design-system PR sequence:** Design
+  System rev. 4 (signed off,
+  https://claude.ai/code/artifact/8042b7b0-1759-40a3-afdf-1b12285466e3) is
+  frozen as the normative React visual specification for Workspace, Task
+  Details, MEET Details, and shared modals/panels. Neutral is the initial
+  accent profile, Warm is the alternative; System is the initial theme
+  preference, resolving to Light or Dark. While this sequence lands, `main`
+  accepts only the bounded design-system PRs (this one and PR-2 through
+  PR-8 below), blocker fixes, and critical bug fixes — new product/backend
+  features are paused. Any deviation from rev. 4 (a different token value,
+  a new token, a different default) requires an explicit product decision
+  recorded here first, not an implementation-time judgment call.
 
 ## Process
 

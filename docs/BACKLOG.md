@@ -22,6 +22,15 @@ Active product scope:
 - No `localStorage` production persistence.
 - No mock-only production controls.
 
+Design system integration gate (temporary):
+
+- Product/backend feature work below is deferred while the bounded
+  design-system PR sequence lands (PR-1 token foundation through PR-8 final
+  acceptance; see ROADMAP.md "Design System Integration" and DECISIONS.md
+  "Design System"). Nothing below is cancelled or reprioritized - it resumes
+  once the signed-off Design System rev. 4 is integrated. Blocker fixes and
+  critical bug fixes remain in scope during the freeze.
+
 Product direction:
 
 - TaskOverlay is a personal Windows-first working-memory system. Its purpose is
