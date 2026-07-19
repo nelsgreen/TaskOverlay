@@ -4,6 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
   activeTranscriptSegmentIndex,
+  captureSafeMediaFailureState,
+  isNativeAudioPlaybackEvent,
+  mediaPlaybackFailureLabel,
+  postNativeAudioPlaybackCommand,
+  probeTranscriptAudioEndpoint,
   seekTranscriptSegment,
   shouldAutoScrollTranscript,
   transcriptAudioUnavailableLabel,
@@ -1039,15 +1044,21 @@ function TranscriptPlayback({
   const [audioDuration, setAudioDuration] = useState(transcript.audio.durationSeconds)
   const [isPlaying, setIsPlaying] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
-  const [runtimeUnavailable, setRuntimeUnavailable] = useState(false)
-  const audioAvailable = transcript.audio.status === "Available" &&
-    Boolean(transcript.audio.url) && !runtimeUnavailable
+  const [runtimeUnavailable, setRuntimeUnavailable] = useState<string | null>(null)
+  const [nativeFallback, setNativeFallback] = useState(false)
+  const [nativePosition, setNativePosition] = useState(0)
+  const snapshotAudioAvailable = transcript.audio.status === "Available" &&
+    Boolean(transcript.audio.url)
+  const audioAvailable = snapshotAudioAvailable && !runtimeUnavailable
+  const browserAudioAvailable = audioAvailable && !nativeFallback
 
   useEffect(() => {
     setActiveSegmentIndex(null)
     setAudioDuration(transcript.audio.durationSeconds)
     setIsPlaying(false)
-    setRuntimeUnavailable(false)
+    setRuntimeUnavailable(null)
+    setNativeFallback(false)
+    setNativePosition(0)
     previousActiveIndexRef.current = null
     lastManualScrollAtRef.current = null
   }, [transcript.id, transcript.audio.url, transcript.audio.durationSeconds])
@@ -1090,6 +1101,38 @@ function TranscriptPlayback({
     return () => scrollContainer?.removeEventListener("scroll", onScroll)
   }, [isPlaying, transcript.id])
 
+  useEffect(() => {
+    const webview = window.chrome?.webview
+    const recordingId = transcript.recordingId
+    if (!webview || !recordingId) return
+    const onMessage = (event: { data: unknown }) => {
+      if (!isNativeAudioPlaybackEvent(event.data) ||
+          event.data.recordingId !== recordingId ||
+          event.data.transcriptId !== transcript.id) return
+      setNativePosition(Math.max(0, event.data.positionSeconds))
+      if (event.data.durationSeconds > 0) setAudioDuration(event.data.durationSeconds)
+      setIsPlaying(event.data.state === "Playing")
+      if (event.data.state === "Failed") {
+        setRuntimeUnavailable(event.data.failureReason ?? "Native playback unavailable")
+        return
+      }
+      setActiveSegmentIndex(activeTranscriptSegmentIndex(
+        transcript.segments,
+        event.data.positionSeconds,
+        event.data.durationSeconds || transcript.audio.durationSeconds,
+      ))
+    }
+    webview.addEventListener("message", onMessage)
+    return () => {
+      webview.removeEventListener("message", onMessage)
+      postNativeAudioPlaybackCommand({
+        action: "stop",
+        recordingId,
+        transcriptId: transcript.id,
+      })
+    }
+  }, [transcript.id, transcript.recordingId])
+
   const updateActiveSegment = () => {
     const player = audioRef.current
     if (!player) return
@@ -1102,13 +1145,24 @@ function TranscriptPlayback({
   }
 
   const seekToSegment = async (startSeconds: number | null) => {
+    if (startSeconds == null || !audioAvailable) return
+    if (nativeFallback && transcript.recordingId) {
+      setNativePosition(startSeconds)
+      postNativeAudioPlaybackCommand({
+        action: "play",
+        recordingId: transcript.recordingId,
+        transcriptId: transcript.id,
+        positionSeconds: startSeconds,
+      })
+      return
+    }
     const player = audioRef.current
-    if (!player || !audioAvailable) return
+    if (!player) return
     try {
       await seekTranscriptSegment(player, startSeconds)
       updateActiveSegment()
     } catch {
-      setRuntimeUnavailable(true)
+      setRuntimeUnavailable("Unknown playback failure")
       setIsPlaying(false)
     }
   }
@@ -1119,7 +1173,7 @@ function TranscriptPlayback({
 
   return (
     <div className="space-y-2">
-      {audioAvailable && (
+      {browserAudioAvailable && (
         <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card/95 px-2.5 py-2 shadow-sm backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <audio
@@ -1140,7 +1194,71 @@ function TranscriptPlayback({
               onPlay={() => { setIsPlaying(true); updateActiveSegment() }}
               onPause={() => setIsPlaying(false)}
               onEnded={() => { setIsPlaying(false); setActiveSegmentIndex(null) }}
-              onError={() => { setRuntimeUnavailable(true); setIsPlaying(false) }}
+              onError={(event) => {
+                const media = event.currentTarget
+                const safeState = captureSafeMediaFailureState(media)
+                setIsPlaying(false)
+                void probeTranscriptAudioEndpoint(transcript.audio.url ?? "")
+                  .then((probe) => {
+                    if (probe === "Available" &&
+                        (safeState.errorCode === 3 || safeState.errorCode === 4) &&
+                        transcript.recordingId) {
+                      setNativeFallback(true)
+                      setRuntimeUnavailable(null)
+                      return
+                    }
+                    setRuntimeUnavailable(mediaPlaybackFailureLabel(safeState, probe))
+                  })
+              }}
+            />
+            <label className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={autoScroll}
+                onChange={(event) => setAutoScroll(event.target.checked)}
+                className="size-3 accent-[var(--status-meet)]"
+              />
+              Auto-scroll
+            </label>
+          </div>
+          <p className="min-h-4 text-[10px] text-muted-foreground" aria-live="polite">
+            {isPlaying && nowSpeaking ? <>Now speaking: <strong className="text-foreground">{nowSpeaking}</strong></> : " "}
+          </p>
+        </div>
+      )}
+      {audioAvailable && nativeFallback && transcript.recordingId && (
+        <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card/95 px-2.5 py-2 shadow-sm backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded border border-border px-2 py-1 text-[10px] text-foreground"
+              onClick={() => postNativeAudioPlaybackCommand({
+                action: isPlaying ? "pause" : "play",
+                recordingId: transcript.recordingId!,
+                transcriptId: transcript.id,
+                positionSeconds: nativePosition,
+              })}
+            >
+              {isPlaying ? "Pause" : "Play"}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(audioDuration, 0.1)}
+              step={0.1}
+              value={Math.min(nativePosition, Math.max(audioDuration, 0.1))}
+              aria-label="Transcript recording position"
+              className="min-w-0 flex-1 accent-[var(--status-meet)]"
+              onChange={(event) => {
+                const positionSeconds = Number(event.currentTarget.value)
+                setNativePosition(positionSeconds)
+                postNativeAudioPlaybackCommand({
+                  action: "play",
+                  recordingId: transcript.recordingId!,
+                  transcriptId: transcript.id,
+                  positionSeconds,
+                })
+              }}
             />
             <label className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
               <input
@@ -1160,7 +1278,7 @@ function TranscriptPlayback({
         {(transcript.audio.status === "Unavailable" || runtimeUnavailable) && (
           <div className="rounded border border-border px-2.5 py-1.5 text-[10px] text-muted-foreground" role="status">
             Audio unavailable: {runtimeUnavailable
-              ? "Playback failed"
+              ? runtimeUnavailable
               : transcriptAudioUnavailableLabel(transcript.audio.unavailableReason)}
           </div>
       )}

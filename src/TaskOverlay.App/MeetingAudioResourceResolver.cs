@@ -6,6 +6,7 @@ using TaskOverlay.Core;
 namespace TaskOverlay.App;
 
 public sealed record MeetingAudioResource(
+    Guid RecordingId,
     string FilePath,
     string ContentType,
     long Length,
@@ -82,7 +83,8 @@ public sealed class MeetingAudioResourceResolver
             ? new WorkspaceTranscriptAudioSnapshot(
                 WorkspaceTranscriptAudioSnapshot.Available,
                 $"https://taskoverlay.workspace{ResourcePathPrefix}{recordingId:N}",
-                resource.DurationSeconds)
+                resource.DurationSeconds,
+                RecordingId: recordingId)
             : new WorkspaceTranscriptAudioSnapshot(
                 WorkspaceTranscriptAudioSnapshot.Unavailable,
                 null,
@@ -224,6 +226,7 @@ public sealed class MeetingAudioResourceResolver
             }
 
             resource = new MeetingAudioResource(
+                recording.Id,
                 path,
                 contentType,
                 length,

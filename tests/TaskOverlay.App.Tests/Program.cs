@@ -58,6 +58,8 @@ internal static class Program
             ("transcript recording links persist and repair", TranscriptRecordingLinksPersistAndRepair),
             ("active transcript audio resolution is restricted and resilient", ActiveTranscriptAudioResolutionIsRestrictedAndResilient),
             ("meeting audio byte ranges support seeking", MeetingAudioByteRangesSupportSeeking),
+            ("meeting audio HTTP responses support Chromium media requests", MeetingAudioHttpResponsesSupportChromium),
+            ("native meeting audio fallback is single-session and path-safe", NativeMeetingAudioFallbackIsSafe),
             ("transcript revision save command", TranscriptRevisionSaveCommand),
             ("transcript revision persistence is transactional", TranscriptRevisionPersistenceIsTransactional),
             ("meeting analysis runtime state is shared and cancellable", MeetingAnalysisRuntimeStateIsSharedAndCancellable),
@@ -1945,11 +1947,13 @@ internal static class Program
             var importedSnapshot = WorkspaceSnapshotFactory.Create(
                 state,
                 meetingAudioLoader: compatibilityResolver.Describe);
-            var importedSnapshotJson = JsonSerializer.Serialize(
-                importedSnapshot.MeetingTranscripts.Single(item => item.Id == legacyTranscript.Id.ToString("N")));
+            var importedTranscriptSnapshot = importedSnapshot.MeetingTranscripts.Single(
+                item => item.Id == legacyTranscript.Id.ToString("N"));
+            var importedSnapshotJson = JsonSerializer.Serialize(importedTranscriptSnapshot);
             Assert(!importedSnapshotJson.Contains(directory, StringComparison.OrdinalIgnoreCase) &&
-                   !importedSnapshotJson.Contains(importedPath, StringComparison.OrdinalIgnoreCase),
-                "Meeting audio snapshots must never expose managed filesystem paths.");
+                   !importedSnapshotJson.Contains(importedPath, StringComparison.OrdinalIgnoreCase) &&
+                   importedTranscriptSnapshot.RecordingId == importedRecording.Id.ToString("N"),
+                "Meeting audio snapshots must expose the resolved recording ID without managed filesystem paths.");
 
             var legacyEdit = new MeetingTranscript
             {
@@ -2295,6 +2299,144 @@ internal static class Program
                !MeetingAudioByteRange.TryParse("bytes=1-2,4-5", 100, out _) &&
                !MeetingAudioByteRange.TryParse("../../state.json", 100, out _),
             "Unsatisfiable, multipart, and malformed ranges must be rejected.");
+        return Task.CompletedTask;
+    }
+
+    private static Task MeetingAudioHttpResponsesSupportChromium()
+    {
+        const long length = 100;
+        const string contentType = "audio/mp4";
+        var full = MeetingAudioHttpResponsePolicy.Create("GET", null, length, contentType);
+        var head = MeetingAudioHttpResponsePolicy.Create("HEAD", null, length, contentType);
+        var explicitRange = MeetingAudioHttpResponsePolicy.Create(
+            "GET", "bytes=10-19", length, contentType);
+        var openRange = MeetingAudioHttpResponsePolicy.Create(
+            "GET", "bytes=90-", length, contentType);
+        var suffixRange = MeetingAudioHttpResponsePolicy.Create(
+            "GET", "bytes=-8", length, contentType);
+        var invalidRange = MeetingAudioHttpResponsePolicy.Create(
+            "GET", "bytes=100-101", length, contentType);
+        var repeatedSeek = MeetingAudioHttpResponsePolicy.Create(
+            "GET", "bytes=25-34", length, contentType);
+        var rejectedMethod = MeetingAudioHttpResponsePolicy.Create(
+            "POST", null, length, contentType);
+
+        Assert(full.StatusCode == 200 && full.IncludeBody &&
+               full.HeaderContentLength == length && full.BodyLength == length &&
+               full.BodyStart == 0 && full.ContentRange is null && full.AcceptRanges,
+            "A normal GET must return the complete media body with exact 200 headers.");
+        Assert(head.StatusCode == 200 && !head.IncludeBody &&
+               head.HeaderContentLength == length && head.BodyLength == 0 &&
+               head.ContentType == contentType && head.AcceptRanges,
+            "HEAD must report the GET representation without opening or returning a body.");
+        Assert(explicitRange.StatusCode == 206 && explicitRange.BodyStart == 10 &&
+               explicitRange.BodyLength == 10 && explicitRange.HeaderContentLength == 10 &&
+               explicitRange.ContentRange == "bytes 10-19/100" &&
+               explicitRange.ContentType == contentType && explicitRange.AcceptRanges,
+            "An explicit range must produce an exact 206 response.");
+        Assert(openRange.StatusCode == 206 && openRange.BodyStart == 90 &&
+               openRange.BodyLength == 10 && openRange.ContentRange == "bytes 90-99/100" &&
+               suffixRange.StatusCode == 206 && suffixRange.BodyStart == 92 &&
+               suffixRange.BodyLength == 8 && suffixRange.ContentRange == "bytes 92-99/100",
+            "Open-ended and suffix ranges must produce exact bounded 206 responses.");
+        Assert(invalidRange.StatusCode == 416 && !invalidRange.IncludeBody &&
+               invalidRange.HeaderContentLength == 0 && invalidRange.BodyLength == 0 &&
+               invalidRange.ContentRange == "bytes */100" && invalidRange.AcceptRanges,
+            "An invalid range must produce a bodyless 416 with a valid Content-Range.");
+        Assert(repeatedSeek.StatusCode == 206 && repeatedSeek.BodyStart == 25 &&
+               repeatedSeek.BodyLength == 10 && repeatedSeek.ContentRange == "bytes 25-34/100",
+            "A later independent range request must remain seekable.");
+        Assert(rejectedMethod.StatusCode == 405 && !rejectedMethod.IsAllowedMethod &&
+               !rejectedMethod.IncludeBody && rejectedMethod.HeaderContentLength == 0,
+            "Unrelated methods must be rejected without a response body.");
+        var diagnosticRecordingId = Guid.NewGuid();
+        var diagnostic = MeetingAudioRequestDiagnostic.Format(
+            "GET", true, 206, contentType, 16, diagnosticRecordingId);
+        Assert(diagnostic.Contains("method=GET", StringComparison.Ordinal) &&
+               diagnostic.Contains("rangePresent=True", StringComparison.Ordinal) &&
+               diagnostic.Contains("status=206", StringComparison.Ordinal) &&
+               diagnostic.Contains("contentType=audio/mp4", StringComparison.Ordinal) &&
+               diagnostic.Contains("responseLength=16", StringComparison.Ordinal) &&
+               diagnostic.Contains($"recordingId={diagnosticRecordingId:N}", StringComparison.Ordinal) &&
+               !diagnostic.Contains("\\", StringComparison.Ordinal) &&
+               !diagnostic.Contains("/meetings/", StringComparison.OrdinalIgnoreCase),
+            "Audio request diagnostics must contain only the safe response policy fields.");
+
+        using var source = new MemoryStream(Enumerable.Range(0, 100).Select(value => (byte)value).ToArray());
+        using var bounded = new BoundedReadStream(
+            source,
+            explicitRange.BodyStart,
+            explicitRange.BodyLength);
+        var bytes = new byte[explicitRange.BodyLength];
+        var read = bounded.Read(bytes, 0, bytes.Length);
+        Assert(read == explicitRange.BodyLength && bytes[0] == 10 && bytes[^1] == 19 &&
+               bounded.ReadByte() == -1,
+            "A planned partial response stream must remain readable for exactly its advertised length.");
+        return Task.CompletedTask;
+    }
+
+    private static Task NativeMeetingAudioFallbackIsSafe()
+    {
+        var created = new List<FakeNativeAudioBackend>();
+        var sourcePaths = new List<string>();
+        using var service = new MeetingNativeAudioPlaybackService(path =>
+        {
+            sourcePaths.Add(path);
+            var backend = new FakeNativeAudioBackend(20);
+            created.Add(backend);
+            return backend;
+        });
+        var firstRecordingId = Guid.NewGuid();
+        var firstTranscriptId = Guid.NewGuid();
+        var first = new MeetingAudioResource(
+            firstRecordingId,
+            "C:\\synthetic-private\\first.m4a",
+            "audio/mp4",
+            100,
+            20);
+        Assert(service.Play(first, firstTranscriptId, 3) &&
+               service.Snapshot() is
+               {
+                   State: MeetingNativeAudioPlaybackState.Playing,
+                   PositionSeconds: 3,
+                   DurationSeconds: 20
+               },
+            "Native fallback must begin the authorized resource at the requested timestamp.");
+        Assert(service.Seek(firstRecordingId, firstTranscriptId, 9) &&
+               service.Pause(firstRecordingId, firstTranscriptId) &&
+               service.Snapshot() is
+               {
+                   State: MeetingNativeAudioPlaybackState.Paused,
+                   PositionSeconds: 9
+               },
+            "Native fallback must support seek and pause for its owning transcript.");
+        created[0].RaiseEnded();
+        Assert(service.Snapshot().State == MeetingNativeAudioPlaybackState.Stopped,
+            "A completed native backend must publish Stopped state.");
+
+        var secondRecordingId = Guid.NewGuid();
+        var secondTranscriptId = Guid.NewGuid();
+        var second = first with
+        {
+            RecordingId = secondRecordingId,
+            FilePath = "C:\\synthetic-private\\second.m4a"
+        };
+        Assert(service.Play(second, secondTranscriptId, 2) &&
+               created.Count == 2 && created[0].Disposed &&
+               !service.Pause(firstRecordingId, firstTranscriptId),
+            "Starting another transcript must dispose the prior backend and reject stale ownership commands.");
+        created[1].RaiseFailed();
+        Assert(service.Snapshot() is
+               {
+                   State: MeetingNativeAudioPlaybackState.Failed,
+                   FailureReason: "Native playback unavailable"
+               },
+            "A native backend failure must surface only the fixed safe failure reason.");
+        var safeEvent = JsonSerializer.Serialize(service.Snapshot());
+        Assert(!safeEvent.Contains("synthetic-private", StringComparison.OrdinalIgnoreCase) &&
+               !safeEvent.Contains(".m4a", StringComparison.OrdinalIgnoreCase) &&
+               sourcePaths.Count == 2,
+            "Native playback events must contain only IDs, state, position, duration, and a safe failure.");
         return Task.CompletedTask;
     }
 
@@ -3282,6 +3424,36 @@ internal static class Program
                 path,
                 new[] { path },
                 reader.TotalTime));
+        }
+    }
+
+    private sealed class FakeNativeAudioBackend : IMeetingNativeAudioBackend
+    {
+        public FakeNativeAudioBackend(double durationSeconds)
+        {
+            DurationSeconds = durationSeconds;
+        }
+
+        public event EventHandler? PlaybackEnded;
+        public event EventHandler? PlaybackFailed;
+        public double PositionSeconds { get; set; }
+        public double DurationSeconds { get; }
+        public bool Disposed { get; private set; }
+        public bool IsPlaying { get; private set; }
+
+        public void Play() => IsPlaying = true;
+        public void Pause() => IsPlaying = false;
+        public void Stop() => IsPlaying = false;
+        public void RaiseEnded()
+        {
+            IsPlaying = false;
+            PlaybackEnded?.Invoke(this, EventArgs.Empty);
+        }
+        public void RaiseFailed() => PlaybackFailed?.Invoke(this, EventArgs.Empty);
+        public void Dispose()
+        {
+            Disposed = true;
+            IsPlaying = false;
         }
     }
 

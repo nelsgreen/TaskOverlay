@@ -181,7 +181,8 @@ public sealed record WorkspaceTranscriptAudioSnapshot(
     string Status,
     string? Url,
     double DurationSeconds,
-    string? UnavailableReason = null)
+    string? UnavailableReason = null,
+    Guid? RecordingId = null)
 {
     public const string NotLinked = "NotLinked";
     public const string Available = "Available";
@@ -621,7 +622,11 @@ public static class WorkspaceSnapshotFactory
                 return new WorkspaceMeetingTranscriptSnapshot(
                     FormatId(transcript.Id),
                     FormatId(transcript.MeetId!.Value),
-                    transcript.RecordingId is Guid recordingId ? FormatId(recordingId) : null,
+                    audio.RecordingId is Guid resolvedRecordingId
+                        ? FormatId(resolvedRecordingId)
+                        : transcript.RecordingId is Guid recordingId
+                            ? FormatId(recordingId)
+                            : null,
                     transcript.Origin.ToString(),
                     transcript.Format.ToString(),
                     transcript.Provider,
