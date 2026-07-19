@@ -589,6 +589,58 @@ item.
   Chat, voice question input, Overlay Quick Ask, Meeting Brief, Meeting
   Overlay, and Live Meeting Copilot.
 
+## Design System
+
+- PR-1 (token foundation) is implemented: one canonical semantic token model
+  (`--bg-app`, `--surface`/`-raised`/`-sunken`, `--field`/`-readonly`/`-disabled`,
+  `--border`/`-strong`/`-disabled`, `--text`/`-muted`/`-disabled`/`-faint`,
+  `--accent`/`-ink`, `--focus-ring`, `--selection`, `--destructive`,
+  `--recording`(+`-soft`/`-line`), `--warning`/`-ink`, and the domain
+  `--sem-todo/focus/wait/done/remind/meet/panel/deadline/now`) with complete
+  Light and Dark value sets, plus Neutral (initial) and Warm (alternative)
+  accent profiles, switched via `data-theme` and `data-accent` on `<html>` in
+  `workspace-ui/app/layout.tsx`. Values are taken verbatim from the signed-off
+  design specification (rev. 4,
+  https://claude.ai/code/artifact/8042b7b0-1759-40a3-afdf-1b12285466e3);
+  `.design-sync/NOTES.md` in the separate `wt-design-system` worktree has the
+  full decision history (rev. 1-4).
+- `data-theme` initial value follows `prefers-color-scheme` live (System is the
+  initial preference, per the approved contract) via a small `beforeInteractive`
+  script in `layout.tsx`; no localStorage, no settings UI. Manual Dark/Light
+  selection and Neutral/Warm persistence through native C# settings + the
+  WebView2 bridge are explicitly deferred to a later bounded PR — this PR only
+  wires the mechanism (the attributes), not a preference store.
+- The same script accepts `?ds-theme=light|dark` and `?ds-accent=neutral|warm`
+  query params as a dev/QA-only hook for rendering/screenshotting all four
+  theme x accent combinations. This is not a second production preference
+  system; it has no effect once the query params are absent.
+- Legacy shadcn `--accent` (a neutral hover-surface tint used by 20+ existing
+  components via `hover:bg-accent`) collided with the canonical spec's
+  `--accent` (the brand/interaction color, §06). Resolved by renaming the
+  Tailwind `accent` utility's backing variable to `--surface-hover` (aliased to
+  `--surface-sunken`); `.meet-shell`'s violet hover-tint override was updated to
+  target `--surface-hover` instead of `--accent` so it renders identically to
+  before. `--accent` is now free to hold the canonical brand/interaction color
+  everywhere, matching D9 (FOCUS green is no longer the global accent).
+- Compatibility aliases retained in `workspace-ui/app/globals.css` so no
+  component file needed to change: `--background`, `--foreground`, `--card`(+
+  `-foreground`), `--popover`(+`-foreground`), `--primary`(+`-foreground`),
+  `--secondary`(+`-foreground`), `--muted`(+`-foreground`), `--input`, `--ring`,
+  `--status-*`, `--now-marker`, `--row-selected`(+`-border`), `--sidebar-*`, and
+  `--chart-1..5` (chart tokens are unused in the Workspace UI and were left as
+  flat pre-existing values, not themed). Each maps onto a canonical token; PR-2+
+  component migrations may retire them one at a time as primitives adopt the
+  canonical names directly.
+- `@custom-variant dark` was repointed from `.dark` (a class no longer applied
+  anywhere) to `[data-theme="dark"]` so the one existing `dark:` Tailwind usage
+  (`components/ui/button.tsx`) keeps working under the new attribute-based
+  wiring.
+- Deferred to later PRs per the accepted 8-PR sequence: Field
+  Default/Read-only/Disabled primitive (PR-2), Button/IconButton +
+  recording-variant (PR-3), remaining primitives (PR-4..6), and view migration
+  with dual-theme x dual-accent acceptance (PR-7/8). `.meet-shell` remains in
+  place and unmigrated; it is still slated for removal in PR-8.
+
 ## Process
 
 - Manual UX acceptance beats a green build.
