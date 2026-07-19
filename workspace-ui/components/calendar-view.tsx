@@ -56,6 +56,21 @@ type DragState =
 type CalendarMenuState =
   | { kind: "slot"; x: number; y: number; dateKey: string; startMin: number }
   | { kind: "block"; x: number; y: number; block: Block }
+type PlanningPoolFilter = "ACTIVE" | "UNSCHEDULED" | "TODAY" | "ALL"
+
+const PLANNING_POOL_FILTERS: ReadonlyArray<{ id: PlanningPoolFilter; label: string; title: string }> = [
+  { id: "ACTIVE", label: "Active", title: "All TODO, FOCUS, and WAIT tasks" },
+  { id: "UNSCHEDULED", label: "Unscheduled", title: "Active tasks with no work sessions" },
+  { id: "TODAY", label: "Today", title: "Active tasks with at least one work session today" },
+  { id: "ALL", label: "All", title: "All tasks in scope, including DONE" },
+]
+
+const PLANNING_POOL_EMPTY_COPY: Record<PlanningPoolFilter, string> = {
+  ACTIVE: "No active tasks in scope. DONE tasks stay hidden.",
+  UNSCHEDULED: "No unscheduled active tasks in scope.",
+  TODAY: "No active tasks are scheduled today.",
+  ALL: "No tasks in scope.",
+}
 
 const STATUS_STYLES: Record<Status, { bg: string; text: string; label: string }> = {
   FOCUS: { bg: "bg-status-focus/15", text: "text-status-focus", label: "Focus" },
@@ -115,6 +130,7 @@ export function CalendarView({
   }, [])
 
   const [poolWidth, setPoolWidth] = useState(224) // session-only
+  const [poolFilter, setPoolFilter] = useState<PlanningPoolFilter>("ACTIVE")
   const [poolDropActive, setPoolDropActive] = useState(false)
   const [ghost, setGhost] = useState<{ startMin: number; endMin: number } | null>(null)
   const [weekGhost, setWeekGhost] = useState<{ dayIso: string; startMin: number; endMin: number } | null>(null)
@@ -156,12 +172,6 @@ export function CalendarView({
     return { blocks, markers }
   }
 
-  const planningTasks = useMemo(() => {
-    const pool = tasks.filter((t) => (t.status === "TODO" || t.status === "FOCUS" || t.status === "WAIT") && inScope(t.projectId))
-    return [...pool.filter((t) => t.pinned || t.status === "FOCUS"), ...pool.filter((t) => !t.pinned && t.status !== "FOCUS")]
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks, allSelected, selectedProjectIds])
-
   const todaySessionTotals = useMemo(() => {
     const totals = new Map<string, { blocks: number; minutes: number }>()
     taskWorkSessions.forEach((session) => {
@@ -175,6 +185,26 @@ export function CalendarView({
     })
     return totals
   }, [taskWorkSessions, today])
+
+  const scheduledTaskIds = useMemo(
+    () => new Set(taskWorkSessions.map((session) => session.taskId)),
+    [taskWorkSessions],
+  )
+
+  const planningTasks = useMemo(() => {
+    const pool = tasks.filter((task) => inScope(task.projectId)).filter((task) => {
+      if (poolFilter === "ALL") return true
+      if (task.status === "DONE") return false
+      if (poolFilter === "UNSCHEDULED") return !scheduledTaskIds.has(task.id)
+      if (poolFilter === "TODAY") return todaySessionTotals.has(task.id)
+      return true
+    })
+    return [
+      ...pool.filter((task) => task.pinned || task.status === "FOCUS"),
+      ...pool.filter((task) => !task.pinned && task.status !== "FOCUS"),
+    ]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, allSelected, selectedProjectIds, poolFilter, scheduledTaskIds, todaySessionTotals])
 
   const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i)
   const displayTitle = (block: Block) => block.title.trim() || (block.kind === "MEET" ? "Untitled MEET" : "Untitled task")
@@ -337,20 +367,44 @@ export function CalendarView({
           <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Planning pool</span>
           <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">{planningTasks.length}</span>
         </div>
+        <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-border px-2 py-2" aria-label="Planning pool filters">
+          {PLANNING_POOL_FILTERS.map((filter) => {
+            const selected = poolFilter === filter.id
+            return (
+              <button
+                key={filter.id}
+                type="button"
+                aria-pressed={selected}
+                title={filter.title}
+                onClick={() => setPoolFilter(filter.id)}
+                className={cn(
+                  "min-w-0 rounded-md border px-1.5 py-1 text-[10px] font-medium transition-colors",
+                  selected
+                    ? "border-primary/40 bg-primary/10 text-foreground"
+                    : "border-border/60 bg-card/50 text-muted-foreground hover:border-border hover:bg-accent/40 hover:text-foreground",
+                )}
+              >
+                {filter.label}
+              </button>
+            )
+          })}
+        </div>
         <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
           {planningTasks.length === 0 ? (
-            <p className="px-1 py-3 text-[11px] text-muted-foreground">No active tasks in scope. DONE tasks stay hidden.</p>
+            <p className="px-1 py-3 text-[11px] text-muted-foreground">{PLANNING_POOL_EMPTY_COPY[poolFilter]}</p>
           ) : (
             planningTasks.map((t) => {
               const p = projectMap.get(t.projectId); const s = sectionMap.get(t.sectionId ?? ""); const st = STATUS_STYLES[t.status] ?? STATUS_STYLES.TODO
               const todayTotal = todaySessionTotals.get(t.id)
-              const scheduleLabel = !todayTotal
-                ? "Unscheduled"
-                : `Scheduled today · ${todayTotal.blocks} ${todayTotal.blocks === 1 ? "block" : "blocks"} · ${fmtDur(todayTotal.minutes)} total`
+              const hasAnySession = scheduledTaskIds.has(t.id)
+              const scheduleLabel = todayTotal
+                ? `Scheduled today · ${todayTotal.blocks} ${todayTotal.blocks === 1 ? "block" : "blocks"} · ${fmtDur(todayTotal.minutes)} total`
+                : hasAnySession ? "No session today" : "Unscheduled"
+              const taskCanSchedule = canSchedule && t.status !== "DONE"
               return (
                 <div
                   key={t.id}
-                  draggable={canSchedule}
+                  draggable={taskCanSchedule}
                   onDragStart={(e) => startPoolDrag(e, t.id)}
                   onDragEnd={onDragCleanup}
                   onPointerDown={beginBlockPointer}
@@ -359,12 +413,13 @@ export function CalendarView({
                   }}
                   className={cn(
                     "group flex flex-col gap-1.5 rounded-lg border bg-card p-2 text-left transition-colors",
-                    canSchedule ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+                    taskCanSchedule ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
                     t.id === selectedTaskId ? "border-primary/50 bg-primary/8" : "border-border hover:border-border/80 hover:bg-accent/40",
+                    t.status === "DONE" && "opacity-65",
                   )}
                 >
                   <div className="flex items-center gap-1.5">
-                    {canSchedule && <GripVertical className="size-3 shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground" />}
+                    {taskCanSchedule && <GripVertical className="size-3 shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground" />}
                     <span className={cn("rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide", st.bg, st.text)}>{st.label}</span>
                     {t.pinned && <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">pinned</span>}
                   </div>
@@ -381,7 +436,7 @@ export function CalendarView({
         </div>
         {canSchedule && (
           <div className="shrink-0 border-t border-border px-2 py-1.5 text-[10px] text-muted-foreground">
-            {poolDropActive ? "Drop to remove this calendar block" : "Tasks stay until DONE · drag to add a session"}
+            {poolDropActive ? "Drop to remove this calendar block" : "Active tasks stay until DONE · drag to add a session"}
           </div>
         )}
         <div onMouseDown={startPoolResize} title="Drag to resize" className="absolute right-0 top-0 z-20 h-full w-1.5 translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40" />
