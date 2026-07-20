@@ -159,6 +159,10 @@ internal static class Program
             ("working hours persistence and repair", WorkingHoursPersistenceAndRepair),
             ("working hours command persistence and validation", WorkingHoursCommandPersistenceAndValidation),
             ("working hours workspace snapshot", WorkingHoursWorkspaceSnapshot),
+            ("appearance schema migration and defaults", AppearanceSchemaMigrationAndDefaults),
+            ("appearance persistence and repair", AppearancePersistenceAndRepair),
+            ("appearance valid values round trip", AppearanceValidValuesRoundTrip),
+            ("appearance workspace snapshot", AppearanceWorkspaceSnapshot),
             ("workspace context command persistence", WorkspaceContextCommandPersistence),
             ("workspace command status persistence", WorkspaceCommandStatusPersistence),
             ("workspace command invalid task and status", WorkspaceCommandInvalidTaskAndStatus),
@@ -4429,7 +4433,7 @@ internal static class Program
         var waitingSnapshot = snapshot.Tasks.Single(task =>
             task.Id == waiting.Id.ToString("N"));
 
-        Assert(snapshot.SchemaVersion == 6, "Workspace contract version should be 6.");
+        Assert(snapshot.SchemaVersion == 7, "Workspace contract version should be 7.");
         Assert(snapshot.MeetingOperations.Count == 0,
             "A fresh snapshot must not claim transient MEET operations survive startup.");
         Assert(snapshot.Mode == "readonly", "Workspace contract should be read-only.");
@@ -4465,7 +4469,7 @@ internal static class Program
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
         var document = JsonDocument.Parse(json);
-        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == 6,
+        Assert(document.RootElement.GetProperty("schemaVersion").GetInt32() == WorkspaceSnapshotFactory.CurrentSchemaVersion,
             "Serialized workspace contract should use camelCase fields.");
         Assert(document.RootElement.GetProperty("mode").GetString() == "readonly",
             "Serialized workspace contract mode mismatch.");
@@ -4487,8 +4491,8 @@ internal static class Program
             File.WriteAllText(store.StatePath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
             var loaded = store.Load();
-            Assert(loaded.SchemaVersion == 8,
-                "Schema-7 state should migrate additively to schema 8.");
+            Assert(loaded.SchemaVersion == AppState.CurrentSchemaVersion,
+                "Schema-7 state should migrate additively to the current schema.");
             Assert(loaded.WorkspaceSettings.WorkdayStartMinutes == 540 &&
                    loaded.WorkspaceSettings.WorkdayEndMinutes == 1080,
                 "Missing working-hours fields should default to 09:00-18:00.");
@@ -4577,6 +4581,98 @@ internal static class Program
         snapshot = WorkspaceSnapshotFactory.Create(state);
         Assert(snapshot.WorkdayStartMinutes == 540 && snapshot.WorkdayEndMinutes == 1080,
             "Workspace snapshot should fall back safely for invalid in-memory values.");
+    }
+
+    private static void AppearanceSchemaMigrationAndDefaults()
+    {
+        // Synthetic schema-8 fixture only. No real user state is read or modified.
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = AppState.CreateDefault(DateTimeOffset.Parse("2026-07-20T08:00:00Z"));
+            store.Save(state);
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            root["schemaVersion"] = 8;
+            var workspaceSettings = root["workspaceSettings"]!.AsObject();
+            workspaceSettings.Remove("theme");
+            workspaceSettings.Remove("accent");
+            File.WriteAllText(store.StatePath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+            var loaded = store.Load();
+            Assert(loaded.SchemaVersion == 9,
+                "Schema-8 state should migrate additively to schema 9.");
+            Assert(loaded.WorkspaceSettings.Theme == WorkspaceTheme.System &&
+                   loaded.WorkspaceSettings.Accent == WorkspaceAccent.Neutral,
+                "Missing appearance fields should default to System + Neutral.");
+        });
+    }
+
+    private static void AppearancePersistenceAndRepair()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var state = AppState.CreateDefault();
+            state.WorkspaceSettings.Theme = WorkspaceTheme.Dark;
+            state.WorkspaceSettings.Accent = WorkspaceAccent.Warm;
+            store.Save(state);
+            var loaded = store.Load();
+            Assert(loaded.WorkspaceSettings.Theme == WorkspaceTheme.Dark &&
+                   loaded.WorkspaceSettings.Accent == WorkspaceAccent.Warm,
+                "Valid appearance preferences should survive serialization and reload.");
+            Assert(loaded.WorkspaceSettings.WorkdayStartMinutes == WorkspaceSettings.DefaultWorkdayStartMinutes &&
+                   loaded.WorkspaceSettings.WorkdayEndMinutes == WorkspaceSettings.DefaultWorkdayEndMinutes,
+                "Unrelated WorkspaceSettings fields (working hours) must remain untouched.");
+
+            var root = JsonNode.Parse(File.ReadAllText(store.StatePath))!.AsObject();
+            var workspaceSettings = root["workspaceSettings"]!.AsObject();
+            workspaceSettings["theme"] = 99;
+            workspaceSettings["accent"] = -1;
+            File.WriteAllText(store.StatePath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            loaded = store.Load();
+            Assert(loaded.WorkspaceSettings.Theme == WorkspaceTheme.System &&
+                   loaded.WorkspaceSettings.Accent == WorkspaceAccent.Neutral,
+                "Invalid persisted theme/accent values should repair to System + Neutral.");
+        });
+    }
+
+    private static void AppearanceValidValuesRoundTrip()
+    {
+        WithTemporaryDirectory(directory =>
+        {
+            var store = new AppStateStore(directory);
+            var themes = new[] { WorkspaceTheme.System, WorkspaceTheme.Dark, WorkspaceTheme.Light };
+            var accents = new[] { WorkspaceAccent.Neutral, WorkspaceAccent.Warm };
+            foreach (var theme in themes)
+            {
+                foreach (var accent in accents)
+                {
+                    var state = AppState.CreateDefault();
+                    state.WorkspaceSettings.Theme = theme;
+                    state.WorkspaceSettings.Accent = accent;
+                    store.Save(state);
+                    var loaded = store.Load();
+                    Assert(loaded.WorkspaceSettings.Theme == theme && loaded.WorkspaceSettings.Accent == accent,
+                        $"Theme {theme} / Accent {accent} should round-trip through save/load unchanged.");
+                }
+            }
+        });
+    }
+
+    private static void AppearanceWorkspaceSnapshot()
+    {
+        var state = AppState.CreateDefault();
+        state.WorkspaceSettings.Theme = WorkspaceTheme.Dark;
+        state.WorkspaceSettings.Accent = WorkspaceAccent.Warm;
+        var snapshot = WorkspaceSnapshotFactory.Create(state);
+        Assert(snapshot.AppearanceTheme == "dark" && snapshot.AppearanceAccent == "warm",
+            "Workspace snapshot should project the resolved appearance preference.");
+
+        state.WorkspaceSettings.Theme = (WorkspaceTheme)999;
+        state.WorkspaceSettings.Accent = (WorkspaceAccent)999;
+        snapshot = WorkspaceSnapshotFactory.Create(state);
+        Assert(snapshot.AppearanceTheme == "system" && snapshot.AppearanceAccent == "neutral",
+            "Workspace snapshot should fall back safely for invalid in-memory appearance values.");
     }
 
     private static void WorkspaceTimelineConsistency()
@@ -7897,7 +7993,7 @@ internal static class Program
         Assert(migrated.Meetings.Single().Id == meeting.Id,
             "Migration must preserve existing MEET data.");
         var snapshot = WorkspaceSnapshotFactory.Create(migrated, now);
-        Assert(snapshot.SchemaVersion == 6 &&
+        Assert(snapshot.SchemaVersion == WorkspaceSnapshotFactory.CurrentSchemaVersion &&
                snapshot.MeetingRecordings.Count == 0 &&
                snapshot.MeetingAnalyses.Count == 0,
             "Old states should produce a valid current Workspace snapshot.");
@@ -8465,7 +8561,7 @@ internal static class Program
         var revisionBefore = transcript.RevisionId;
 
         StateMigrator.Migrate(state);
-        Assert(state.SchemaVersion == 8 &&
+        Assert(state.SchemaVersion == AppState.CurrentSchemaVersion &&
                state.MeetingTranscripts.Single().RevisionId == revisionBefore &&
                state.MeetingTranscripts.Single().SourceTranscriptId is null &&
                state.MeetingTranscripts.Single().ParentRevisionId is null &&
@@ -8473,7 +8569,7 @@ internal static class Program
             "Schema 6 states without transcript edits should reach the current schema unchanged.");
 
         StateMigrator.Migrate(state);
-        Assert(state.SchemaVersion == 8 && state.MeetingTranscripts.Count == 1,
+        Assert(state.SchemaVersion == AppState.CurrentSchemaVersion && state.MeetingTranscripts.Count == 1,
             "Migration from schema 6 through the current schema should be idempotent.");
     }
 

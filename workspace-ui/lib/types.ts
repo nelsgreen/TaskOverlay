@@ -390,7 +390,7 @@ export interface ProjectScope {
 }
 
 export interface WorkspaceSnapshotContract {
-  schemaVersion: 6
+  schemaVersion: 7
   generatedAtUtc: string
   mode: "readonly" | "connected"
   projects: WorkspaceProjectSnapshot[]
@@ -411,6 +411,8 @@ export interface WorkspaceSnapshotContract {
   timelineItems: WorkspaceTimelineSnapshot[]
   workdayStartMinutes: number
   workdayEndMinutes: number
+  appearanceTheme: "system" | "dark" | "light"
+  appearanceAccent: "neutral" | "warm"
   context: WorkspaceContextSnapshot
 }
 

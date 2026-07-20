@@ -34,6 +34,7 @@ import type {
   WorkspaceContextSourceSnapshot,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { MetadataBadge } from "@/components/ui/metadata-badge"
 import { LinkedTasksField } from "./linked-task-picker"
 
 // ─── Selection shared with task-manager ─────────────────────────────────────
@@ -155,12 +156,7 @@ function StatusChip({ status }: { status: ContextItemStatus }) {
 }
 
 function SourceChip({ type }: { type: ContextSourceType }) {
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-      <FileText className="size-2.5" aria-hidden />
-      {sourceTypeMeta[type].short}
-    </span>
-  )
+  return <MetadataBadge icon={FileText} label={sourceTypeMeta[type].short} />
 }
 
 function LinkCount({ kind, count }: { kind: "task" | "meet"; count: number }) {

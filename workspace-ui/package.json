@@ -26,7 +26,9 @@
     "test:meet-sources-review-layout": "node --test lib/meet-sources-review-layout.test.mjs",
     "test:meet-transcript-editor": "node --test lib/meet-transcript-editor.test.mjs",
     "test:meet-transcript-audio": "node --test lib/meet-transcript-audio.test.mjs",
-    "test:tabs-segmented-control": "node --test lib/tabs-segmented-control-primitives.test.mjs"
+    "test:tabs-segmented-control": "node --test lib/tabs-segmented-control-primitives.test.mjs",
+    "test:appearance": "node --test lib/appearance.test.mjs",
+    "test:design-system-primitives": "node --test lib/design-system-primitives.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

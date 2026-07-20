@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { CalendarDays, Check, ExternalLink, MapPin, RefreshCw, Trash2, Video, X } from "lucide-react"
+import { CalendarDays, ExternalLink, MapPin, Trash2, Video, X } from "lucide-react"
 import type {
   MeetDuration,
   MeetItem,
@@ -42,6 +42,7 @@ import {
 } from "@/lib/meet-shell"
 import { isValidMeetingLinkUrl } from "@/lib/meeting-link"
 import { Tabs, TabList, Tab, TabPanel } from "@/components/ui/tabs"
+import { SavedState } from "@/components/ui/saved-state"
 import { MeetContextBlock } from "./task-context-block"
 import {
   MeetingReviewWorkspace,
@@ -772,30 +773,11 @@ export function MeetDetailsModal({
           </div>
           <div className="flex items-center gap-3">
             {!readOnly && (
-              <span className="flex items-center gap-1.5 text-[11px]" aria-live="polite">
-                {saveStatus === "saving" && (
-                  <>
-                    <span className="size-1.5 animate-pulse rounded-full bg-status-meet motion-reduce:animate-none" />
-                    <span className="text-muted-foreground">Saving…</span>
-                  </>
-                )}
-                {saveStatus === "saved" && (
-                  <>
-                    <Check className="size-3 text-status-focus" />
-                    <span className="text-muted-foreground">Saved</span>
-                  </>
-                )}
-                {saveStatus === "failed" && (
-                  <button
-                    type="button"
-                    onClick={() => void autosaveRef.current?.retry()}
-                    className="inline-flex items-center gap-1 rounded text-destructive outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <RefreshCw className="size-3" />
-                    Save failed · Retry
-                  </button>
-                )}
-              </span>
+              <SavedState
+                status={saveStatus}
+                failedLabel="Save failed"
+                onRetry={() => void autosaveRef.current?.retry()}
+              />
             )}
             <button
               type="button"
