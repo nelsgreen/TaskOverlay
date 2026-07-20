@@ -59,10 +59,38 @@ const compositePkg = readFileSync(
   "utf8",
 )
 
-// Same hardcoded-color detector as lib/button-primitives.test.mjs (matches
-// both normal CSS `rgb(`/`rgba(` and Tailwind's underscore arbitrary-value
-// form, e.g. `rgb(0_0_0/0.18)`).
-const hardcodedColorPattern = /#[0-9a-fA-F]{3,8}\b|rgba?[\s_]*\(/i
+// Broader than lib/button-primitives.test.mjs's detector: catches hex plus
+// every raw color function this codebase could plausibly leak - rgb/rgba,
+// hsl/hsla, oklch/oklab - in both normal CSS syntax and Tailwind's
+// underscore arbitrary-value form (e.g. `oklch(0_0_0_/_0.18)`, or
+// `2px_oklch(...)` where Tailwind rewrote a preceding space as "_").
+// Deliberately has no leading `\b`/word-boundary guard before the function
+// name: a real color-space keyword argument to `color-mix()` (`in_oklch`,
+// `in oklch`) is always followed by "," or a space, never immediately by
+// "(" - only an actual `oklch(...)` function call is. Requiring the
+// function name be immediately followed by (optional space/underscore then)
+// "(" is what distinguishes the two, not word-boundary position - a leaked
+// color can be preceded by an underscore too (Tailwind's `2px_oklch(...)`).
+const hardcodedColorPattern = /#[0-9a-fA-F]{3,8}\b|(?:rgba?|hsla?|oklch|oklab)[\s_]*\(/i
+
+test("hardcodedColorPattern catches hex, rgb/rgba, hsl/hsla, and oklch/oklab, in both normal CSS and Tailwind's underscore arbitrary-value form", () => {
+  // The exact leaked form this ticket fixes: SegmentedControlItem's selected
+  // shadow used to hardcode `oklch(0_0_0_/_0.18)` instead of `var(--shadow-1)`.
+  assert.equal(hardcodedColorPattern.test('shadow-[0_1px_2px_oklch(0_0_0_/_0.18)]'), true)
+  assert.equal(hardcodedColorPattern.test('oklch(0 0 0 / 0.18)'), true)
+  assert.equal(hardcodedColorPattern.test('oklab(0.5 0 0)'), true)
+  assert.equal(hardcodedColorPattern.test('hsl(0deg 0% 0%)'), true)
+  assert.equal(hardcodedColorPattern.test('hsla(0, 0%, 0%, 0.5)'), true)
+  assert.equal(hardcodedColorPattern.test('rgb(0_0_0/0.18)'), true)
+  assert.equal(hardcodedColorPattern.test('bg-[rgba(0,0,0,0.5)]'), true)
+  assert.equal(hardcodedColorPattern.test('text-[#fff]'), true)
+  // Canonical token references, including color-mix expressions built
+  // entirely from canonical CSS variables and `transparent`, must not
+  // false-positive.
+  assert.equal(hardcodedColorPattern.test('shadow-[var(--shadow-1)]'), false)
+  assert.equal(hardcodedColorPattern.test('color-mix(in_oklch,var(--selection)_25%,transparent)'), false)
+  assert.equal(hardcodedColorPattern.test('color-mix(in oklch, var(--destructive) 32%, transparent)'), false)
+})
 
 function namedExportStatements(src) {
   return src.match(/export\s+(?:type\s+)?\{[^}]*\}/g) ?? []

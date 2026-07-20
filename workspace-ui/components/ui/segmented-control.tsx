@@ -92,7 +92,7 @@ function SegmentedControlItem<Value extends string>({
         'hover:text-text',
         'focus-visible:shadow-[var(--focus-ring)]',
         'aria-pressed:bg-surface-raised aria-pressed:font-semibold aria-pressed:text-text',
-        'aria-pressed:shadow-[0_1px_2px_oklch(0_0_0_/_0.18),inset_0_0_0_1px_color-mix(in_oklch,var(--selection)_25%,transparent)]',
+        'aria-pressed:shadow-[var(--shadow-1),inset_0_0_0_1px_color-mix(in_oklch,var(--selection)_25%,transparent)]',
         'disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
