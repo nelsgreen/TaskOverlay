@@ -2,9 +2,12 @@
  * Pure helpers for the MEET modal shell (phase 1 visual migration).
  *
  * Kept dependency-free so it can be unit-tested with `node --test` and so the
- * shell geometry, tab identity, keyboard navigation, and header summary logic
- * live outside the React component. The tab order is asserted against
- * `meet-workspace-policy` in the test suite to prevent drift.
+ * shell geometry, tab identity, and header summary logic live outside the
+ * React component. Tab keyboard navigation (ArrowLeft/ArrowRight/Home/End,
+ * roving tabIndex, disabled-skip) is owned by the canonical
+ * `components/ui/tabs.tsx` primitive (`@base-ui/react/tabs`), not by this
+ * module. The tab order is asserted against `meet-workspace-policy` in the
+ * test suite to prevent drift.
  */
 
 export type MeetShellTab = "details" | "sources" | "review"
@@ -41,21 +44,6 @@ export function meetTabPanelId(tab: MeetShellTab): string {
 
 export function meetTabLabel(tab: MeetShellTab): string {
   return tab.charAt(0).toUpperCase() + tab.slice(1)
-}
-
-/** Roving tab navigation for ArrowLeft/ArrowRight, wrapping at both ends. */
-export function nextMeetTab(
-  current: MeetShellTab,
-  direction: "next" | "prev",
-): MeetShellTab {
-  const order = MEET_SHELL_TAB_ORDER
-  const index = order.indexOf(current)
-  if (index < 0) return order[0]
-  const count = order.length
-  const target = direction === "next"
-    ? (index + 1) % count
-    : (index - 1 + count) % count
-  return order[target]
 }
 
 /**

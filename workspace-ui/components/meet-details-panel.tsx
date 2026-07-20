@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { CalendarDays, Check, ExternalLink, MapPin, RefreshCw, Trash2, Video, X } from "lucide-react"
 import type {
   MeetDuration,
@@ -39,9 +39,9 @@ import {
   meetTabButtonId,
   meetTabLabel,
   meetTabPanelId,
-  nextMeetTab,
 } from "@/lib/meet-shell"
 import { isValidMeetingLinkUrl } from "@/lib/meeting-link"
+import { Tabs, TabList, Tab, TabPanel } from "@/components/ui/tabs"
 import { MeetContextBlock } from "./task-context-block"
 import {
   MeetingReviewWorkspace,
@@ -352,16 +352,6 @@ export function MeetDetailsModal({
   const recordingActive = !!activeRecording && activeRecording.meetingId === draft.id
   const isDetails = shouldShowMeetDetailsActions(activeTab)
 
-  const onTabsKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
-    event.preventDefault()
-    const target = nextMeetTab(activeTab, event.key === "ArrowRight" ? "next" : "prev")
-    if (!switchTab(target)) return
-    window.requestAnimationFrame(() => {
-      document.getElementById(meetTabButtonId(target))?.focus()
-    })
-  }
-
   return (
     // Scrim never closes the modal (backdrop click is a no-op by product decision).
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-2 backdrop-blur-sm">
@@ -409,51 +399,28 @@ export function MeetDetailsModal({
           </button>
         </header>
 
-        {/* ── Tabs — full-width, equal, keyboard-navigable ── */}
-        <div
-          role="tablist"
-          aria-label="MEET sections"
-          onKeyDown={onTabsKeyDown}
-          className="flex shrink-0 border-b border-border bg-background/40"
+        {/* ── Tabs — keyboard-navigable via the canonical Tabs primitive ── */}
+        <Tabs
+          value={activeTab}
+          onValueChange={(value, eventDetails) => {
+            if (!switchTab(value as MeetWorkspaceTab)) eventDetails.cancel()
+          }}
+          className="min-h-0 flex-1"
         >
-          {MEET_WORKSPACE_TABS.map((tab) => {
-            const active = activeTab === tab
-            return (
-              <button
-                key={tab}
-                type="button"
-                id={meetTabButtonId(tab)}
-                role="tab"
-                aria-selected={active}
-                aria-controls={meetTabPanelId(tab)}
-                tabIndex={active ? 0 : -1}
-                onClick={() => switchTab(tab)}
-                className={cn(
-                  "relative flex-1 px-3 py-2.5 text-[12px] font-medium outline-none transition-colors",
-                  "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                  active ? "text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                )}
-              >
-                {active && (
-                  <span aria-hidden className="absolute inset-0 bg-[var(--meet-selected)]" />
-                )}
-                <span className="relative">{meetTabLabel(tab)}</span>
-                {active && (
-                  <span aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-[var(--meet-active)]" />
-                )}
-              </button>
-            )
-          })}
-        </div>
+          <TabList activateOnFocus aria-label="MEET sections" className="bg-background/40">
+            {MEET_WORKSPACE_TABS.map((tab) => (
+              <Tab key={tab} value={tab} id={meetTabButtonId(tab)}>
+                {meetTabLabel(tab)}
+              </Tab>
+            ))}
+          </TabList>
 
-        {/* ── Content region — fixed height, only inner columns scroll ── */}
-        <div
-          role="tabpanel"
-          id={meetTabPanelId(activeTab)}
-          aria-labelledby={meetTabButtonId(activeTab)}
-          className="flex min-h-0 flex-1 flex-col bg-[var(--meet-content)]"
-        >
-          {isDetails && (
+          {/* ── Content region — fixed height, only inner columns scroll ── */}
+          <TabPanel
+            value="details"
+            id={meetTabPanelId("details")}
+            className="flex min-h-0 flex-1 flex-col bg-[var(--meet-content)]"
+          >
             <fieldset
               disabled={readOnly}
               className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 disabled:opacity-80 lg:grid-cols-[minmax(0,1.65fr)_minmax(320px,0.85fr)]"
@@ -724,9 +691,13 @@ export function MeetDetailsModal({
                 )}
               </div>
             </fieldset>
-          )}
+          </TabPanel>
 
-          {activeTab === "sources" && (
+          <TabPanel
+            value="sources"
+            id={meetTabPanelId("sources")}
+            className="flex min-h-0 flex-1 flex-col bg-[var(--meet-content)]"
+          >
             <MeetingSourcesWorkspace
               meet={draft}
               projects={projects}
@@ -751,9 +722,13 @@ export function MeetDetailsModal({
               )}
               onBeforeRecordingStart={flushAutosave}
             />
-          )}
+          </TabPanel>
 
-          {activeTab === "review" && (
+          <TabPanel
+            value="review"
+            id={meetTabPanelId("review")}
+            className="flex min-h-0 flex-1 flex-col bg-[var(--meet-content)]"
+          >
             <MeetingReviewWorkspace
               meet={draft}
               projects={projects}
@@ -773,8 +748,8 @@ export function MeetDetailsModal({
               onSaveTranscriptRevision={onSaveTranscriptRevision}
               registerTranscriptEditGuard={registerTranscriptEditGuard}
             />
-          )}
-        </div>
+          </TabPanel>
+        </Tabs>
 
         {/* ── Footer — one stable bar across every tab (autosave, no Save/Revert) ── */}
         <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-2.5">

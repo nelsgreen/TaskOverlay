@@ -8,7 +8,6 @@ import {
   meetTabButtonId,
   meetTabLabel,
   meetTabPanelId,
-  nextMeetTab,
 } from "./meet-shell.ts"
 import { MEET_WORKSPACE_TABS } from "./meet-workspace-policy.ts"
 
@@ -31,13 +30,6 @@ test("tab identity helpers are stable and distinct", () => {
   assert.equal(meetTabPanelId("review"), "meet-panel-review")
   assert.equal(meetTabLabel("sources"), "Sources")
   assert.notEqual(meetTabButtonId("details"), meetTabPanelId("details"))
-})
-
-test("arrow navigation wraps in both directions", () => {
-  assert.equal(nextMeetTab("details", "next"), "sources")
-  assert.equal(nextMeetTab("review", "next"), "details")
-  assert.equal(nextMeetTab("details", "prev"), "review")
-  assert.equal(nextMeetTab("sources", "prev"), "details")
 })
 
 test("secondary header line drops blank parts and joins with a middot", () => {
@@ -114,12 +106,26 @@ test("Sources and Review keep their existing props and command wiring", () => {
   )
 })
 
-test("tabs use correct ARIA roles and a single tabpanel", () => {
-  assert.match(component, /role="tablist"/)
-  assert.match(component, /role="tab"/)
-  assert.match(component, /aria-selected=\{active\}/)
-  assert.match(component, /role="tabpanel"/)
-  assert.match(component, /aria-controls=\{meetTabPanelId/)
+test("MEET tabs delegate ARIA roles/keyboard nav to the canonical Tabs primitive, not a hand-rolled tablist", () => {
+  assert.match(component, /import \{ Tabs, TabList, Tab, TabPanel \} from ["']@\/components\/ui\/tabs["']/)
+  assert.match(component, /<Tabs\s*\n\s*value=\{activeTab\}/)
+  assert.match(component, /<TabList activateOnFocus aria-label="MEET sections"/)
+  // No hand-rolled ARIA attributes duplicating what Tabs/TabList/Tab/TabPanel
+  // already own internally (role, aria-selected, aria-controls, tabIndex).
+  assert.doesNotMatch(component, /role="tablist"/)
+  assert.doesNotMatch(component, /role="tab"/)
+  assert.doesNotMatch(component, /role="tabpanel"/)
+})
+
+test("all three MEET tabs are wired through matching Tab/TabPanel value pairs with stable ids", () => {
+  for (const tab of ["details", "sources", "review"]) {
+    assert.match(component, new RegExp(`<TabPanel\\s*\\n\\s*value="${tab}"\\s*\\n\\s*id=\\{meetTabPanelId\\("${tab}"\\)\\}`))
+  }
+  assert.match(component, /\{MEET_WORKSPACE_TABS.map\(\(tab\) => \(\s*\n\s*<Tab key=\{tab\} value=\{tab\} id=\{meetTabButtonId\(tab\)\}>/)
+})
+
+test("tab switching still routes through the transcript-edit-exit guard (switchTab), and a canceled switch cancels the Tabs change event", () => {
+  assert.match(component, /onValueChange=\{\(value, eventDetails\) => \{\s*\n\s*if \(!switchTab\(value as MeetWorkspaceTab\)\) eventDetails\.cancel\(\)/)
 })
 
 test("exactly one autosave status region exists (no header/footer duplication)", () => {
