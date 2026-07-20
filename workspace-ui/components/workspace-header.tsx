@@ -24,6 +24,7 @@ import type { MeetingRecordingSnapshot, StatusFilterKey, TabKey, Task, TreeFilte
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control"
 import { addDaysKey, formatWeekLabel, mondayOfWeekKey, parseDateKey, todayKey } from "@/lib/calendar-date"
 
 interface Props {
@@ -580,14 +581,10 @@ function CalendarToolbar({
   return (
     <>
       {/* View mode */}
-      <div className={toolbar.segment} role="group" aria-label="Calendar view mode">
-        <button type="button" onClick={() => onViewModeChange("day")} className={toolbar.segmentItem(viewMode === "day")}>
-          Day
-        </button>
-        <button type="button" onClick={() => onViewModeChange("week")} className={toolbar.segmentItem(viewMode === "week")}>
-          Week
-        </button>
-      </div>
+      <SegmentedControl value={viewMode} onValueChange={onViewModeChange} aria-label="Calendar view mode">
+        <SegmentedControlItem value="day">Day</SegmentedControlItem>
+        <SegmentedControlItem value="week">Week</SegmentedControlItem>
+      </SegmentedControl>
 
       {/* Quick jumps */}
       <button type="button" onClick={onToday} className={ghost(isToday)}>Today</button>
