@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Bell, Link2, Plus, X } from "lucide-react"
 import type { Project, Section, Status, Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { Input } from "@/components/ui/input"
 import { StatusBadge } from "./status-badge"
 
 /**
@@ -13,9 +14,6 @@ import { StatusBadge } from "./status-badge"
  * cross-project guard with no feedback). This shows only same-project,
  * not-yet-linked tasks with status/path context and a title+path search.
  */
-
-const inputClass =
-  "rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-primary/60 focus:ring-1 focus:ring-primary/40"
 
 /** Same-project tasks not already linked. The picker's only eligibility rule. */
 export function getEligibleTasks(tasks: Task[], projectId: string, linkedTaskIds: string[]): Task[] {
@@ -210,12 +208,11 @@ function LinkedTaskPickerModal({
         </div>
 
         <div className="space-y-2 border-b border-border px-4 py-2.5">
-          <input
+          <Input
             autoFocus
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by title or path…"
-            className={cn(inputClass, "w-full")}
           />
           <div className="flex flex-wrap gap-1">
             {STATUS_FILTERS.map((filter) => (

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Check, Copy, X } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
 
 /**
  * Shared preview/copy modal for Context Pack export (Project / Task / MEET).
@@ -65,12 +66,12 @@ export function ContextPackModal({ subtitle, markdown, onClose }: ContextPackMod
         </div>
 
         <div className="flex-1 overflow-hidden px-4 py-3">
-          <textarea
+          <Textarea
             ref={textareaRef}
             readOnly
             value={markdown}
             onFocus={(e) => e.currentTarget.select()}
-            className="h-full min-h-[320px] w-full resize-none rounded-md border border-input bg-background px-3 py-2 font-mono text-[12px] leading-relaxed text-foreground outline-none focus:border-primary/60"
+            className="h-full min-h-[320px] resize-none font-mono text-[12px]"
           />
         </div>
 

@@ -23,6 +23,7 @@ import {
 import type { MeetingRecordingSnapshot, StatusFilterKey, TabKey, Task, TreeFilter, WorkstreamFilter } from "@/lib/types"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { cn } from "@/lib/utils"
+import { Input } from "@/components/ui/input"
 import { addDaysKey, formatWeekLabel, mondayOfWeekKey, parseDateKey, todayKey } from "@/lib/calendar-date"
 
 interface Props {
@@ -230,12 +231,12 @@ export function WorkspaceHeader({
 
         <div className="relative my-auto w-56 shrink-0 max-w-[28vw]">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
+          <Input
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
             disabled={searchDisabled}
             placeholder={searchDisabled ? "Search unavailable in this view" : "Search or jump to..."}
-            className="h-8 w-full rounded-md border border-input bg-card pl-8 pr-3 text-[12px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/60 focus:ring-1 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="pl-8 pr-3 text-[12px]"
           />
         </div>
       </div>
