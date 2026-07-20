@@ -166,6 +166,39 @@ test("IconButton uses a distinct fixed square/radius-sm geometry from Button's r
   assert.equal(/rounded-md/.test(iconButtonSrc), false)
 })
 
+/**
+ * Every `export { ... }` / `export type { ... }` statement in `src`, so a
+ * test can assert on exactly what a module-level import can see - not just
+ * grep the whole file text, which would also match the internal `const
+ * buttonVariants = cva(...)` declaration and false-negative on a leak.
+ */
+function namedExportStatements(src) {
+  return src.match(/export\s+(?:type\s+)?\{[^}]*\}/g) ?? []
+}
+
+test("buttonVariants stays module-local: it is declared but never appears in any export statement", () => {
+  assert.match(buttonSrc, /const buttonVariants = cva\(/, "buttonVariants must still exist internally")
+  const exportsText = namedExportStatements(buttonSrc).join("\n")
+  assert.equal(/\bbuttonVariants\b/.test(exportsText), false)
+  assert.match(exportsText, /\bButton\b/)
+  assert.match(exportsText, /\bButtonProps\b/)
+})
+
+test("iconButtonVariants stays module-local: it is declared but never appears in any export statement", () => {
+  assert.match(iconButtonSrc, /const iconButtonVariants = cva\(/, "iconButtonVariants must still exist internally")
+  const exportsText = namedExportStatements(iconButtonSrc).join("\n")
+  assert.equal(/\biconButtonVariants\b/.test(exportsText), false)
+  assert.match(exportsText, /\bIconButton\b/)
+  assert.match(exportsText, /\bIconButtonProps\b/)
+})
+
+test("Button/IconButton modules export nothing beyond the component and its props type - no back door to the raw cva variants (and therefore no back door to the internal 'selected' tone)", () => {
+  const buttonExports = namedExportStatements(buttonSrc)
+  const iconButtonExports = namedExportStatements(iconButtonSrc)
+  assert.equal(buttonExports.length, 2, "expected exactly one value export and one type export from button.tsx")
+  assert.equal(iconButtonExports.length, 2, "expected exactly one value export and one type export from icon-button.tsx")
+})
+
 test("Context actions (Link/Hub/Export) render as three equal-width buttons via CSS grid, never flex (which cannot guarantee equal thirds)", () => {
   assert.match(taskContextBlock, /grid grid-cols-3 gap-1\.5/)
 })
