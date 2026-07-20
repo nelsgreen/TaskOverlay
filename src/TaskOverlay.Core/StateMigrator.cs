@@ -65,6 +65,14 @@ public static class StateMigrator
                     state.WorkspaceSettings.NormalizeWorkingHours();
                     state.SchemaVersion = 8;
                     break;
+                case 8:
+                    // Schema 9 adds persistent Workspace theme (System/Dark/Light)
+                    // and accent (Neutral/Warm) preferences. Property initializers
+                    // supply System/Neutral when schema-8 JSON omits them.
+                    state.WorkspaceSettings ??= new WorkspaceSettings();
+                    state.WorkspaceSettings.NormalizeAppearance();
+                    state.SchemaVersion = 9;
+                    break;
                 default:
                     throw new InvalidDataException(
                         $"Unsupported schema version: {state.SchemaVersion}.");
@@ -239,6 +247,11 @@ public static class StateMigrator
         }
 
         if (state.WorkspaceSettings.NormalizeWorkingHours())
+        {
+            changed = true;
+        }
+
+        if (state.WorkspaceSettings.NormalizeAppearance())
         {
             changed = true;
         }

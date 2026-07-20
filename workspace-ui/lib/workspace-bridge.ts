@@ -72,6 +72,8 @@ export interface WorkspaceData {
   defaultMeetingRecordingPolicy: "Manual" | "AutoRecord"
   workdayStartMinutes: number
   workdayEndMinutes: number
+  appearanceTheme: "system" | "dark" | "light"
+  appearanceAccent: "neutral" | "warm"
   contextSources: WorkspaceContextSourceSnapshot[]
   contextItems: WorkspaceContextItemSnapshot[]
   context: WorkspaceContextSnapshot
@@ -357,7 +359,7 @@ export function useWorkspaceBridge(): WorkspaceBridgeState {
 function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<WorkspaceSnapshotContract>
-  return candidate.schemaVersion === 6 &&
+  return candidate.schemaVersion === 7 &&
     (candidate.mode === "readonly" || candidate.mode === "connected") &&
     typeof candidate.generatedAtUtc === "string" &&
     Array.isArray(candidate.projects) &&
@@ -376,6 +378,8 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshotContract
     Array.isArray(candidate.timelineItems) &&
     typeof candidate.workdayStartMinutes === "number" &&
     typeof candidate.workdayEndMinutes === "number" &&
+    ["system", "dark", "light"].includes(candidate.appearanceTheme ?? "") &&
+    ["neutral", "warm"].includes(candidate.appearanceAccent ?? "") &&
     isWorkspaceContext(candidate.context)
 }
 
@@ -446,6 +450,8 @@ function adaptWorkspaceSnapshot(snapshot: WorkspaceSnapshotContract): WorkspaceD
       : "Manual",
     workdayStartMinutes: workingHours.startMin,
     workdayEndMinutes: workingHours.endMin,
+    appearanceTheme: snapshot.appearanceTheme,
+    appearanceAccent: snapshot.appearanceAccent,
     // Snapshot rows are used as-is (ids already snapshot-format); ?? [] keeps
     // a host built before ContextHUB from breaking the whole snapshot.
     contextSources: snapshot.contextSources ?? [],

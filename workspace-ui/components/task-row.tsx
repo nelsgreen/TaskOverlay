@@ -3,7 +3,7 @@
 import { Bell, ChevronRight, CornerDownRight, Pin, Clock } from "lucide-react"
 import type { Task } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { StatusBadge } from "./status-badge"
+import { StatusBadge } from "@/components/ui/status-badge"
 
 interface Props {
   task: Task

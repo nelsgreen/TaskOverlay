@@ -1,9 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { ChevronRight, ClipboardList, Layers, Link2, Plus, X } from "lucide-react"
+import { ClipboardList, Layers, Link2, Plus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
+import { Panel } from "@/components/ui/panel"
+import { DetailsSection } from "@/components/ui/details-section"
 import type {
   ContextItemStatus,
   ContextItemType,
@@ -234,98 +236,91 @@ function RecordContextBlock({
 
   return (
     <>
-      <div className="group/card mt-3 rounded-lg border border-border bg-card/40">
-        {/* Header — collapsed by default when nothing is linked; expanded by
-            default once something is, so the user isn't shown a large empty
-            card. Always click-to-toggle regardless of the default. */}
-        <button
-          type="button"
-          onClick={() => setManualOpen(!open)}
-          className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
-          aria-expanded={open}
+      <Panel className="group/card mt-3">
+        {/* Collapsed by default when nothing is linked; expanded by default
+            once something is, so the user isn't shown a large empty card.
+            Always click-to-toggle regardless of the default. */}
+        <DetailsSection
+          icon={<Layers className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+          title="Context"
+          meta={
+            totalLinked > 0 && (
+              <span className="text-[11px] font-semibold tabular-nums text-primary">
+                {totalLinked} linked
+              </span>
+            )
+          }
+          open={open}
+          onOpenChange={setManualOpen}
         >
-          <Layers className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">Context</span>
-          <span className="flex-1" />
-          {totalLinked > 0 && (
-            <span className="text-[11px] font-semibold tabular-nums text-primary">
-              {totalLinked} linked
-            </span>
+          {totalLinked === 0 ? (
+            <p className="text-[12px] text-muted-foreground">No context linked yet.</p>
+          ) : (
+            <>
+              {linkedSources.length > 0 && (
+                <div className="space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Sources ({linkedSources.length})
+                  </span>
+                  {linkedSources.map((source) => (
+                    <LinkedSourceRow
+                      key={source.id}
+                      source={source}
+                      locked={locked}
+                      onUnlink={() => onUnlinkSource(source.id)}
+                    />
+                  ))}
+                </div>
+              )}
+              {linkedItems.length > 0 && (
+                <div className="space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Context items ({linkedItems.length})
+                  </span>
+                  {linkedItems.map((item) => (
+                    <LinkedItemRow
+                      key={item.id}
+                      item={item}
+                      locked={locked}
+                      onUnlink={() => onUnlinkItem(item.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
-          <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
-        </button>
 
-        {open && (
-          <div className="space-y-2.5 border-t border-border/50 px-3 pb-3 pt-2.5">
-            {totalLinked === 0 ? (
-              <p className="text-[12px] text-muted-foreground">No context linked yet.</p>
-            ) : (
-              <>
-                {linkedSources.length > 0 && (
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Sources ({linkedSources.length})
-                    </span>
-                    {linkedSources.map((source) => (
-                      <LinkedSourceRow
-                        key={source.id}
-                        source={source}
-                        locked={locked}
-                        onUnlink={() => onUnlinkSource(source.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-                {linkedItems.length > 0 && (
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Context items ({linkedItems.length})
-                    </span>
-                    {linkedItems.map((item) => (
-                      <LinkedItemRow
-                        key={item.id}
-                        item={item}
-                        locked={locked}
-                        onUnlink={() => onUnlinkItem(item.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* Three neutral, equal-hierarchy actions - never status toggles.
-                A CSS grid (not flex) guarantees exactly equal thirds at the
-                narrow inspector width regardless of each label's text
-                width, so none of the three can ever overflow the card. */}
-            <div className="grid grid-cols-3 gap-1.5 pt-0.5">
-              <Button
-                tone="secondary"
-                size="xs"
-                disabled={locked}
-                onClick={() => setModalOpen(true)}
-                title="Link existing context"
-              >
-                <Plus className="size-3 shrink-0" aria-hidden />
-                Link
-              </Button>
-              <Button tone="secondary" size="xs" onClick={onOpenContextHub} title="Open ContextHUB">
-                <Link2 className="size-3 shrink-0" aria-hidden />
-                Hub
-              </Button>
-              <Button
-                tone="secondary"
-                size="xs"
-                onClick={() => setPackMarkdown(contextPack.buildMarkdown())}
-                title="Context Pack export"
-              >
-                <ClipboardList className="size-3 shrink-0" aria-hidden />
-                Export
-              </Button>
-            </div>
+          {/* Three neutral, equal-hierarchy actions - never status toggles.
+              A CSS grid (not flex) guarantees exactly equal thirds at the
+              narrow inspector width regardless of each label's text
+              width, so none of the three can ever overflow the card. */}
+          <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+            <Button
+              tone="secondary"
+              size="xs"
+              disabled={locked}
+              onClick={() => setModalOpen(true)}
+              title="Link existing context"
+            >
+              <Plus className="size-3 shrink-0" aria-hidden />
+              Link
+            </Button>
+            <Button tone="secondary" size="xs" onClick={onOpenContextHub} title="Open ContextHUB">
+              <Link2 className="size-3 shrink-0" aria-hidden />
+              Hub
+            </Button>
+            <Button
+              tone="secondary"
+              size="xs"
+              onClick={() => setPackMarkdown(contextPack.buildMarkdown())}
+              title="Context Pack export"
+            >
+              <ClipboardList className="size-3 shrink-0" aria-hidden />
+              Export
+            </Button>
           </div>
-        )}
-      </div>
+        </DetailsSection>
+      </Panel>
 
       {modalOpen && (
         <LinkExistingModal

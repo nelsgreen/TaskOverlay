@@ -27,6 +27,7 @@ import {
   timelineItems as mockTimelineItems,
 } from "@/lib/mock-data"
 import { cn } from "@/lib/utils"
+import { useWorkspaceAppearance } from "@/lib/appearance"
 import { useWorkspaceBridge } from "@/lib/workspace-bridge"
 import { matchesStatusFilter } from "@/lib/status-filter"
 import { addDaysKey, isoFromLocalDateTime, localSlotFromIso, todayKey } from "@/lib/calendar-date"
@@ -170,6 +171,9 @@ export function TaskManager() {
   const meetItems = bridge.data?.meetItems ?? mockMeetItems
   const workdayStartMinutes = bridge.data?.workdayStartMinutes ?? DEFAULT_WORKDAY_START_MIN
   const workdayEndMinutes = bridge.data?.workdayEndMinutes ?? DEFAULT_WORKDAY_END_MIN
+  const appearanceTheme = bridge.data?.appearanceTheme ?? "system"
+  const appearanceAccent = bridge.data?.appearanceAccent ?? "neutral"
+  useWorkspaceAppearance(appearanceTheme, appearanceAccent)
   const meetingRecordings = bridge.data?.meetingRecordings ?? []
   const meetingTranscripts = bridge.data?.meetingTranscripts ?? []
   const meetingScreenshots = bridge.data?.meetingScreenshots ?? []

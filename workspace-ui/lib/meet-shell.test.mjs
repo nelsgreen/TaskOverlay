@@ -129,9 +129,12 @@ test("tab switching still routes through the transcript-edit-exit guard (switchT
 })
 
 test("exactly one autosave status region exists (no header/footer duplication)", () => {
-  assert.equal(component.match(/saveStatus === "saving"/g)?.length, 1)
-  assert.equal(component.match(/saveStatus === "saved"/g)?.length, 1)
-  assert.equal(component.match(/saveStatus === "failed"/g)?.length, 1)
+  // Migrated onto the shared SavedState primitive (components/ui/saved-state.tsx):
+  // the saving/saved/failed rendering now lives there, so this checks for
+  // exactly one SavedState usage bound to saveStatus instead of the old
+  // inline saveStatus === "..." conditionals.
+  assert.equal(component.match(/<SavedState\b/g)?.length, 1)
+  assert.equal(component.match(/status=\{saveStatus\}/g)?.length, 1)
 })
 
 test("no Save or Revert controls, and no legacy onApply path", () => {

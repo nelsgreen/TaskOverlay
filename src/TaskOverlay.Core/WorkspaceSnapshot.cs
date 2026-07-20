@@ -26,6 +26,8 @@ public sealed record WorkspaceSnapshot(
     IReadOnlyList<WorkspaceTimelineItemSnapshot> TimelineItems,
     int WorkdayStartMinutes,
     int WorkdayEndMinutes,
+    string AppearanceTheme,
+    string AppearanceAccent,
     WorkspaceContextSnapshot Context);
 
 public sealed record WorkspaceContextSnapshot(
@@ -339,7 +341,7 @@ public sealed record WorkspaceTimelineItemSnapshot(
 
 public static class WorkspaceSnapshotFactory
 {
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 7;
     public const string ReadOnlyMode = "readonly";
     public const string ConnectedMode = "connected";
 
@@ -821,6 +823,7 @@ public static class WorkspaceSnapshotFactory
             .ToList();
         var settings = state.WorkspaceSettings ?? new WorkspaceSettings();
         var workingHours = WorkspaceSettings.ResolveWorkingHours(settings);
+        var appearance = WorkspaceSettings.ResolveAppearance(settings);
         var context = new WorkspaceContextSnapshot(
             ToWorkspaceTab(settings.ActiveTab),
             settings.SelectedProjectIds?
@@ -860,6 +863,8 @@ public static class WorkspaceSnapshotFactory
             timelineItems,
             workingHours.StartMinutes,
             workingHours.EndMinutes,
+            ToWorkspaceTheme(appearance.Theme),
+            ToWorkspaceAccent(appearance.Accent),
             context);
     }
 
@@ -1006,6 +1011,19 @@ public static class WorkspaceSnapshotFactory
         WorkspaceTab.Workstreams => "workstreams",
         WorkspaceTab.ContextHub => "contexthub",
         _ => "tree"
+    };
+
+    private static string ToWorkspaceTheme(WorkspaceTheme theme) => theme switch
+    {
+        WorkspaceTheme.Dark => "dark",
+        WorkspaceTheme.Light => "light",
+        _ => "system"
+    };
+
+    private static string ToWorkspaceAccent(WorkspaceAccent accent) => accent switch
+    {
+        WorkspaceAccent.Warm => "warm",
+        _ => "neutral"
     };
 
     private static IReadOnlyList<string> FormatLinkedIds(

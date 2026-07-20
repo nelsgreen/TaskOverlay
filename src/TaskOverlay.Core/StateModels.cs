@@ -7,7 +7,7 @@ namespace TaskOverlay.Core;
 
 public sealed class AppState
 {
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public List<TaskItem> Tasks { get; set; } = new();
@@ -537,6 +537,8 @@ public sealed class WorkspaceSettings
     public const int DefaultWorkdayStartMinutes = 9 * 60;
     public const int DefaultWorkdayEndMinutes = 18 * 60;
     public const int WorkdayIncrementMinutes = 15;
+    public const WorkspaceTheme DefaultTheme = WorkspaceTheme.System;
+    public const WorkspaceAccent DefaultAccent = WorkspaceAccent.Neutral;
 
     public WorkspaceTab ActiveTab { get; set; } = WorkspaceTab.Tree;
     public List<Guid> SelectedProjectIds { get; set; } = new();
@@ -547,6 +549,8 @@ public sealed class WorkspaceSettings
     public bool ActiveNowCollapsed { get; set; }
     public int WorkdayStartMinutes { get; set; } = DefaultWorkdayStartMinutes;
     public int WorkdayEndMinutes { get; set; } = DefaultWorkdayEndMinutes;
+    public WorkspaceTheme Theme { get; set; } = DefaultTheme;
+    public WorkspaceAccent Accent { get; set; } = DefaultAccent;
 
     public bool NormalizeWorkingHours()
     {
@@ -574,6 +578,35 @@ public sealed class WorkspaceSettings
         IsValidWorkingHours(settings.WorkdayStartMinutes, settings.WorkdayEndMinutes)
             ? (settings.WorkdayStartMinutes, settings.WorkdayEndMinutes)
             : (DefaultWorkdayStartMinutes, DefaultWorkdayEndMinutes);
+
+    /// <summary>
+    /// Repairs an unknown/invalid persisted Theme or Accent value back to the
+    /// default. Mirrors <see cref="NormalizeWorkingHours"/>.
+    /// </summary>
+    public bool NormalizeAppearance()
+    {
+        var changed = false;
+
+        if (!Enum.IsDefined(Theme))
+        {
+            Theme = DefaultTheme;
+            changed = true;
+        }
+
+        if (!Enum.IsDefined(Accent))
+        {
+            Accent = DefaultAccent;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    public static (WorkspaceTheme Theme, WorkspaceAccent Accent) ResolveAppearance(
+        WorkspaceSettings? settings) =>
+        settings is not null && Enum.IsDefined(settings.Theme) && Enum.IsDefined(settings.Accent)
+            ? (settings.Theme, settings.Accent)
+            : (DefaultTheme, DefaultAccent);
 }
 
 public enum WorkspaceTab
@@ -591,6 +624,29 @@ public enum WorkspaceFilter
     All,
     Active,
     ActivePath
+}
+
+/// <summary>
+/// User-selected Workspace theme preference. System resolves from the OS
+/// light/dark appearance setting and stays live-following it; Dark/Light are
+/// explicit and ignore later OS changes. See DECISIONS.md "Design System".
+/// </summary>
+public enum WorkspaceTheme
+{
+    System,
+    Dark,
+    Light
+}
+
+/// <summary>
+/// User-selected Workspace accent profile. Affects only the interaction
+/// accent/selection/focus-ring role, never surface or status/domain colors.
+/// See DECISIONS.md "Design System".
+/// </summary>
+public enum WorkspaceAccent
+{
+    Neutral,
+    Warm
 }
 
 public sealed class TelegramCaptureSettings

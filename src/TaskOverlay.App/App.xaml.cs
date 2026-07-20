@@ -1283,6 +1283,7 @@ public partial class App : System.Windows.Application
             new SettingsWindowActions(
                 SetOverlayMode,
                 SaveWorkingHoursSettings,
+                SaveWorkspaceAppearanceSettings,
                 () => OpenFolder(_diagnostics?.LogsDirectory),
                 () => OpenFolder(_stateStore?.StateDirectory),
                 ResetSavedWindowPositions,
@@ -1454,6 +1455,18 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        PersistState();
+        _workspaceWindow?.RefreshFromExternalChange();
+    }
+
+    private void SaveWorkspaceAppearanceSettings()
+    {
+        if (_state is null)
+        {
+            return;
+        }
+
+        _state.WorkspaceSettings.NormalizeAppearance();
         PersistState();
         _workspaceWindow?.RefreshFromExternalChange();
     }

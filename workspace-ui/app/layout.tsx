@@ -15,16 +15,20 @@ export const viewport: Viewport = {
   ],
 }
 
-// Resolves the initial theme/accent before first paint (no FOUC) and keeps
-// System live-following the OS appearance setting. This is the PR-1 minimal
-// root wiring only: System/Dark/Light preference and Neutral/Warm accent
-// persistence through native C# settings + the WebView2 bridge is a separate,
-// later increment (see DECISIONS.md) — no localStorage is used here.
+// Resolves a best-guess initial theme/accent before first paint (no FOUC),
+// before the real persisted preference can arrive from the Workspace
+// snapshot (WebView2 bridge, post-hydration). It assumes System/Neutral with
+// a live prefers-color-scheme fallback, matching the production defaults; the
+// centralized `useWorkspaceAppearance` layer (lib/appearance.ts) then applies
+// the actual persisted preference once the bridge connects, and keeps
+// re-applying it on every snapshot change. No localStorage is used here or
+// there — persistence lives entirely in native C# settings + AppState.
 //
 // `?ds-theme=light|dark` and `?ds-accent=neutral|warm` query params are a
 // small dev/QA hook for rendering all four theme x accent combinations
 // (screenshots, manual review); they are not a second production preference
-// system and have no effect once removed from the URL.
+// system, are re-checked by `useWorkspaceAppearance` too, and have no effect
+// once removed from the URL.
 const THEME_INIT_SCRIPT = `(function () {
   try {
     var root = document.documentElement;

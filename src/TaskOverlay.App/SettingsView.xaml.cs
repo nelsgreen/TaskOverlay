@@ -21,6 +21,8 @@ internal sealed record MeetingLanguageOption(
     MeetingTranscriptLanguage Value,
     string Label);
 internal sealed record WorkdayTimeOption(int Minutes, string Label);
+internal sealed record WorkspaceThemeOption(WorkspaceTheme Value, string Label);
+internal sealed record WorkspaceAccentOption(WorkspaceAccent Value, string Label);
 
 public partial class SettingsView : UserControl
 {
@@ -67,6 +69,17 @@ public partial class SettingsView : UserControl
         WorkdayEndComboBox.ItemsSource = BuildWorkdayTimeOptions(includeMidnightEnd: true)
             .Where(option => option.Minutes > 0)
             .ToArray();
+        WorkspaceThemeComboBox.ItemsSource = new[]
+        {
+            new WorkspaceThemeOption(WorkspaceTheme.System, "System"),
+            new WorkspaceThemeOption(WorkspaceTheme.Dark, "Dark"),
+            new WorkspaceThemeOption(WorkspaceTheme.Light, "Light")
+        };
+        WorkspaceAccentComboBox.ItemsSource = new[]
+        {
+            new WorkspaceAccentOption(WorkspaceAccent.Neutral, "Neutral"),
+            new WorkspaceAccentOption(WorkspaceAccent.Warm, "Warm")
+        };
         HotkeyItems.ItemsSource = BuildHotkeyItems();
         MeetingRecordingPolicyComboBox.ItemsSource =
             new[]
@@ -158,6 +171,7 @@ public partial class SettingsView : UserControl
             WorkingWindowHeightSlider.Value =
                 _state.OverlaySettings.WorkingWindowHeight;
             UpdateWorkingHoursControls();
+            UpdateWorkspaceAppearanceControls();
             UpdateValueLabels();
             UpdateBackupControls();
             UpdateTelegramControls();
@@ -223,6 +237,35 @@ public partial class SettingsView : UserControl
         settings.WorkdayStartMinutes = startMinutes;
         settings.WorkdayEndMinutes = endMinutes;
         _actions.SaveWorkingHoursSettings();
+    }
+
+    private void UpdateWorkspaceAppearanceControls()
+    {
+        var appearance = WorkspaceSettings.ResolveAppearance(_state.WorkspaceSettings);
+        WorkspaceThemeComboBox.SelectedValue = appearance.Theme;
+        WorkspaceAccentComboBox.SelectedValue = appearance.Accent;
+    }
+
+    private void WorkspaceAppearanceComboBox_OnSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_updatingControls ||
+            WorkspaceThemeComboBox.SelectedValue is not WorkspaceTheme theme ||
+            WorkspaceAccentComboBox.SelectedValue is not WorkspaceAccent accent)
+        {
+            return;
+        }
+
+        var settings = _state.WorkspaceSettings;
+        if (settings.Theme == theme && settings.Accent == accent)
+        {
+            return;
+        }
+
+        settings.Theme = theme;
+        settings.Accent = accent;
+        _actions.SaveWorkspaceAppearanceSettings();
     }
 
     private void ModeListBox_OnSelectionChanged(

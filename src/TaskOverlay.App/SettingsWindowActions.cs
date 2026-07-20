@@ -10,6 +10,7 @@ public sealed class SettingsWindowActions
     public SettingsWindowActions(
         Action<OverlayMode> setOverlayMode,
         Action saveWorkingHoursSettings,
+        Action saveWorkspaceAppearanceSettings,
         Action openLogs,
         Action openStateFolder,
         Action resetWindowPositions,
@@ -41,6 +42,7 @@ public sealed class SettingsWindowActions
     {
         SetOverlayMode = setOverlayMode;
         SaveWorkingHoursSettings = saveWorkingHoursSettings;
+        SaveWorkspaceAppearanceSettings = saveWorkspaceAppearanceSettings;
         OpenLogs = openLogs;
         OpenStateFolder = openStateFolder;
         ResetWindowPositions = resetWindowPositions;
@@ -73,6 +75,7 @@ public sealed class SettingsWindowActions
 
     public Action<OverlayMode> SetOverlayMode { get; }
     public Action SaveWorkingHoursSettings { get; }
+    public Action SaveWorkspaceAppearanceSettings { get; }
     public Action OpenLogs { get; }
     public Action OpenStateFolder { get; }
     public Action ResetWindowPositions { get; }
