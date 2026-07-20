@@ -3,15 +3,29 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import { buttonDisabledClasses, buttonToneClasses } from "../components/ui/button-tone.ts"
 
+const buttonToneSrc = readFileSync(new URL("../components/ui/button-tone.ts", import.meta.url), "utf8")
+
 const buttonSrc = readFileSync(new URL("../components/ui/button.tsx", import.meta.url), "utf8")
 const iconButtonSrc = readFileSync(new URL("../components/ui/icon-button.tsx", import.meta.url), "utf8")
 const taskContextBlock = readFileSync(new URL("../components/task-context-block.tsx", import.meta.url), "utf8")
 const contextPackModal = readFileSync(new URL("../components/context-pack-modal.tsx", import.meta.url), "utf8")
 
+/**
+ * Catches hardcoded colors in both normal CSS syntax (`rgb(`, `rgba(`) and
+ * Tailwind arbitrary-value syntax, where spaces are written as underscores
+ * (`rgb_`, `rgba_`) - a plain `rgb\(` regex misses `rgb(0_0_0/0.18)` because
+ * the space before the opening paren became an underscore, not a real space.
+ * Hex colors are matched in either position.
+ */
+// No `\b` before `rgba?`: Tailwind arbitrary values often precede it with an
+// underscore (`shadow-[0_1px_2px_rgb(0_0_0/0.18)]`), and `_` counts as a word
+// character - `\brgb` would never match right after it, silently missing the
+// exact underscore-arbitrary-value form this pattern exists to catch.
+const hardcodedColorPattern = /#[0-9a-fA-F]{3,8}\b|rgba?[\s_]*\(/i
+
 test("every button tone reads a canonical token for its background/text/border, never a raw color", () => {
-  const hexOrRawColor = /#[0-9a-fA-F]{3,8}\b|\brgb\(|\brgba\(/
   for (const [tone, classes] of Object.entries(buttonToneClasses)) {
-    assert.equal(hexOrRawColor.test(classes), false, `${tone} must reference tokens, not a hardcoded color`)
+    assert.equal(hardcodedColorPattern.test(classes), false, `${tone} must reference tokens, not a hardcoded color`)
   }
   assert.match(buttonToneClasses.primary, /\bbg-primary\b/)
   assert.match(buttonToneClasses.primary, /\btext-primary-foreground\b/)
@@ -44,6 +58,27 @@ test("no tone reuses a domain task-status/MEET/warning color as a generic button
 test("selected/toggle tone is not color-only: it also carries a distinct ring and font-weight signal", () => {
   assert.match(buttonToneClasses.selected, /font-semibold/)
   assert.match(buttonToneClasses.selected, /shadow-\[/)
+  // Regression: selected's shadow must reference the canonical shadow token,
+  // not a hardcoded rgb() (the bug the strengthened pattern below now catches).
+  assert.match(buttonToneClasses.selected, /var\(--shadow-1\)/)
+})
+
+test("the hardcoded-color pattern itself catches the underscore-arbitrary-value form a plain rgb\\( regex misses", () => {
+  // This is the exact shape that leaked through the original, weaker test:
+  // Tailwind arbitrary values write spaces as underscores, so `rgb(0 0 0/0.18)`
+  // becomes `rgb(0_0_0/0.18)` - no literal "rgb(" substring survives immediately
+  // followed by a digit, but there's still a raw color hidden in the class list.
+  assert.equal(hardcodedColorPattern.test('shadow-[0_1px_2px_rgb(0_0_0/0.18)]'), true)
+  assert.equal(hardcodedColorPattern.test('bg-[rgba(0,0,0,0.5)]'), true)
+  assert.equal(hardcodedColorPattern.test('text-[#fff]'), true)
+  // Canonical token references must not false-positive.
+  assert.equal(hardcodedColorPattern.test('shadow-[var(--shadow-1)]'), false)
+})
+
+test("no tone contains any hardcoded color anywhere, in normal CSS or Tailwind arbitrary-value syntax", () => {
+  for (const [tone, classes] of Object.entries(buttonToneClasses)) {
+    assert.equal(hardcodedColorPattern.test(classes), false, `${tone} must not contain a literal color`)
+  }
 })
 
 test("disabled is native-semantics driven (opacity + not-allowed), matching the spec's Focus & states model for buttons", () => {
@@ -69,6 +104,55 @@ test("Button forwards disabled to the native button element (no aria-disabled su
 test("Button's pressed prop always keeps aria-pressed and the selected tone in sync", () => {
   assert.match(buttonSrc, /aria-pressed=\{pressed\}/)
   assert.match(buttonSrc, /pressed \? 'selected' : tone/)
+})
+
+test("PublicButtonTone excludes 'selected' - selected only ever applies through pressed, never as a directly selectable tone", () => {
+  assert.match(buttonToneSrc, /export type PublicButtonTone = Exclude<ButtonTone, ['"]selected['"]>/)
+  // buttonToneClasses itself keeps the internal 'selected' entry (Button/
+  // IconButton still need to resolve it internally via `pressed`).
+  assert.ok("selected" in buttonToneClasses)
+})
+
+test("Button and IconButton's public tone prop is typed as PublicButtonTone, not the raw cva/VariantProps tone (which would include 'selected')", () => {
+  for (const src of [buttonSrc, iconButtonSrc]) {
+    assert.match(src, /import \{[^}]*\bPublicButtonTone\b[^}]*\} from ['"]\.\/button-tone['"]/)
+    assert.match(src, /tone\?:\s*PublicButtonTone/)
+    // The VariantProps intersection must have 'tone' omitted, or the raw
+    // (selected-inclusive) cva type would leak back in through it.
+    assert.match(src, /Omit<VariantProps<typeof \w+Variants>,\s*['"]tone['"]>/)
+  }
+})
+
+test("controlled accessibility props (aria-pressed, aria-busy, disabled) are excluded from Button's accepted native props, so a caller cannot pass a conflicting value", () => {
+  const extendsLine = buttonSrc.match(/interface ButtonProps\s*\n\s*extends Omit<ButtonPrimitive\.Props,([^>]+)>/)
+  assert.ok(extendsLine, "expected an Omit<ButtonPrimitive.Props, ...> extends clause")
+  for (const excluded of ["aria-pressed", "aria-busy", "disabled"]) {
+    assert.match(extendsLine[1], new RegExp(`['"]${excluded}['"]`))
+  }
+})
+
+test("controlled accessibility props (aria-label, aria-pressed, aria-busy, disabled) are excluded from IconButton's accepted native props", () => {
+  const extendsBlock = iconButtonSrc.match(/interface IconButtonProps\s*\n\s*extends Omit<\s*\n?\s*ButtonPrimitive\.Props,([\s\S]+?)>/)
+  assert.ok(extendsBlock, "expected an Omit<ButtonPrimitive.Props, ...> extends clause")
+  for (const excluded of ["aria-label", "aria-pressed", "aria-busy", "disabled"]) {
+    assert.match(extendsBlock[1], new RegExp(`['"]${excluded}['"]`))
+  }
+})
+
+test("Button and IconButton spread caller props before the controlled accessibility attributes in JSX, so even an unexpected/loosely-typed caller prop can never win", () => {
+  for (const src of [buttonSrc, iconButtonSrc]) {
+    const spreadIdx = src.indexOf("{...props}")
+    const ariaPressedIdx = src.indexOf("aria-pressed={pressed}")
+    const ariaBusyIdx = src.indexOf("aria-busy={loading")
+    const disabledIdx = src.indexOf("disabled={disabled || loading}")
+    assert.notEqual(spreadIdx, -1, "expected {...props} in the returned JSX")
+    assert.ok(spreadIdx < ariaPressedIdx, "{...props} must come before aria-pressed")
+    assert.ok(spreadIdx < ariaBusyIdx, "{...props} must come before aria-busy")
+    assert.ok(spreadIdx < disabledIdx, "{...props} must come before disabled")
+  }
+  const labelIdx = iconButtonSrc.indexOf("{...props}")
+  const ariaLabelIdx = iconButtonSrc.indexOf("aria-label={label}")
+  assert.ok(labelIdx < ariaLabelIdx, "{...props} must come before aria-label in IconButton")
 })
 
 test("IconButton requires a label prop and renders it as aria-label", () => {

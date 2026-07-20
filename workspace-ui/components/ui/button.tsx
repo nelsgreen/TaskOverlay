@@ -4,7 +4,7 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { LoaderCircle } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { buttonDisabledClasses, buttonToneClasses } from './button-tone'
+import { buttonDisabledClasses, buttonToneClasses, type PublicButtonTone } from './button-tone'
 
 /**
  * Canonical Button primitive, per the design spec §07 Button family
@@ -42,21 +42,32 @@ const buttonVariants = cva(
 )
 
 interface ButtonProps
-  extends Omit<ButtonPrimitive.Props, 'className'>,
-    VariantProps<typeof buttonVariants> {
+  extends Omit<ButtonPrimitive.Props, 'className' | 'aria-pressed' | 'aria-busy' | 'disabled'>,
+    Omit<VariantProps<typeof buttonVariants>, 'tone'> {
   className?: string
   /**
-   * Toggle/selected state for status-like controls. Setting this also sets
-   * `aria-pressed` and overrides `tone` to `selected` when true, so the
-   * visual state and the accessibility attribute can never drift apart.
+   * `selected` is deliberately not part of this public type (see
+   * `PublicButtonTone`) - it only ever applies through `pressed` below.
+   */
+  tone?: PublicButtonTone
+  /**
+   * Toggle/selected state for status-like controls. This is the only source
+   * of `aria-pressed` and of the `selected` tone: setting it also swaps in
+   * the `selected` visual regardless of `tone`, so the state is never
+   * color-only and never silently out of sync with the accessibility
+   * attribute. `aria-pressed` is omitted from the accepted props above so a
+   * caller cannot pass a conflicting value directly.
    */
   pressed?: boolean
   /**
    * Replaces the leading icon with a spinner and marks the control busy
    * without changing its label, so width is preserved. Callers must not
-   * also render their own leading icon while `loading` is true.
+   * also render their own leading icon while `loading` is true. `aria-busy`
+   * is omitted from the accepted props above - this is its only source.
    */
   loading?: boolean
+  /** Native disabled state. Combined with `loading` (see below) - this is the only source of the rendered `disabled` attribute. */
+  disabled?: boolean
 }
 
 function Button({
@@ -72,12 +83,12 @@ function Button({
   const resolvedTone = pressed ? 'selected' : tone
   return (
     <ButtonPrimitive
+      {...props}
       data-slot="button"
       aria-pressed={pressed}
       aria-busy={loading || undefined}
       disabled={disabled || loading}
       className={cn(buttonVariants({ tone: resolvedTone, size, className }))}
-      {...props}
     >
       {loading && (
         <LoaderCircle className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />

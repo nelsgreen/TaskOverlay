@@ -36,7 +36,7 @@ export const buttonToneClasses = {
   // legible without relying on color alone.
   selected:
     'border-transparent bg-surface-raised text-text font-semibold ' +
-    'shadow-[0_1px_2px_rgb(0_0_0/0.18),inset_0_0_0_1px_color-mix(in_oklch,var(--selection)_40%,transparent)]',
+    'shadow-[var(--shadow-1),inset_0_0_0_1px_color-mix(in_oklch,var(--selection)_40%,transparent)]',
   destructive:
     'border-[color-mix(in_oklch,var(--destructive)_32%,transparent)] bg-destructive-soft text-destructive ' +
     'hover:not-disabled:bg-[color-mix(in_oklch,var(--destructive)_17%,transparent)] ' +
@@ -47,6 +47,15 @@ export const buttonToneClasses = {
 } as const
 
 export type ButtonTone = keyof typeof buttonToneClasses
+
+/**
+ * `selected` is an internal styling contract, not a tone a caller may pick
+ * directly - it only ever applies through `pressed`, which sets `aria-
+ * pressed` in lockstep with the visual state (see Button/IconButton). A
+ * public `tone="selected"` would let a caller render the pressed look with
+ * no pressed semantics at all, so the public prop type excludes it.
+ */
+export type PublicButtonTone = Exclude<ButtonTone, 'selected'>
 
 /** Shared with Input/Textarea/Select's disabledBase in intent, not literally
  * reused, because Button also needs the visible `opacity-50` the field

@@ -4,7 +4,7 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { LoaderCircle } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { buttonDisabledClasses, buttonToneClasses } from './button-tone'
+import { buttonDisabledClasses, buttonToneClasses, type PublicButtonTone } from './button-tone'
 
 /**
  * Icon-only button primitive, per the design spec §07 Button family. Shares
@@ -41,15 +41,32 @@ const iconButtonVariants = cva(
 )
 
 interface IconButtonProps
-  extends Omit<ButtonPrimitive.Props, 'className' | 'children'>,
-    VariantProps<typeof iconButtonVariants> {
+  extends Omit<
+      ButtonPrimitive.Props,
+      'className' | 'children' | 'aria-label' | 'aria-pressed' | 'aria-busy' | 'disabled'
+    >,
+    Omit<VariantProps<typeof iconButtonVariants>, 'tone'> {
   className?: string
-  /** Accessible name. Required - an icon-only control has no visible text. */
+  /**
+   * `selected` is deliberately not part of this public type (see
+   * `PublicButtonTone`) - it only ever applies through `pressed` below.
+   */
+  tone?: PublicButtonTone
+  /**
+   * Accessible name. Required - an icon-only control has no visible text.
+   * This is the control's only source of `aria-label`; the prop is omitted
+   * from the accepted native props above so a caller cannot pass a second,
+   * conflicting `aria-label` directly.
+   */
   label: string
   /** The icon element, e.g. `<X className="size-4" />`. */
   children: React.ReactNode
+  /** See `Button`'s `pressed` - this is the only source of `aria-pressed` and the `selected` tone. */
   pressed?: boolean
+  /** See `Button`'s `loading` - this is the only source of `aria-busy`. */
   loading?: boolean
+  /** Native disabled state. Combined with `loading` (see below) - this is the only source of the rendered `disabled` attribute. */
+  disabled?: boolean
 }
 
 function IconButton({
@@ -66,13 +83,13 @@ function IconButton({
   const resolvedTone = pressed ? 'selected' : tone
   return (
     <ButtonPrimitive
+      {...props}
       data-slot="icon-button"
       aria-label={label}
       aria-pressed={pressed}
       aria-busy={loading || undefined}
       disabled={disabled || loading}
       className={cn(iconButtonVariants({ tone: resolvedTone, size, className }))}
-      {...props}
     >
       {loading ? <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : children}
     </ButtonPrimitive>
