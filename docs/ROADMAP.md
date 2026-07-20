@@ -13,21 +13,21 @@ Product/backend feature work is paused while this bounded PR sequence lands
 the one already accepted in the signed-off spec's handoff notes
 (rev. 4, https://claude.ai/code/artifact/8042b7b0-1759-40a3-afdf-1b12285466e3):
 
-1. PR-1 token foundation - implemented: canonical semantic tokens, Light/Dark
-   value sets, Neutral/Warm accent profiles, `data-theme`/`data-accent` root
-   wiring, compatibility aliases.
-2. Field primitives - Editable / Read-only / Disabled - implemented and in
-   review (this PR): shared `Input`/`Textarea`/`Select` under
-   `components/ui/`, driven by native `readOnly`/`disabled` attributes, with
-   a handful of low-risk callers migrated to prove all three states across
-   all four theme x accent combinations. Behavior-sensitive fields
-   (date/time, MEET transcript editing, custom "select trigger" pickers) and
-   the read-only-workspace `<fieldset disabled>` pattern in Task/MEET
-   Details and ContextHUB remain deferred (see DECISIONS.md "Design
-   System").
-3. Button and action primitives, including the recording variant - next.
-4. Remaining shared primitives (Tabs/Segment, StatusBadge/MetadataBadge,
-   Empty/Loading/Error/Saved states, Panel/ModalShell/DetailsSection).
+1. PR-1 token foundation - implemented and merged: canonical semantic tokens,
+   Light/Dark value sets, Neutral/Warm accent profiles,
+   `data-theme`/`data-accent` root wiring, and compatibility aliases.
+2. Field primitives - implemented and merged in PR #78: shared
+   `Input`/`Textarea`/`Select`, native Editable / Read-only / Disabled states,
+   and bounded low-risk production migrations. Behavior-sensitive date/time,
+   transcript, custom-picker, and broad read-only-workspace migrations remain
+   later scope.
+3. Button and action primitives - implemented and merged in PR #80: canonical
+   `Button`/`IconButton`, independent destructive and recording contracts,
+   controlled accessibility semantics, and the compact equal-width
+   `Link` / `Hub` / `Export` Context row.
+4. Remaining shared primitives - next: Tabs/Segment,
+   StatusBadge/MetadataBadge, Empty/Loading/Error/Saved states,
+   Panel/ModalShell/DetailsSection.
 5. Component and shell migrations onto the new primitives.
 6. Workspace view migrations (Tree, Status, Timeline, Calendar,
    Workstreams, ContextHUB).
@@ -81,12 +81,31 @@ never a direct mutation without explicit user confirmation (see DECISIONS
 
 ## Workspace Evolution
 
-1. Stabilize shell and Details layout.
-2. Adaptive layout/collapsible panels.
-3. Hotkey toggle behavior.
-4. Auto-open Workspace after backup checks.
-5. Keep old Tree Manager fallback until Workspace is stable.
-6. Bridge changes as connected vertical slices only.
+This sequence remains behind the active Design System integration gate. Keep
+each item as a bounded connected PR rather than combining lifecycle, editor,
+Settings, and reminder work.
+
+1. Finish the shared Design System primitives and acceptance gate.
+2. Introduce one shared `TaskEditorContent` implementation with `create` and
+   `edit` modes while preserving the connected React -> WebView2 -> C# ->
+   AppState -> state.json -> fresh snapshot path.
+3. Add a focused Task Details modal inside Workspace while retaining the
+   right-side Details panel as the fast inspector on sufficiently wide layouts.
+4. Add Workspace task creation through the same shared editor; keep the native
+   Quick Add window until create-mode parity and manual artifact QA pass.
+5. Route `Ctrl+Alt+Q` through C# to show/focus the existing Workspace window,
+   open task-create mode, and focus Title.
+6. Move Settings into a Workspace modal only after parity; keep the native
+   Settings window during transition.
+7. Auto-open Workspace once after startup and backup checks; closing Workspace
+   must not exit the app, and reopening must focus the existing instance.
+8. Route Overlay task clicks to show/focus Workspace and open the focused Task
+   Details modal for that task; completion remains an explicit action.
+9. Design and validate reminder delivery separately. Preserve the current native
+   initial alert until a reliable replacement exists; investigate persistent
+   actionable reminder state in Overlay afterward.
+10. Continue adaptive layout/collapsible-panel work and keep old Tree Manager
+    fallback until Workspace is stable.
 
 ## Scheduling / Planning
 
@@ -235,11 +254,12 @@ APIs remain intentionally later work.
    Claude/ChatGPT/Codex, generated from stored TaskOverlay data only
    (`lib/context-pack-builder.ts`, `context-pack-modal.tsx`). Three entry
    points: "Context Pack" in the ContextHUB toolbar (Project pack, requires
-   one project selected), and a "Context Pack" action in the shared Task/
-   MEET Context block (focused Task/MEET pack including linked context and
-   same-project active decisions/blockers/open questions). Export/copy
-   only - no AI, no external API calls, no automatic analysis, no task/MEET
-   creation, no AppState mutation.
+   one project selected), and a Context action in the shared Task/MEET Context
+   block (focused Task/MEET pack including linked context and same-project
+   active decisions/blockers/open questions). PR #80 completed the compact
+   equal-width `Link` / `Hub` / `Export` action row and preserved all handlers.
+   Export/copy only - no AI, no external API calls, no automatic analysis,
+   no task/MEET creation, no AppState mutation.
 5. Manual source import polish.
 6. MEET recording/transcription/analysis foundation is implemented with
    explicit ProposedActions review; transcript promotion into ContextHUB and
