@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Check, Copy, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { IconButton } from "@/components/ui/icon-button"
 import { Textarea } from "@/components/ui/textarea"
 
 /**
@@ -55,14 +57,9 @@ export function ContextPackModal({ subtitle, markdown, onClose }: ContextPackMod
             <span className="text-sm font-semibold text-foreground">Context Pack</span>
             <span className="text-[11px] text-muted-foreground">{subtitle}</span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
+          <IconButton label="Close" onClick={onClose}>
             <X className="size-4" />
-          </button>
+          </IconButton>
         </div>
 
         <div className="flex-1 overflow-hidden px-4 py-3">
@@ -82,21 +79,13 @@ export function ContextPackModal({ subtitle, markdown, onClose }: ContextPackMod
             {copyState === "idle" && "Based on stored TaskOverlay data only."}
           </span>
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[12px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-            >
+            <Button tone="primary" size="sm" onClick={handleCopy}>
               {copyState === "copied" ? <Check className="size-3.5" aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
               Copy markdown
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground transition-colors hover:bg-accent"
-            >
+            </Button>
+            <Button tone="secondary" size="sm" onClick={onClose}>
               Close
-            </button>
+            </Button>
           </div>
         </div>
       </div>

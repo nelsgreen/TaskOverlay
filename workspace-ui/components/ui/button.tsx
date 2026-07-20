@@ -1,58 +1,102 @@
+import * as React from 'react'
 import { Button as ButtonPrimitive } from '@base-ui/react/button'
 import { cva, type VariantProps } from 'class-variance-authority'
+import { LoaderCircle } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { buttonDisabledClasses, buttonToneClasses, type PublicButtonTone } from './button-tone'
 
+/**
+ * Canonical Button primitive, per the design spec §07 Button family
+ * (https://claude.ai/code/artifact/8042b7b0-1759-40a3-afdf-1b12285466e3).
+ * See DECISIONS.md "Design System" for the PR-3 scope this implements.
+ *
+ * `pressed` drives real `aria-pressed` toggle semantics (Toolbar-style
+ * selected/toggle controls) and always swaps in the `selected` tone
+ * together with it, so the state is never color-only and never silently
+ * out of sync with the accessibility attribute.
+ */
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  'group/button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md ' +
+    'border font-medium whitespace-nowrap outline-none select-none transition-colors ' +
+    'active:not-disabled:translate-y-px motion-reduce:active:translate-y-0 ' +
+    'focus-visible:shadow-[var(--focus-ring)] ' +
+    buttonDisabledClasses,
   {
     variants: {
-      variant: {
-        default: 'bg-primary text-primary-foreground [a]:hover:bg-primary/80',
-        outline:
-          'border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
-        secondary:
-          'bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground',
-        ghost:
-          'hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50',
-        destructive:
-          'bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40',
-        link: 'text-primary underline-offset-4 hover:underline',
-      },
+      tone: buttonToneClasses,
       size: {
-        default:
-          'h-8 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
-        xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-7 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: 'h-9 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
-        icon: 'size-8',
-        'icon-xs':
-          "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
-        'icon-sm':
-          'size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg',
-        'icon-lg': 'size-9',
+        default: 'h-8 px-3 text-[13px]',
+        sm: 'h-7 px-2.5 text-[12.5px]',
+        xs: 'h-6 rounded-sm px-2 text-[11.5px]',
       },
     },
     defaultVariants: {
-      variant: 'default',
+      // Deliberately neutral, not primary: a caller must opt into the
+      // primary tone explicitly rather than every unstyled call site
+      // silently reading as the page's main call-to-action.
+      tone: 'secondary',
       size: 'default',
     },
   },
 )
 
+interface ButtonProps
+  extends Omit<ButtonPrimitive.Props, 'className' | 'aria-pressed' | 'aria-busy' | 'disabled'>,
+    Omit<VariantProps<typeof buttonVariants>, 'tone'> {
+  className?: string
+  /**
+   * `selected` is deliberately not part of this public type (see
+   * `PublicButtonTone`) - it only ever applies through `pressed` below.
+   */
+  tone?: PublicButtonTone
+  /**
+   * Toggle/selected state for status-like controls. This is the only source
+   * of `aria-pressed` and of the `selected` tone: setting it also swaps in
+   * the `selected` visual regardless of `tone`, so the state is never
+   * color-only and never silently out of sync with the accessibility
+   * attribute. `aria-pressed` is omitted from the accepted props above so a
+   * caller cannot pass a conflicting value directly.
+   */
+  pressed?: boolean
+  /**
+   * Replaces the leading icon with a spinner and marks the control busy
+   * without changing its label, so width is preserved. Callers must not
+   * also render their own leading icon while `loading` is true. `aria-busy`
+   * is omitted from the accepted props above - this is its only source.
+   */
+  loading?: boolean
+  /** Native disabled state. Combined with `loading` (see below) - this is the only source of the rendered `disabled` attribute. */
+  disabled?: boolean
+}
+
 function Button({
   className,
-  variant = 'default',
-  size = 'default',
+  tone,
+  size,
+  pressed,
+  loading = false,
+  disabled,
+  children,
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+}: ButtonProps) {
+  const resolvedTone = pressed ? 'selected' : tone
   return (
     <ButtonPrimitive
-      data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-    />
+      data-slot="button"
+      aria-pressed={pressed}
+      aria-busy={loading || undefined}
+      disabled={disabled || loading}
+      className={cn(buttonVariants({ tone: resolvedTone, size, className }))}
+    >
+      {loading && (
+        <LoaderCircle className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+      )}
+      {children}
+    </ButtonPrimitive>
   )
 }
 
-export { Button, buttonVariants }
+export { Button }
+export type { ButtonProps }

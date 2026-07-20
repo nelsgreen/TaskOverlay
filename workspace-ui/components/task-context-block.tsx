@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { ChevronRight, ClipboardList, Layers, Link2, Plus, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { IconButton } from "@/components/ui/icon-button"
 import type {
   ContextItemStatus,
   ContextItemType,
@@ -292,32 +294,34 @@ function RecordContextBlock({
               </>
             )}
 
-            <div className="flex items-center gap-2 pt-0.5">
-              <button
-                type="button"
+            {/* Three neutral, equal-hierarchy actions - never status toggles.
+                A CSS grid (not flex) guarantees exactly equal thirds at the
+                narrow inspector width regardless of each label's text
+                width, so none of the three can ever overflow the card. */}
+            <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+              <Button
+                tone="secondary"
+                size="xs"
                 disabled={locked}
                 onClick={() => setModalOpen(true)}
-                className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                title="Link existing context"
               >
-                <Plus className="size-3" aria-hidden />
-                Link existing context
-              </button>
-              <button
-                type="button"
-                onClick={onOpenContextHub}
-                className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <Link2 className="size-3" aria-hidden />
-                Open ContextHUB
-              </button>
-              <button
-                type="button"
+                <Plus className="size-3 shrink-0" aria-hidden />
+                Link
+              </Button>
+              <Button tone="secondary" size="xs" onClick={onOpenContextHub} title="Open ContextHUB">
+                <Link2 className="size-3 shrink-0" aria-hidden />
+                Hub
+              </Button>
+              <Button
+                tone="secondary"
+                size="xs"
                 onClick={() => setPackMarkdown(contextPack.buildMarkdown())}
-                className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Context Pack export"
               >
-                <ClipboardList className="size-3" aria-hidden />
-                Context Pack
-              </button>
+                <ClipboardList className="size-3 shrink-0" aria-hidden />
+                Export
+              </Button>
             </div>
           </div>
         )}
@@ -487,14 +491,9 @@ function LinkExistingModal({
             <span className="text-sm font-semibold text-foreground">Link existing context</span>
             <span className="text-[11px] text-muted-foreground">Same-project sources and context items only</span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
+          <IconButton label="Close" onClick={onClose}>
             <X className="size-4" />
-          </button>
+          </IconButton>
         </div>
         <div className="border-b border-border px-4 py-2.5">
           <input
