@@ -178,8 +178,8 @@ export function MeetingAssistantSection({
       )}
 
       {commandNotice && (
-        <div className="flex items-start gap-2 rounded-md border border-status-meet/30 bg-status-meet/10 p-2 text-[11px] text-foreground" role="status">
-          <Info className="mt-0.5 size-3.5 shrink-0 text-status-meet" aria-hidden="true" />
+        <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/10 p-2 text-[11px] text-foreground" role="status">
+          <Info className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
           <span className="min-w-0 flex-1">{commandNotice}</span>
           {onClearNotice && (
             <button type="button" onClick={onClearNotice} aria-label="Dismiss notice" className="text-muted-foreground hover:text-foreground">
@@ -210,7 +210,7 @@ export function MeetingAssistantSection({
               className={cn(
                 "rounded-md border px-2 py-1 text-[10px] font-medium",
                 (meet.recordingPolicy ?? "Inherit") === option.value
-                  ? "border-status-meet/50 bg-status-meet/10 text-status-meet"
+                  ? "border-primary/50 bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:bg-accent",
               )}
             >
@@ -474,7 +474,7 @@ function RecordingCard({
         <span className={cn(
           "size-2 shrink-0 rounded-full",
           recording.state === "Recording" ? "animate-pulse bg-red-500" :
-            recording.state === "Failed" ? "bg-destructive" : "bg-status-meet",
+            recording.state === "Failed" ? "bg-destructive" : "bg-text-faint",
         )} />
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground">
           {formatRecordingStateLabel(recording)}
@@ -528,7 +528,7 @@ function RecordingCard({
                   untilSeconds: null,
                 })) confirmRangeSaved()
               }}
-              className="text-[10px] font-medium text-status-meet disabled:opacity-40"
+              className="text-[10px] font-medium text-primary disabled:opacity-40"
             >
               Use full recording
             </button>
@@ -637,7 +637,7 @@ function RecordingCard({
               recordingId: recording.id,
               keepLocalOnly: false,
             })}
-            className="font-medium text-status-meet hover:underline disabled:opacity-40"
+            className="font-medium text-primary hover:underline disabled:opacity-40"
           >
             Allow transcription
           </button>
@@ -794,7 +794,7 @@ export function AnalysisReview({
     }))
 
   return (
-    <div className="space-y-2 rounded-md border border-status-meet/30 bg-status-meet/5 p-2.5">
+    <div className="space-y-2 rounded-md border border-border bg-card p-2.5">
       <div className="flex items-center gap-2">
         <Bot className="size-4 text-status-meet" />
         <span className="text-[11px] font-semibold text-foreground">Meeting Assistant</span>
@@ -1012,9 +1012,9 @@ function RecordingOperationStatus({ operation }: { operation: MeetingOperationSn
       role="status"
       aria-live="polite"
       aria-busy="true"
-      className="space-y-1.5 rounded border border-status-meet/30 bg-status-meet/10 p-2 text-[10px]"
+      className="space-y-1.5 rounded border border-primary/30 bg-primary/10 p-2 text-[10px]"
     >
-      <div className="flex items-center gap-2 font-medium text-status-meet">
+      <div className="flex items-center gap-2 font-medium text-primary">
         <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
         <span>{label}</span>
         <span className="ml-auto font-mono" aria-hidden="true">{elapsed}</span>
@@ -1048,7 +1048,7 @@ function ActionButton({
       onClick={onClick}
       className={cn(
         "flex h-7 items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
-        primary && "border-status-meet/50 bg-status-meet/10 text-status-meet",
+        primary && "border-primary/50 bg-primary/10 text-primary",
         danger && "border-destructive/40 text-destructive hover:bg-destructive/10",
         !primary && !danger && "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
       )}

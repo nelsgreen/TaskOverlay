@@ -6,6 +6,7 @@ const modalShellSrc = readFileSync(new URL("../components/ui/modal-shell.tsx", i
 const meetDetailsSrc = readFileSync(new URL("../components/meet-details-panel.tsx", import.meta.url), "utf8")
 const globalsSrc = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8")
 const meetSourcesReviewSrc = readFileSync(new URL("../components/meet-sources-review.tsx", import.meta.url), "utf8")
+const meetingAssistantSrc = readFileSync(new URL("../components/meeting-assistant-section.tsx", import.meta.url), "utf8")
 
 // Same detector used by the other design-system primitive tests (see
 // lib/design-system-primitives.test.mjs / lib/tabs-segmented-control-primitives.test.mjs).
@@ -56,7 +57,8 @@ test("ModalShell has no literal color (hex, rgb/rgba, hsl/hsla, oklch/oklab) - t
 })
 
 // ---------------------------------------------------------------------------
-// No raw exported style/variant helper; className is layout-only
+// No raw exported style/variant helper; no appearance-overriding className
+// or style prop of any kind on any of the four components
 // ---------------------------------------------------------------------------
 
 test("modal-shell.tsx exports only the four components and their prop types - no raw class-string/variant helper a caller could import to restyle semantic appearance", () => {
@@ -65,13 +67,30 @@ test("modal-shell.tsx exports only the four components and their prop types - no
   assert.equal(/export\s+const\s+\w*[Cc]lass/.test(modalShellSrc), false)
 })
 
-test("ModalShell's className is appended after the canonical surface/border/radius/shadow classes (layout-only, matching the Panel convention)", () => {
-  assert.match(modalShellSrc, /cn\(\s*\n?\s*'flex w-full flex-col overflow-hidden rounded-xl border border-border bg-surface-raised text-text shadow-\[var\(--shadow-3\)\]',\s*\n?\s*className,/)
+test("ModalShell/ModalHeader/ModalBody/ModalFooter accept no className or style prop - a caller cannot override surface, border, radius, shadow, or text color from outside", () => {
+  for (const propsBlock of [
+    modalShellSrc.slice(modalShellSrc.indexOf("interface ModalShellProps"), modalShellSrc.indexOf("function ModalShell(")),
+    modalShellSrc.slice(modalShellSrc.indexOf("interface ModalHeaderProps"), modalShellSrc.indexOf("function ModalHeader(")),
+    modalShellSrc.slice(modalShellSrc.indexOf("interface ModalBodyProps"), modalShellSrc.indexOf("function ModalBody(")),
+    modalShellSrc.slice(modalShellSrc.indexOf("interface ModalFooterProps"), modalShellSrc.indexOf("function ModalFooter(")),
+  ]) {
+    assert.doesNotMatch(propsBlock, /className/)
+    assert.doesNotMatch(propsBlock, /\bstyle\??:/)
+  }
+  // The four render functions never destructure or forward a className/style
+  // parameter, and never spread arbitrary rest props onto the DOM.
+  assert.doesNotMatch(modalShellSrc, /\{\s*[\w,\s]*className[\w,\s]*\}/)
+  assert.doesNotMatch(modalShellSrc, /\.\.\.props/)
+  assert.doesNotMatch(modalShellSrc, /import \{ cn \}/)
 })
 
-test("ModalShell has no baked-in max-w-* default - a caller's w-[...] geometry override is never silently capped by a base max-width", () => {
-  const shellFn = modalShellSrc.slice(modalShellSrc.indexOf("function ModalShell("), modalShellSrc.indexOf("interface ModalHeaderProps"))
-  assert.doesNotMatch(shellFn, /\bmax-w-/)
+test("ModalShell's bounded geometry is expressed through typed numeric props (maxWidthPx/maxHeightPx/viewportWidthPercent/viewportHeightPercent), computed into an inline min()/min() style - not a caller-supplied class string", () => {
+  assert.match(modalShellSrc, /maxWidthPx: number/)
+  assert.match(modalShellSrc, /maxHeightPx: number/)
+  assert.match(modalShellSrc, /viewportWidthPercent: number/)
+  assert.match(modalShellSrc, /viewportHeightPercent: number/)
+  assert.match(modalShellSrc, /width: `min\(\$\{maxWidthPx\}px, \$\{viewportWidthPercent\}vw\)`/)
+  assert.match(modalShellSrc, /height: `min\(\$\{maxHeightPx\}px, \$\{viewportHeightPercent\}dvh\)`/)
 })
 
 // ---------------------------------------------------------------------------
@@ -88,9 +107,10 @@ test("ModalBody is overflow-hidden, not overflow-y-auto - the shell region itsel
 // MEET modal composes ModalShell (the required production migration)
 // ---------------------------------------------------------------------------
 
-test("MeetDetailsModal uses the canonical ModalShell/ModalHeader/ModalBody/ModalFooter, not a bespoke shell", () => {
+test("MeetDetailsModal uses the canonical ModalShell/ModalHeader/ModalBody/ModalFooter, not a bespoke shell, and applies the accepted geometry through MEET_SHELL_GEOMETRY spread onto ModalShell's typed props", () => {
   assert.match(meetDetailsSrc, /from ["']@\/components\/ui\/modal-shell["']/)
-  assert.match(meetDetailsSrc, /<ModalShell titleId="meet-details-title" className="h-\[min\(820px,88dvh\)\] w-\[min\(1280px,90vw\)\]">/)
+  assert.match(meetDetailsSrc, /MEET_SHELL_GEOMETRY,?\s*\n?\s*meetTabButtonId,/)
+  assert.match(meetDetailsSrc, /<ModalShell titleId="meet-details-title" \{\.\.\.MEET_SHELL_GEOMETRY\}>/)
   assert.match(meetDetailsSrc, /<ModalHeader>/)
   assert.match(meetDetailsSrc, /<ModalBody>/)
   assert.match(meetDetailsSrc, /<ModalFooter>/)
@@ -154,4 +174,62 @@ test("Details-tab text fields (title, location, link, notes) use the canonical I
   assert.match(meetDetailsSrc, /from ["']@\/components\/ui\/select["']/)
   assert.doesNotMatch(meetDetailsSrc, /focus-visible:border-status-meet/)
   assert.doesNotMatch(meetDetailsSrc, /focus-visible:ring-status-meet/)
+})
+
+// ---------------------------------------------------------------------------
+// Sources/Review: MEET violet removed from generic interaction states,
+// retained only for MEET identity/domain markers
+// ---------------------------------------------------------------------------
+
+test("Sources/Review: no button, field, hover, focus-ring, selected/active-segment, or native accent-color state uses MEET violet as its interactive color", () => {
+  for (const src of [meetSourcesReviewSrc, meetingAssistantSrc]) {
+    // Hover and keyboard-focus states never key off status-meet - these only
+    // ever appeared on interactive controls (buttons/fields), never on the
+    // static badges/icons that legitimately keep status-meet as identity.
+    assert.doesNotMatch(src, /hover:bg-status-meet/)
+    assert.doesNotMatch(src, /hover:text-status-meet/)
+    assert.doesNotMatch(src, /focus-visible:(border|ring)-status-meet/)
+    // Native form-control accent-color (checkbox tick, range thumb) uses the
+    // canonical brand accent, not MEET violet.
+    assert.doesNotMatch(src, /accent-\[var\(--status-meet\)\]/)
+  }
+  // The transcript-playback active-segment highlight (a generic "currently
+  // playing" state, not MEET identity) is accent/selection-driven.
+  assert.doesNotMatch(meetSourcesReviewSrc, /ring-status-meet/)
+  assert.match(meetSourcesReviewSrc, /activeSegmentIndex === row\.segment\.index && "bg-primary\/10 ring-1 ring-inset ring-primary\/35"/)
+  // The "Edit transcript" / "Save revision" / "Analyze transcript" primary
+  // action buttons and the recording-policy toggle no longer soft-fill with
+  // status-meet.
+  assert.doesNotMatch(meetSourcesReviewSrc, /border-status-meet\/40 bg-status-meet\/10/)
+  assert.doesNotMatch(meetingAssistantSrc, /border-status-meet\/50 bg-status-meet\/10/)
+})
+
+test("Sources/Review: replaced generic states now read the canonical --accent alias (text-primary/bg-primary/border-primary) or --accent directly, never a raw literal", () => {
+  for (const src of [meetSourcesReviewSrc, meetingAssistantSrc]) {
+    assert.match(src, /text-primary|bg-primary|border-primary|accent-\[var\(--accent\)\]/)
+    assert.equal(hardcodedColorPattern.test(src), false)
+  }
+})
+
+test("Sources/Review: legitimate MEET identity markers are retained - section icons, the REC/Meet badges' sibling type badges, and restrained secondary cues stay on --sem-meet/--status-meet", () => {
+  // Section-heading icons (non-interactive, purely decorative domain markers).
+  assert.match(meetSourcesReviewSrc, /<FileText className="size-4 text-status-meet" \/>/)
+  assert.match(meetSourcesReviewSrc, /<ImageIcon className="size-4 text-status-meet" \/>/)
+  assert.match(meetSourcesReviewSrc, /<Bot className="size-4 text-status-meet" \/>/)
+  // "Generated" transcript-origin type badge (sibling to the Imported/UserEdited badges).
+  assert.match(meetSourcesReviewSrc, /"bg-status-meet\/15 text-status-meet"/)
+  // The restrained secondary "Active" check - the card's own selected state
+  // (border/surface) already reads canonical tokens; only this small icon
+  // keeps the domain accent.
+  assert.match(meetSourcesReviewSrc, /<Check className="size-3 text-status-meet" \/> Active/)
+  // meeting-assistant-section.tsx keeps its own Bot identity icon and the
+  // decorative source-excerpt blockquote accent.
+  assert.match(meetingAssistantSrc, /<Bot className="size-4 text-status-meet" \/>/)
+  assert.match(meetingAssistantSrc, /border-l-2 border-status-meet\/40/)
+})
+
+test("Recording and destructive actions are unaffected by the violet cleanup - they keep their own dedicated roles, never merged into --accent", () => {
+  assert.match(meetingAssistantSrc, /recording\.state === "Recording" \? "animate-pulse bg-red-500"/)
+  assert.match(meetingAssistantSrc, /recording\.state === "Failed" \? "bg-destructive"/)
+  assert.match(meetSourcesReviewSrc, /border-destructive\/30 bg-destructive\/10/)
 })

@@ -414,7 +414,7 @@ export function MeetingReviewWorkspace({
                   <button
                     type="button"
                     onClick={startEditing}
-                    className="flex h-7 items-center gap-1 rounded border border-status-meet/40 bg-status-meet/10 px-2 text-[10px] font-medium text-status-meet outline-none hover:bg-status-meet/20 focus-visible:ring-2 focus-visible:ring-status-meet/50"
+                    className="flex h-7 items-center gap-1 rounded border border-primary/40 bg-primary/10 px-2 text-[10px] font-medium text-primary outline-none hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <PencilLine className="size-3" /> Edit transcript
                   </button>
@@ -436,7 +436,7 @@ export function MeetingReviewWorkspace({
                   onClick={() => void saveDraft()}
                   disabled={saving}
                   aria-busy={saving}
-                  className="flex h-7 items-center gap-1 rounded border border-status-meet/40 bg-status-meet/10 px-2 text-[10px] font-medium text-status-meet outline-none hover:bg-status-meet/20 focus-visible:ring-2 focus-visible:ring-status-meet/50 disabled:opacity-40"
+                  className="flex h-7 items-center gap-1 rounded border border-primary/40 bg-primary/10 px-2 text-[10px] font-medium text-primary outline-none hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
                 >
                   {saving
                     ? <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
@@ -500,7 +500,7 @@ export function MeetingReviewWorkspace({
                     disabled={readOnly || Boolean(analysisOperation)}
                     aria-busy={Boolean(analysisOperation)}
                     onClick={() => send({ type: "analyzeMeetingTranscript", transcriptId: activeTranscript.id })}
-                    className="flex h-7 items-center gap-1 rounded border border-status-meet/40 bg-status-meet/10 px-2 text-[10px] font-medium text-status-meet disabled:opacity-40"
+                    className="flex h-7 items-center gap-1 rounded border border-primary/40 bg-primary/10 px-2 text-[10px] font-medium text-primary disabled:opacity-40"
                   >
                     {analysisOperation
                       ? <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
@@ -901,7 +901,7 @@ function TranscriptEditor({
               value={speakers.find((speaker) => speaker.isCurrentUser)?.speakerId ?? ""}
               aria-label="Current user speaker"
               onChange={(event) => onChange(setDraftCurrentUser(draft, event.target.value || null))}
-              className="h-7 w-full rounded border border-input bg-background px-2 text-[11px] text-foreground outline-none focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
+              className="h-7 w-full rounded border border-input bg-background px-2 text-[11px] text-foreground outline-none focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring/25"
             >
               <option value="">No speaker selected</option>
               {speakers.map((speaker) => (
@@ -920,7 +920,7 @@ function TranscriptEditor({
                 aria-label={`Display name for speaker ${speaker.originalLabel || speaker.speakerId}`}
                 onChange={(event) =>
                   onChange(renameDraftSpeaker(draft, speaker.speakerId, event.target.value))}
-                className="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-[11px] text-foreground outline-none focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
+                className="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-[11px] text-foreground outline-none focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring/25"
               />
               {speaker.isCurrentUser && (
                 <span className="rounded border border-status-meet/45 bg-status-meet/15 px-2 py-1 text-[10px] font-medium text-status-meet">
@@ -1003,7 +1003,7 @@ function TranscriptEditor({
                   rows={Math.min(6, Math.max(2, Math.ceil(segment.text.length / 90) + 1))}
                   onChange={(event) =>
                     onChange(setDraftSegmentText(draft, segment.index, event.target.value))}
-                  className="w-full resize-y rounded border border-input bg-background px-2 py-1.5 text-[12px] leading-relaxed text-foreground outline-none focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25 disabled:opacity-60"
+                  className="w-full resize-y rounded border border-input bg-background px-2 py-1.5 text-[12px] leading-relaxed text-foreground outline-none focus-visible:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-60"
                 />
               </div>
             </div>
@@ -1016,8 +1016,8 @@ function TranscriptEditor({
 
 function NeutralNotice({ message, onDismiss }: { message: string; onDismiss?: () => void }) {
   return (
-    <div className="flex items-start gap-2 rounded border border-status-meet/30 bg-status-meet/10 p-2 text-[10px] text-foreground" role="status">
-      <Info className="mt-0.5 size-3 shrink-0 text-status-meet" aria-hidden="true" />
+    <div className="flex items-start gap-2 rounded border border-primary/30 bg-primary/10 p-2 text-[10px] text-foreground" role="status">
+      <Info className="mt-0.5 size-3 shrink-0 text-primary" aria-hidden="true" />
       <span className="min-w-0 flex-1">{message}</span>
       {onDismiss && (
         <button type="button" onClick={onDismiss} aria-label="Dismiss notice" className="text-muted-foreground hover:text-foreground">
@@ -1232,7 +1232,7 @@ function TranscriptPlayback({
                 type="checkbox"
                 checked={autoScroll}
                 onChange={(event) => setAutoScroll(event.target.checked)}
-                className="size-3 accent-[var(--status-meet)]"
+                className="size-3 accent-[var(--accent)]"
               />
               Auto-scroll
             </label>
@@ -1271,7 +1271,7 @@ function TranscriptPlayback({
               value={Math.min(nativePosition, Math.max(audioDuration, 0.1))}
               disabled={!nativeSessionReady || nativeCommandPending}
               aria-label="Transcript recording position"
-              className="min-w-0 flex-1 accent-[var(--status-meet)]"
+              className="min-w-0 flex-1 accent-[var(--accent)]"
               onChange={(event) => {
                 const positionSeconds = Number(event.currentTarget.value)
                 setNativePosition(positionSeconds)
@@ -1289,7 +1289,7 @@ function TranscriptPlayback({
                 type="checkbox"
                 checked={autoScroll}
                 onChange={(event) => setAutoScroll(event.target.checked)}
-                className="size-3 accent-[var(--status-meet)]"
+                className="size-3 accent-[var(--accent)]"
               />
               Auto-scroll
             </label>
@@ -1378,14 +1378,14 @@ function TranscriptContent({
           ref={(element) => registerSegment(row.segment.index, element)}
           className={cn(
             "grid grid-cols-[auto_minmax(0,1fr)] gap-2 rounded px-1 py-0.5 text-[12px] leading-relaxed transition-colors",
-            activeSegmentIndex === row.segment.index && "bg-status-meet/10 ring-1 ring-inset ring-status-meet/35",
+            activeSegmentIndex === row.segment.index && "bg-primary/10 ring-1 ring-inset ring-primary/35",
           )}
         >
           <button
             type="button"
             disabled={!audioAvailable || row.segment.startSeconds == null}
             onClick={() => onSeekSegment(row.segment.startSeconds)}
-            className="w-14 self-start pt-0.5 text-left font-mono text-[10px] text-muted-foreground outline-none enabled:hover:text-status-meet enabled:focus-visible:ring-2 enabled:focus-visible:ring-status-meet/50 disabled:cursor-default"
+            className="w-14 self-start pt-0.5 text-left font-mono text-[10px] text-muted-foreground outline-none enabled:hover:text-primary enabled:focus-visible:ring-2 enabled:focus-visible:ring-ring disabled:cursor-default"
             aria-label={row.segment.startSeconds == null
               ? "Untimed transcript segment"
               : `Play transcript from ${formatOffset(row.segment.startSeconds)}`}
@@ -1404,7 +1404,7 @@ function TranscriptContent({
           type="button"
           key={row.key}
           onClick={() => send({ type: "openMeetingScreenshot", screenshotId: row.screenshot.id })}
-          className="flex w-full items-center gap-2 rounded-md border border-status-meet/25 bg-status-meet/5 p-2 text-left"
+          className="flex w-full items-center gap-2 rounded-md border border-border bg-card p-2 text-left hover:bg-accent"
         >
           {row.screenshot.thumbnailDataUrl && (
             // The image is a WPF-provided managed artifact data URL, never a remote source.
@@ -1516,12 +1516,12 @@ function OperationStatus({
     : "Analyzing transcript..."
   return (
     <div
-      className="space-y-1.5 rounded-md border border-status-meet/30 bg-status-meet/10 p-3 text-[11px]"
+      className="space-y-1.5 rounded-md border border-primary/30 bg-primary/10 p-3 text-[11px]"
       role="status"
       aria-live="polite"
       aria-busy="true"
     >
-      <div className="flex items-center gap-2 font-medium text-status-meet">
+      <div className="flex items-center gap-2 font-medium text-primary">
         <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <span>{status}</span>
         <span className="ml-auto font-mono text-[10px]" aria-hidden="true">

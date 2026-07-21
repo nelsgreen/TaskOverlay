@@ -36,6 +36,7 @@ import {
 } from "@/lib/meet-workspace-policy"
 import {
   buildMeetSecondaryLine,
+  MEET_SHELL_GEOMETRY,
   meetTabButtonId,
   meetTabLabel,
   meetTabPanelId,
@@ -365,7 +366,7 @@ export function MeetDetailsModal({
   const isDetails = shouldShowMeetDetailsActions(activeTab)
 
   return (
-    <ModalShell titleId="meet-details-title" className="h-[min(820px,88dvh)] w-[min(1280px,90vw)]">
+    <ModalShell titleId="meet-details-title" {...MEET_SHELL_GEOMETRY}>
       <ModalHeader>
         <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-status-meet/15 text-status-meet">
           <Video className="size-4" />

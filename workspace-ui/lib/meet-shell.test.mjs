@@ -51,12 +51,12 @@ test("geometry constants describe a bounded, clearly intentional shell", () => {
   assert.ok(MEET_SHELL_GEOMETRY.maxHeightPx < 1000)
 })
 
-test("modal geometry is bounded, viewport-clamped, and stable across tabs", () => {
-  // Bounded clamp, applied once on the shell box independent of the tab.
-  assert.match(component, /min\(1280px,90vw\)/)
-  assert.match(component, /min\(820px,88dvh\)/)
-  assert.equal(component.match(/w-\[min\(1280px/g)?.length, 1)
-  assert.equal(component.match(/h-\[min\(820px/g)?.length, 1)
+test("modal geometry is bounded, viewport-clamped, and stable across tabs - applied once through ModalShell's typed geometry props, not a raw className string", () => {
+  assert.match(component, /import \{\s*\n?\s*buildMeetSecondaryLine,\s*\n?\s*MEET_SHELL_GEOMETRY,/)
+  // Bounded clamp, applied once on the shell box independent of the tab,
+  // via the authoritative MEET_SHELL_GEOMETRY constant (see the geometry
+  // constants test above) spread onto ModalShell's typed numeric props.
+  assert.equal(component.match(/<ModalShell titleId="meet-details-title" \{\.\.\.MEET_SHELL_GEOMETRY\}>/g)?.length, 1)
   // The rejected near-fullscreen geometry must be fully gone.
   assert.doesNotMatch(component, /1600px|calc\(100vw-16px\)|calc\(100dvh-16px\)/)
 })

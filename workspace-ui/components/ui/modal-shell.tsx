@@ -1,7 +1,5 @@
 import * as React from 'react'
 
-import { cn } from '@/lib/utils'
-
 /**
  * Canonical modal dialog shell, per the design spec's `.mshell` contract
  * (https://claude.ai/code/artifact/8042b7b0-1759-40a3-afdf-1b12285466e3) and
@@ -13,17 +11,24 @@ import { cn } from '@/lib/utils'
  * own Escape handling where existing modal-specific guards - e.g. a dirty-
  * draft confirmation - need to intercept Escape first).
  *
- * `className` on `ModalShell` is required to set the bounded width/height
- * (e.g. MEET's accepted `h-[min(820px,88dvh)] w-[min(1280px,90vw)]` clamp) -
- * the base has no built-in max-width of its own (deliberately: a baked-in
- * `max-w-*` would cap `max-width` independently of a caller's `w-[...]`
- * override, since Tailwind's width and max-width utilities are different
- * groups that both apply in the cascade rather than one replacing the
- * other). `className` is appended after the canonical surface/border/
- * radius/shadow classes, the same layout-only convention as `Panel`. It
- * cannot express color, border, or elevation: this file exposes no raw
- * class-string/variant helper a caller could import to restyle the
- * semantic appearance directly.
+ * Semantic appearance (scrim, surface, border, radius, shadow, text color) is
+ * fixed and cannot be overridden by a caller: `ModalShell`/`ModalHeader`/
+ * `ModalBody`/`ModalFooter` accept no `className` or `style` prop of any
+ * kind, and this file exports no raw class-string/variant helper a caller
+ * could import to restyle them from outside. A caller that needs its own
+ * internal layout renders its own wrapper element as `children` inside
+ * `ModalHeader`/`ModalBody`/`ModalFooter` instead of restyling the canonical
+ * region itself.
+ *
+ * The only thing a caller controls is bounded geometry, through the typed
+ * numeric `maxWidthPx`/`maxHeightPx`/`viewportWidthPercent`/
+ * `viewportHeightPercent` props below - plain numbers, not a class string or
+ * style object, so there is no way to smuggle a color/border/shadow override
+ * through them. `ModalShell` computes `width: min(${maxWidthPx}px,
+ * ${viewportWidthPercent}vw)` and `height: min(${maxHeightPx}px,
+ * ${viewportHeightPercent}dvh)` itself. The accepted MEET geometry - `min(
+ * 1280px, 90vw)` by `min(820px, 88dvh)` - is expressed as `maxWidthPx={1280}
+ * maxHeightPx={820} viewportWidthPercent={90} viewportHeightPercent={88}`.
  */
 interface ModalShellProps {
   /**
@@ -33,22 +38,36 @@ interface ModalShellProps {
    * dialog or a guessed id.
    */
   titleId: string
+  /** Bounded width cap in pixels, e.g. `1280`. */
+  maxWidthPx: number
+  /** Bounded height cap in pixels, e.g. `820`. */
+  maxHeightPx: number
+  /** Viewport-width fallback percentage, e.g. `90` for `90vw`. */
+  viewportWidthPercent: number
+  /** Viewport-height fallback percentage, e.g. `88` for `88dvh`. */
+  viewportHeightPercent: number
   children: React.ReactNode
-  /** Layout-only: bounded width/height overrides. See file doc comment. */
-  className?: string
 }
 
-function ModalShell({ titleId, children, className }: ModalShellProps) {
+function ModalShell({
+  titleId,
+  maxWidthPx,
+  maxHeightPx,
+  viewportWidthPercent,
+  viewportHeightPercent,
+  children,
+}: ModalShellProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-2 backdrop-blur-sm">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={cn(
-          'flex w-full flex-col overflow-hidden rounded-xl border border-border bg-surface-raised text-text shadow-[var(--shadow-3)]',
-          className,
-        )}
+        className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface-raised text-text shadow-[var(--shadow-3)]"
+        style={{
+          width: `min(${maxWidthPx}px, ${viewportWidthPercent}vw)`,
+          height: `min(${maxHeightPx}px, ${viewportHeightPercent}dvh)`,
+        }}
       >
         {children}
       </div>
@@ -58,21 +77,15 @@ function ModalShell({ titleId, children, className }: ModalShellProps) {
 
 interface ModalHeaderProps {
   children: React.ReactNode
-  className?: string
 }
 
 /** Fixed header region: never scrolls, always reachable. */
-function ModalHeader({ children, className }: ModalHeaderProps) {
-  return (
-    <header className={cn('flex shrink-0 items-center gap-3 border-b border-border px-4 py-3', className)}>
-      {children}
-    </header>
-  )
+function ModalHeader({ children }: ModalHeaderProps) {
+  return <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">{children}</header>
 }
 
 interface ModalBodyProps {
   children: React.ReactNode
-  className?: string
 }
 
 /**
@@ -82,24 +95,18 @@ interface ModalBodyProps {
  * split columns, etc.) own their own scrolling - this region never scrolls
  * as a whole.
  */
-function ModalBody({ children, className }: ModalBodyProps) {
-  return <div className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', className)}>{children}</div>
+function ModalBody({ children }: ModalBodyProps) {
+  return <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
 }
 
 interface ModalFooterProps {
   children: React.ReactNode
-  className?: string
 }
 
 /** Fixed footer region: never scrolls, always reachable. */
-function ModalFooter({ children, className }: ModalFooterProps) {
+function ModalFooter({ children }: ModalFooterProps) {
   return (
-    <footer
-      className={cn(
-        'flex shrink-0 items-center justify-between gap-3 border-t border-border bg-surface-sunken px-4 py-2.5',
-        className,
-      )}
-    >
+    <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-surface-sunken px-4 py-2.5">
       {children}
     </footer>
   )
