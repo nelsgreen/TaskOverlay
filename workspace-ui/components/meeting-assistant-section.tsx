@@ -817,7 +817,10 @@ export function AnalysisReview({
             const edit = overrides[action.id] ?? { actionId: action.id }
             const editable = action.reviewState === "Pending" || action.reviewState === "Failed"
             return (
-              <div key={action.id} className="space-y-2 rounded-md border border-border bg-surface-sunken p-2">
+              <div
+                key={action.id}
+                className="space-y-2 rounded-md border border-border bg-surface-sunken p-2 dark:bg-[color-mix(in_oklch,var(--surface-sunken)_92%,var(--warning)_8%)]"
+              >
                 <div className="flex items-start gap-2">
                   <input
                     type="checkbox"
@@ -835,72 +838,81 @@ export function AnalysisReview({
                     <span className="text-[10px] font-medium text-muted-foreground">
                       {proposedActionLabel(action.type)}
                     </span>
-                    <input
+                    {/* The proposed title is the card's primary read/edit
+                        content - softened from pure --text in Dark so it
+                        doesn't read as a stark-white block on the warm
+                        graphite card. Canonical Input gives it a visibly
+                        distinct field surface/border/focus vs. the card. */}
+                    <Input
                       value={edit.title ?? ""}
                       disabled={!editable || readOnly}
                       onChange={(event) => updateOverride(action.id, { title: event.target.value })}
-                      className="mt-1.5 h-8 w-full rounded border border-input bg-background px-2 text-[11px] text-foreground"
+                      className="mt-1.5 h-8 text-[11px] dark:text-[color-mix(in_oklch,var(--text)_85%,var(--warning)_15%)]"
                     />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <select
+                  <Select
                     value={edit.projectId ?? ""}
                     disabled={!editable || readOnly}
                     onChange={(event) => updateOverride(action.id, { projectId: event.target.value || null })}
-                    className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                    className="h-7 text-[10px]"
                   >
                     <option value="">{meetProjectName}</option>
                     {projects.map((project) => (
                       <option key={project.id} value={project.id}>{project.name}</option>
                     ))}
-                  </select>
-                  <select
+                  </Select>
+                  <Select
                     value={edit.status ?? action.proposedStatus}
                     disabled={!editable || readOnly}
                     onChange={(event) => updateOverride(action.id, { status: event.target.value as Status })}
-                    className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                    className="h-7 text-[10px]"
                   >
                     {statusOptions.map((status) => <option key={status}>{status}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 {(action.type === "CreateWaitingTask" || (edit.status ?? action.proposedStatus) === "WAIT") && (
-                  <input
+                  <Input
                     value={edit.waitingFor ?? ""}
                     disabled={!editable || readOnly}
                     placeholder="Waiting for"
                     onChange={(event) => updateOverride(action.id, { waitingFor: event.target.value })}
-                    className="h-7 w-full rounded border border-input bg-background px-2 text-[10px] text-foreground"
+                    className="h-7 text-[10px]"
                   />
                 )}
                 <div className="grid grid-cols-2 gap-1.5">
                   <label className="text-[9px] uppercase text-muted-foreground">
                     Deadline
-                    <input
+                    <Input
                       type="datetime-local"
                       value={toLocalInput(edit.deadlineAtUtc)}
                       disabled={!editable || readOnly}
                       onChange={(event) => updateOverride(action.id, { deadlineAtUtc: fromLocalInput(event.target.value) })}
-                      className="mt-1 h-7 w-full rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                      className="mt-1 h-7 text-[10px]"
                     />
                   </label>
                   <label className="text-[9px] uppercase text-muted-foreground">
                     Reminder
-                    <input
+                    <Input
                       type="datetime-local"
                       value={toLocalInput(edit.reminderAtUtc)}
                       disabled={!editable || readOnly}
                       onChange={(event) => updateOverride(action.id, { reminderAtUtc: fromLocalInput(event.target.value) })}
-                      className="mt-1 h-7 w-full rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                      className="mt-1 h-7 text-[10px]"
                     />
                   </label>
                 </div>
                 {action.sourceExcerpt && (
-                  <blockquote className="border-l-2 border-status-meet/40 pl-2 text-[10px] italic text-muted-foreground">
+                  <blockquote className="border-l-2 border-status-meet/40 pl-2 text-[11px] italic leading-relaxed text-muted-foreground dark:text-[color-mix(in_oklch,var(--text-muted)_85%,var(--warning)_15%)]">
                     {formatSegment(action)} {action.sourceExcerpt}
                   </blockquote>
                 )}
-                {action.rationale && <p className="text-[10px] text-muted-foreground">{action.rationale}</p>}
+                {action.rationale && (
+                  <p className="text-[11px] leading-relaxed text-muted-foreground dark:text-[color-mix(in_oklch,var(--text-muted)_85%,var(--warning)_15%)]">
+                    {action.rationale}
+                  </p>
+                )}
                 {editable && (
                   <button
                     type="button"
