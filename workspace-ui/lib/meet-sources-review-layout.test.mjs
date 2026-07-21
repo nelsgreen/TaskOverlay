@@ -55,8 +55,9 @@ test("active and inactive transcript cards keep identical geometry", () => {
   assert.match(source, /!transcript\.isActive && "invisible"/)
   assert.doesNotMatch(source, /\{!transcript\.isActive && \(\s*<SourceAction/)
   // Selection is a lighter neutral surface + strong neutral border, with the
-  // violet check only as a secondary cue.
-  assert.match(source, /border-\[var\(--meet-border-strong\)\] bg-\[var\(--meet-selected-surface\)\]/)
+  // violet check only as a secondary cue. Canonical tokens (not a
+  // .meet-shell-only override) so the same treatment follows Light/Dark.
+  assert.match(source, /border-border-strong bg-surface-sunken/)
 })
 
 test("Sources and Review no longer rely on a page-level scroll wrapper", () => {
@@ -96,12 +97,18 @@ test("Sources groups immutable transcript revisions and removes duplicate metada
   assert.match(source, /parts\.join\(" · "\)/)
 })
 
-test("MEET surfaces use a layered charcoal hierarchy instead of black-on-black alphas", () => {
-  // Scoped tokens define shell, content-column, card, and selected levels.
-  assert.match(globals, /--meet-content:/)
-  assert.match(globals, /--meet-selected-surface:/)
-  // The shared content region sits on the lighter column surface for all tabs.
-  assert.match(details, /bg-\[var\(--meet-content\)\]/)
+test("MEET no longer scopes a dark-only .meet-shell token override - it follows the canonical Light/Dark surface tokens like every other Workspace modal", () => {
+  assert.doesNotMatch(globals, /\.meet-shell\b/)
+  assert.doesNotMatch(globals, /--meet-content:/)
+  assert.doesNotMatch(globals, /--meet-border-strong:/)
+  assert.doesNotMatch(globals, /--meet-active:/)
+  assert.doesNotMatch(globals, /--meet-selected:/)
+  assert.doesNotMatch(globals, /--meet-selected-surface:/)
+  // Note: `from "@/lib/meet-shell"` (the unrelated tab-id/geometry helper
+  // module) legitimately still contains the substring "meet-shell".
+  assert.doesNotMatch(details, /className="meet-shell\b/)
+  assert.doesNotMatch(details, /var\(--meet-/)
+  assert.doesNotMatch(source, /var\(--meet-/)
   // Cards are solid surfaces, not near-invisible alpha tints of the background.
   assert.doesNotMatch(source, /bg-card\/40|bg-card\/30/)
 })

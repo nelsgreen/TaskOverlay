@@ -733,11 +733,11 @@ function TranscriptSourceCard({
         activate()
       }}
       className={cn(
-      "space-y-2 rounded-md border p-2.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-status-meet/50",
+      "space-y-2 rounded-md border p-2.5 outline-none transition-colors focus-visible:shadow-[var(--focus-ring)]",
       transcript.isActive
-        ? "border-[var(--meet-border-strong)] bg-[var(--meet-selected-surface)]"
+        ? "border-border-strong bg-surface-sunken"
         : "border-border bg-card",
-      !readOnly && !transcript.isActive && "cursor-pointer hover:border-[var(--meet-border-strong)] hover:bg-secondary",
+      !readOnly && !transcript.isActive && "cursor-pointer hover:border-border-strong hover:bg-secondary",
     )}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className={cn(

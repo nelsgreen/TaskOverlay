@@ -67,7 +67,7 @@ test("Details uses a wider editable column than Context (not 50/50)", () => {
 })
 
 test("compact linked task exposes an inline Open action, not a duplicated card", () => {
-  assert.match(component, /aria-label="Open linked task"/)
+  assert.match(component, /label="Open linked task"/)
   // Open-task navigation still flushes autosave first via requestClose.
   assert.match(component, /if \(await requestClose\("navigate"\)\) onOpenLinkedTask/)
   // The missing-linked-task warning is preserved.
@@ -144,9 +144,9 @@ test("no Save or Revert controls, and no legacy onApply path", () => {
 })
 
 test("one stable footer renders across every tab", () => {
-  assert.equal(component.match(/<footer/g)?.length, 1)
+  assert.equal(component.match(/<ModalFooter/g)?.length, 1)
   // Delete meeting is footer-scoped to Details only.
-  assert.match(component, /isDetails && \(\s*\n\s*<button/)
+  assert.match(component, /isDetails && \(\s*\n\s*<Button/)
 })
 
 test("migrated MEET surface avoids unreadable 8-9px metadata", () => {
@@ -154,12 +154,14 @@ test("migrated MEET surface avoids unreadable 8-9px metadata", () => {
   assert.doesNotMatch(component, /text-\[9px\]/)
 })
 
-test("visual foundation is MEET-scoped, not global", () => {
-  assert.match(component, /className="meet-shell /)
-  assert.match(globals, /\.meet-shell\s*\{/)
-  // The scope raises border + metadata contrast without touching :root/.dark.
-  assert.match(globals, /\.meet-shell[\s\S]*--border:\s*oklch\(1 0 0 \/ 16%\)/)
-  assert.match(globals, /\.meet-shell[\s\S]*--muted-foreground:/)
+test("MEET modal composes the canonical ModalShell - no dark-only .meet-shell override remains", () => {
+  assert.match(component, /import \{ ModalShell, ModalHeader, ModalBody, ModalFooter \} from ["']@\/components\/ui\/modal-shell["']/)
+  assert.match(component, /<ModalShell titleId="meet-details-title"/)
+  // Note: `from "@/lib/meet-shell"` (the unrelated tab-id/geometry helper
+  // module) legitimately still contains the substring "meet-shell" - only
+  // the CSS class usage/definition is checked here.
+  assert.doesNotMatch(component, /className="meet-shell\b/)
+  assert.doesNotMatch(globals, /\.meet-shell\b/)
 })
 
 test("recording start still flushes autosave before recording", () => {

@@ -43,6 +43,12 @@ import {
 import { isValidMeetingLinkUrl } from "@/lib/meeting-link"
 import { Tabs, TabList, Tab, TabPanel } from "@/components/ui/tabs"
 import { SavedState } from "@/components/ui/saved-state"
+import { ModalShell, ModalHeader, ModalBody, ModalFooter } from "@/components/ui/modal-shell"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Select } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
+import { IconButton } from "@/components/ui/icon-button"
 import { MeetContextBlock } from "./task-context-block"
 import {
   MeetingReviewWorkspace,
@@ -104,13 +110,18 @@ const durationOptions: { value: MeetDuration; label: string; short: string }[] =
   { value: "2h", label: "2 hours", short: "2h" },
 ]
 
-// Shared field styling — kept legible on the user's low-contrast work monitor:
-// visible input borders (via the .meet-shell token scope), 13px body text, and
-// a restrained violet focus ring.
+// Shared field label styling. Field surfaces/borders/focus rings come from
+// the canonical Input/Select/Textarea primitives (components/ui) - no local
+// MEET-only field styling remains.
 const labelClass =
   "mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-const inputClass =
-  "w-full rounded-md border border-input bg-background px-3 py-2 text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
+// Selected-state classes for the small date-preset/duration-chip toggle
+// buttons, driven by the canonical accent/selection tokens (Neutral/Warm)
+// instead of MEET violet - MEET identity stays on the badge/icon only, never
+// on general interaction/selection chrome.
+const chipSelectedClass =
+  "border-[color-mix(in_oklch,var(--selection)_45%,transparent)] bg-[color-mix(in_oklch,var(--selection)_10%,transparent)] text-text"
+const chipUnselectedClass = "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
 
 function getDatePresets(): { label: string; value: string }[] {
   const pad = (n: number) => String(n).padStart(2, "0")
@@ -354,52 +365,36 @@ export function MeetDetailsModal({
   const isDetails = shouldShowMeetDetailsActions(activeTab)
 
   return (
-    // Scrim never closes the modal (backdrop click is a no-op by product decision).
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-2 backdrop-blur-sm">
-      {/*
-        Bounded, clearly intentional modal — capped well below the viewport so a
-        normal desktop keeps visible Workspace margins on every side, and scaled
-        down on smaller Workspace sizes. Height stays viewport-derived (not
-        content-derived) so geometry is constant across Details / Sources /
-        Review. `.meet-shell` scopes the improved MEET-only palette.
-      */}
-      <div
-        className="meet-shell flex h-[min(820px,88dvh)] w-[min(1280px,90vw)] flex-col overflow-hidden rounded-xl border border-border bg-sidebar text-foreground shadow-2xl shadow-black/60"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="meet-details-title"
-      >
-        {/* ── Header ── */}
-        <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-status-meet/15 text-status-meet">
-            <Video className="size-4" />
+    <ModalShell titleId="meet-details-title" className="h-[min(820px,88dvh)] w-[min(1280px,90vw)]">
+      <ModalHeader>
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-status-meet/15 text-status-meet">
+          <Video className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 id="meet-details-title" className="truncate text-sm font-semibold text-foreground">
+            {headerTitle}
+          </h2>
+          <p className="truncate text-[11px] text-muted-foreground">{secondaryLine}</p>
+        </div>
+        {recordingActive && (
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-recording-line bg-recording-soft px-2 py-0.5 text-[11px] font-semibold text-recording">
+            <span className="size-1.5 animate-pulse rounded-full bg-recording motion-reduce:animate-none" />
+            REC
           </span>
-          <div className="min-w-0 flex-1">
-            <h2 id="meet-details-title" className="truncate text-sm font-semibold text-foreground">
-              {headerTitle}
-            </h2>
-            <p className="truncate text-[11px] text-muted-foreground">{secondaryLine}</p>
-          </div>
-          {recordingActive && (
-            <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-destructive/40 bg-destructive/12 px-2 py-0.5 text-[11px] font-semibold text-destructive">
-              <span className="size-1.5 animate-pulse rounded-full bg-destructive motion-reduce:animate-none" />
-              REC
-            </span>
-          )}
-          <span className="flex shrink-0 items-center gap-1.5 rounded-md bg-status-meet/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-status-meet">
-            <Video className="size-3" />
-            Meet
-          </span>
-          <button
-            type="button"
-            onClick={() => void requestClose("explicit")}
-            aria-label="Close MEET details"
-            className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <X className="size-4" />
-          </button>
-        </header>
+        )}
+        <span className="flex shrink-0 items-center gap-1.5 rounded-md bg-status-meet/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-status-meet">
+          <Video className="size-3" />
+          Meet
+        </span>
+        <IconButton
+          label="Close MEET details"
+          onClick={() => void requestClose("explicit")}
+        >
+          <X className="size-4" />
+        </IconButton>
+      </ModalHeader>
 
+      <ModalBody>
         {/* ── Tabs — keyboard-navigable via the canonical Tabs primitive ── */}
         <Tabs
           value={activeTab}
@@ -420,7 +415,7 @@ export function MeetDetailsModal({
           <TabPanel
             value="details"
             id={meetTabPanelId("details")}
-            className="flex min-h-0 flex-1 flex-col bg-[var(--meet-content)]"
+            className="flex min-h-0 flex-1 flex-col"
           >
             <fieldset
               disabled={readOnly}
@@ -432,28 +427,26 @@ export function MeetDetailsModal({
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_minmax(150px,220px)]">
                   <div>
                     <label htmlFor="meet-title-input" className={labelClass}>Meeting title</label>
-                    <input
+                    <Input
                       id="meet-title-input"
                       ref={titleInputRef}
                       tabIndex={1}
                       value={draft.titleIsGenerated ? "" : draft.title}
                       onChange={(e) => updateTitle(e.target.value)}
                       placeholder={generatedTitle}
-                      className={inputClass}
                     />
                   </div>
                   <div>
                     <label htmlFor="meet-project-select" className={labelClass}>Project</label>
-                    <select
+                    <Select
                       id="meet-project-select"
                       value={draft.projectId}
                       onChange={(e) => updateDraft({ projectId: e.target.value }, ["projectId"], "immediate")}
-                      className={cn(inputClass, "appearance-none pr-8")}
                     >
                       {projects.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -477,10 +470,8 @@ export function MeetDetailsModal({
                           type="button"
                           onClick={() => updateDraft({ date: p.value }, ["date"], "immediate")}
                           className={cn(
-                            "rounded border px-1 py-1.5 text-center text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                            draft.date === p.value
-                              ? "border-status-meet/45 bg-status-meet/10 text-status-meet"
-                              : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                            "rounded border px-1 py-1.5 text-center text-[11px] font-medium outline-none transition-colors focus-visible:shadow-[var(--focus-ring)]",
+                            draft.date === p.value ? chipSelectedClass : chipUnselectedClass,
                           )}
                         >
                           {p.label}
@@ -491,25 +482,25 @@ export function MeetDetailsModal({
                     <div className="grid grid-cols-[1.5fr_1fr_1fr] gap-1.5">
                       <label className="flex flex-col gap-1">
                         <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Date</span>
-                        <input
+                        <Input
                           type="date"
                           value={draft.date}
                           onChange={(e) => updateDraft({ date: e.target.value }, ["date"], "immediate")}
-                          className="w-full rounded border border-input bg-background px-2 py-1.5 text-[12px] text-foreground outline-none focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
+                          className="h-auto py-1.5 text-[12px]"
                         />
                       </label>
                       <label className="flex flex-col gap-1">
                         <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Start</span>
-                        <input
+                        <Input
                           type="time"
                           value={draft.startTime}
                           onChange={(e) => updateDraft({ startTime: e.target.value }, ["startTime"], "immediate")}
-                          className="w-full rounded border border-input bg-background px-2 py-1.5 text-[12px] text-foreground outline-none focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
+                          className="h-auto py-1.5 text-[12px]"
                         />
                       </label>
                       <label className="flex flex-col gap-1">
                         <span className="text-[11px] uppercase tracking-wide text-muted-foreground">End</span>
-                        <input
+                        <Input
                           type="time"
                           value={draft.endTime ?? ""}
                           onChange={(e) => updateDraft(
@@ -518,7 +509,7 @@ export function MeetDetailsModal({
                             "immediate",
                           )}
                           placeholder={endTime}
-                          className="w-full rounded border border-input bg-background px-2 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/50 focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
+                          className="h-auto py-1.5 text-[12px]"
                         />
                       </label>
                     </div>
@@ -538,10 +529,8 @@ export function MeetDetailsModal({
                               "immediate",
                             )}
                             className={cn(
-                              "rounded border px-1 py-1.5 text-center text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                              draft.duration === d.value && !draft.endTime
-                                ? "border-status-meet/45 bg-status-meet/10 text-status-meet"
-                                : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                              "rounded border px-1 py-1.5 text-center text-[11px] font-medium outline-none transition-colors focus-visible:shadow-[var(--focus-ring)]",
+                              draft.duration === d.value && !draft.endTime ? chipSelectedClass : chipUnselectedClass,
                             )}
                           >
                             {d.short}
@@ -559,7 +548,7 @@ export function MeetDetailsModal({
                       <MapPin className="size-3" />
                       Location
                     </label>
-                    <input
+                    <Input
                       id="meet-location-input"
                       tabIndex={2}
                       value={draft.location ?? ""}
@@ -569,7 +558,6 @@ export function MeetDetailsModal({
                         ["location"],
                         "debounced",
                       )}
-                      className={inputClass}
                     />
                   </div>
                   <div>
@@ -578,7 +566,7 @@ export function MeetDetailsModal({
                       Link
                     </label>
                     <div className="flex items-stretch gap-1.5">
-                      <input
+                      <Input
                         id="meet-link-input"
                         tabIndex={3}
                         value={draft.link ?? ""}
@@ -588,18 +576,18 @@ export function MeetDetailsModal({
                           ["link"],
                           "debounced",
                         )}
-                        className={cn(inputClass, "min-w-0 flex-1")}
+                        className="min-w-0 flex-1"
                       />
                       {isValidMeetingLinkUrl(draft.link) && onMeetingAssistantCommand && (
-                        <button
-                          type="button"
-                          aria-label="Open call link"
+                        <IconButton
+                          label="Open call link"
                           title="Open call link"
+                          tone="secondary"
                           onClick={() => sendMeetingAssistantCommand({ type: "openMeetingLink", meetingId: draft.id })}
-                          className="flex shrink-0 items-center justify-center rounded-md border border-border px-2.5 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="w-auto shrink-0 px-2.5"
                         >
                           <ExternalLink className="size-4" />
-                        </button>
+                        </IconButton>
                       )}
                     </div>
                     {draft.link?.trim() && !isValidMeetingLinkUrl(draft.link) && (
@@ -612,7 +600,7 @@ export function MeetDetailsModal({
                   <div>
                     <label htmlFor="meet-linked-task-select" className={labelClass}>Linked task</label>
                     <div className="flex items-stretch gap-1.5">
-                      <select
+                      <Select
                         id="meet-linked-task-select"
                         value={draft.linkedTaskId ?? ""}
                         onChange={(e) => updateDraft(
@@ -620,25 +608,25 @@ export function MeetDetailsModal({
                           ["linkedTaskId"],
                           "immediate",
                         )}
-                        className={cn(inputClass, "min-w-0 flex-1 appearance-none pr-8")}
+                        className="min-w-0 flex-1"
                       >
                         <option value="">None</option>
                         {tasks.map((t) => (
                           <option key={t.id} value={t.id}>{t.title}</option>
                         ))}
-                      </select>
+                      </Select>
                       {linkedTask && onOpenLinkedTask && (
-                        <button
-                          type="button"
-                          aria-label="Open linked task"
+                        <IconButton
+                          label="Open linked task"
                           title="Open task"
+                          tone="secondary"
                           onClick={async () => {
                             if (await requestClose("navigate")) onOpenLinkedTask(linkedTask.id)
                           }}
-                          className="flex shrink-0 items-center justify-center rounded-md border border-border px-2.5 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="w-auto shrink-0 px-2.5"
                         >
                           <ExternalLink className="size-4" />
-                        </button>
+                        </IconButton>
                       )}
                     </div>
                     {linkedTask ? (
@@ -656,7 +644,7 @@ export function MeetDetailsModal({
                 {/* Notes / Agenda — fills remaining height */}
                 <div className="flex min-h-0 flex-1 flex-col">
                   <label htmlFor="meet-notes-input" className={labelClass}>Notes / Agenda</label>
-                  <textarea
+                  <Textarea
                     id="meet-notes-input"
                     tabIndex={4}
                     value={draft.notes ?? ""}
@@ -666,7 +654,7 @@ export function MeetDetailsModal({
                       ["notes"],
                       "debounced",
                     )}
-                    className="min-h-[120px] w-full flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-[13px] leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-status-meet/60 focus-visible:ring-2 focus-visible:ring-status-meet/25"
+                    className="min-h-[120px] flex-1 resize-none"
                   />
                 </div>
               </div>
@@ -697,7 +685,7 @@ export function MeetDetailsModal({
           <TabPanel
             value="sources"
             id={meetTabPanelId("sources")}
-            className="flex min-h-0 flex-1 flex-col bg-[var(--meet-content)]"
+            className="flex min-h-0 flex-1 flex-col"
           >
             <MeetingSourcesWorkspace
               meet={draft}
@@ -728,7 +716,7 @@ export function MeetDetailsModal({
           <TabPanel
             value="review"
             id={meetTabPanelId("review")}
-            className="flex min-h-0 flex-1 flex-col bg-[var(--meet-content)]"
+            className="flex min-h-0 flex-1 flex-col"
           >
             <MeetingReviewWorkspace
               meet={draft}
@@ -751,44 +739,40 @@ export function MeetDetailsModal({
             />
           </TabPanel>
         </Tabs>
+      </ModalBody>
 
-        {/* ── Footer — one stable bar across every tab (autosave, no Save/Revert) ── */}
-        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            {isDetails && (
-              <button
-                type="button"
-                disabled={readOnly}
-                onClick={async () => {
-                  if (!window.confirm(`Delete meeting "${draft.title || "Untitled"}"?`)) return
-                  if (!await flushAutosave()) return
-                  if (await onDelete(draft.id)) onClose()
-                }}
-                className="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-3 py-1.5 text-[13px] font-medium text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                <Trash2 className="size-4" />
-                Delete meeting
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            {!readOnly && (
-              <SavedState
-                status={saveStatus}
-                failedLabel="Save failed"
-                onRetry={() => void autosaveRef.current?.retry()}
-              />
-            )}
-            <button
+      <ModalFooter>
+        <div className="flex items-center gap-2">
+          {isDetails && (
+            <Button
               type="button"
-              onClick={() => void requestClose("explicit")}
-              className="rounded-lg border border-border px-3 py-1.5 text-[13px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              tone="destructive"
+              size="sm"
+              disabled={readOnly}
+              onClick={async () => {
+                if (!window.confirm(`Delete meeting "${draft.title || "Untitled"}"?`)) return
+                if (!await flushAutosave()) return
+                if (await onDelete(draft.id)) onClose()
+              }}
             >
-              Close
-            </button>
-          </div>
-        </footer>
-      </div>
-    </div>
+              <Trash2 className="size-4" />
+              Delete meeting
+            </Button>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {!readOnly && (
+            <SavedState
+              status={saveStatus}
+              failedLabel="Save failed"
+              onRetry={() => void autosaveRef.current?.retry()}
+            />
+          )}
+          <Button type="button" tone="secondary" size="sm" onClick={() => void requestClose("explicit")}>
+            Close
+          </Button>
+        </div>
+      </ModalFooter>
+    </ModalShell>
   )
 }

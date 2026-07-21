@@ -255,7 +255,6 @@
   --muted-foreground: var(--text-muted);
   /* legacy shadcn "accent" = neutral hover-surface tint, renamed to avoid
      colliding with the canonical brand --accent (see @theme inline note above).
-     .meet-shell overrides this instead of --accent to keep its violet hover tint.
      Uses --surface-raised (not --surface-sunken): a hover cue must read as
      slightly LIFTED/lighter than the resting surface in both themes, never as
      a darker/sunken/pressed state (QA: Tree row hover was darkening, reading
@@ -293,45 +292,6 @@
   --chart-5: oklch(0.269 0 0);
 
   --radius: 0.625rem;
-}
-
-/*
- * MEET visual foundation (phase 1 — shell + Details).
- * Scoped to `.meet-shell` (the MEET modal only); never touches Task, Calendar,
- * ContextHUB, Settings, or Overlay screens. Retained as-is for PR-1 (slated for
- * removal in PR-8 per DECISIONS.md/NOTES.md); the only change is retargeting
- * the hover-tint override from the old `--accent` name to its renamed
- * `--surface-hover` alias so it keeps producing the same violet hover tint now
- * that `--accent` means the canonical brand/interaction color.
- */
-.meet-shell {
-  --background: oklch(0.16 0.004 260);
-  --sidebar: oklch(0.19 0.004 260);
-  --meet-content: oklch(0.215 0.004 260);
-  --card: oklch(0.245 0.005 260);
-  --popover: oklch(0.245 0.005 260);
-  --muted: oklch(0.25 0.004 260);
-  --secondary: oklch(0.28 0.004 260);
-  --secondary-foreground: oklch(0.965 0.004 260);
-  --surface-hover: oklch(0.30 0.015 296); /* was --accent — see header note */
-  --accent-foreground: oklch(0.965 0.004 260);
-
-  --foreground: oklch(0.965 0.004 260);
-  --card-foreground: oklch(0.965 0.004 260);
-  --popover-foreground: oklch(0.965 0.004 260);
-  --sidebar-foreground: oklch(0.965 0.004 260);
-  --muted-foreground: oklch(0.75 0.006 260);
-
-  --border: oklch(1 0 0 / 16%);
-  --sidebar-border: oklch(1 0 0 / 16%);
-  --input: oklch(1 0 0 / 20%);
-
-  --ring: oklch(0.82 0.06 296);
-  --sidebar-ring: oklch(0.82 0.06 296);
-  --meet-border-strong: oklch(1 0 0 / 32%);
-  --meet-active: oklch(0.95 0.004 260);
-  --meet-selected: oklch(0.65 0.16 296 / 16%);
-  --meet-selected-surface: oklch(0.30 0.005 260);
 }
 
 @layer base {
