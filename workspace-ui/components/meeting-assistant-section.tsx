@@ -34,6 +34,10 @@ import { cn } from "@/lib/utils"
 import { deriveMeetingRecordingControlState } from "@/lib/meeting-recording-controls"
 import { resolveMeetingRecordingSelection } from "@/lib/meeting-recording-selection"
 import { proposedActionLabel } from "@/lib/meeting-proposed-action"
+import { Button } from "@/components/ui/button"
+import { Select } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control"
 
 interface Props {
   meet: MeetItem
@@ -178,8 +182,8 @@ export function MeetingAssistantSection({
       )}
 
       {commandNotice && (
-        <div className="flex items-start gap-2 rounded-md border border-status-meet/30 bg-status-meet/10 p-2 text-[11px] text-foreground" role="status">
-          <Info className="mt-0.5 size-3.5 shrink-0 text-status-meet" aria-hidden="true" />
+        <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/10 p-2 text-[11px] text-foreground" role="status">
+          <Info className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
           <span className="min-w-0 flex-1">{commandNotice}</span>
           {onClearNotice && (
             <button type="button" onClick={onClearNotice} aria-label="Dismiss notice" className="text-muted-foreground hover:text-foreground">
@@ -200,24 +204,18 @@ export function MeetingAssistantSection({
             </span>
           )}
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <SegmentedControl
+          value={meet.recordingPolicy ?? "Inherit"}
+          onValueChange={(value) => onRecordingPolicyChange?.(value)}
+          aria-label="Recording policy"
+          disabled={readOnly || !onRecordingPolicyChange}
+        >
           {policyOptions.map((option) => (
-            <button
-              type="button"
-              key={option.value}
-              disabled={readOnly || !onRecordingPolicyChange}
-              onClick={() => onRecordingPolicyChange?.(option.value)}
-              className={cn(
-                "rounded-md border px-2 py-1 text-[10px] font-medium",
-                (meet.recordingPolicy ?? "Inherit") === option.value
-                  ? "border-status-meet/50 bg-status-meet/10 text-status-meet"
-                  : "border-border text-muted-foreground hover:bg-accent",
-              )}
-            >
+            <SegmentedControlItem key={option.value} value={option.value}>
               {option.label}
-            </button>
+            </SegmentedControlItem>
           ))}
-        </div>
+        </SegmentedControl>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -304,17 +302,16 @@ export function MeetingAssistantSection({
       ) : (
         <>
           {meetingRecordings.length > 1 && (
-            <select
+            <Select
               value={selectedRecording?.id ?? ""}
               onChange={(event) => setSelectedRecordingId(event.target.value)}
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-[11px] text-foreground"
             >
               {meetingRecordings.map((recording, index) => (
                 <option key={recording.id} value={recording.id}>
                   {index === 0 ? "Latest" : `Recording ${meetingRecordings.length - index}`} - {formatRecordingTimestamp(recording)}
                 </option>
               ))}
-            </select>
+            </Select>
           )}
 
           {selectedRecording && (
@@ -355,7 +352,7 @@ export function MeetingAssistantSection({
             </p>
           </div>
           {unclassifiedRecordings.slice(0, 5).map((recording) => (
-            <div key={recording.id} className="rounded-md border border-border bg-background/50 p-2">
+            <div key={recording.id} className="rounded-md border border-border bg-card p-2">
               <div className="flex items-center justify-between gap-2 text-[10px]">
                 <span className="font-medium text-foreground">{formatRecordingTimestamp(recording)}</span>
                 <span className="text-muted-foreground">{recording.state}</span>
@@ -474,7 +471,7 @@ function RecordingCard({
         <span className={cn(
           "size-2 shrink-0 rounded-full",
           recording.state === "Recording" ? "animate-pulse bg-red-500" :
-            recording.state === "Failed" ? "bg-destructive" : "bg-status-meet",
+            recording.state === "Failed" ? "bg-destructive" : "bg-text-faint",
         )} />
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground">
           {formatRecordingStateLabel(recording)}
@@ -488,7 +485,7 @@ function RecordingCard({
         <TrackHealth icon={Mic} label="Microphone" value={recording.microphoneHealth} />
       </div>
 
-      <div className="space-y-1 rounded bg-background/40 p-2 text-[10px] text-muted-foreground">
+      <div className="space-y-1 rounded bg-surface-sunken p-2 text-[10px] text-muted-foreground">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span>Format: <strong className="text-foreground">{formatRecordingFormat(recording.recordingFormat)}</strong></span>
           <span>{formatDuration(recording.durationSeconds)} - {formatBytes(recording.totalBytes)}</span>
@@ -528,22 +525,22 @@ function RecordingCard({
                   untilSeconds: null,
                 })) confirmRangeSaved()
               }}
-              className="text-[10px] font-medium text-status-meet disabled:opacity-40"
+              className="text-[10px] font-medium text-primary disabled:opacity-40"
             >
               Use full recording
             </button>
           </div>
           <div className="grid grid-cols-[1fr_1fr_auto_auto] items-center gap-1.5">
-            <input
+            <Input
               type="number"
               min={0}
               step="0.1"
               value={rangeFrom}
               onChange={(event) => setRangeFrom(event.target.value)}
               placeholder="From"
-              className="h-7 min-w-0 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+              className="h-7 min-w-0 text-[10px]"
             />
-            <input
+            <Input
               type="number"
               min={0}
               max={recording.durationSeconds || undefined}
@@ -551,10 +548,12 @@ function RecordingCard({
               value={rangeUntil}
               onChange={(event) => setRangeUntil(event.target.value)}
               placeholder="Until"
-              className="h-7 min-w-0 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+              className="h-7 min-w-0 text-[10px]"
             />
-            <button
+            <Button
               type="button"
+              tone="secondary"
+              size="sm"
               disabled={readOnly || isProcessing}
               onClick={() => {
                 const from = rangeFrom.trim() ? Number(rangeFrom) : null
@@ -568,10 +567,9 @@ function RecordingCard({
                   untilSeconds: until,
                 })) confirmRangeSaved()
               }}
-              className="h-7 rounded border border-border px-2 text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
             >
               Save range
-            </button>
+            </Button>
             {/* Fixed-size confirmation slot — feedback appears here without
                 moving the recording selector, cards, or columns. */}
             <span className="flex w-12 shrink-0 items-center gap-1 text-[10px] text-status-focus" aria-live="polite">
@@ -590,7 +588,7 @@ function RecordingCard({
       )}
 
       {transcriptionSource && (
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded bg-background/40 px-2 py-1.5 text-[10px] text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded bg-surface-sunken px-2 py-1.5 text-[10px] text-muted-foreground">
           <span>
             Transcription source:{" "}
             <strong className="text-foreground">{transcriptionSource.fileName}</strong>
@@ -611,7 +609,7 @@ function RecordingCard({
       {operation && <RecordingOperationStatus operation={operation} />}
 
       {technicalErrors.length > 0 && (
-        <details className="min-w-0 rounded border border-border/70 bg-card/30 p-2">
+        <details className="min-w-0 rounded border border-border bg-surface-sunken p-2">
           <summary className="cursor-pointer text-[10px] font-semibold text-muted-foreground">
             Show technical details
           </summary>
@@ -637,7 +635,7 @@ function RecordingCard({
               recordingId: recording.id,
               keepLocalOnly: false,
             })}
-            className="font-medium text-status-meet hover:underline disabled:opacity-40"
+            className="font-medium text-primary hover:underline disabled:opacity-40"
           >
             Allow transcription
           </button>
@@ -793,8 +791,16 @@ export function AnalysisReview({
       [id]: { ...(current[id] ?? { actionId: id }), ...patch },
     }))
 
+  // Dark-only, neutral (no hue) field treatment for the Proposed Actions
+  // card below: mixing toward --text/--text-muted (both near-zero-chroma
+  // tokens) only changes lightness, never introduces a color - so fields
+  // read clearly lighter than the (also lightened) card without any tint.
+  const darkFieldClass =
+    "dark:bg-[color-mix(in_oklch,var(--surface-raised)_85%,var(--text)_15%)] " +
+    "dark:text-[color-mix(in_oklch,var(--text)_80%,var(--text-muted)_20%)]"
+
   return (
-    <div className="space-y-2 rounded-md border border-status-meet/30 bg-status-meet/5 p-2.5">
+    <div className="space-y-2 rounded-md border border-border bg-card p-2.5">
       <div className="flex items-center gap-2">
         <Bot className="size-4 text-status-meet" />
         <span className="text-[11px] font-semibold text-foreground">Meeting Assistant</span>
@@ -819,7 +825,10 @@ export function AnalysisReview({
             const edit = overrides[action.id] ?? { actionId: action.id }
             const editable = action.reviewState === "Pending" || action.reviewState === "Failed"
             return (
-              <div key={action.id} className="space-y-2 rounded-md border border-border bg-background/60 p-2">
+              // Dark-only bg-surface-raised: slightly lighter than the
+              // parent Meeting Assistant panel (bg-card), not the previous
+              // bg-surface-sunken (darker than the panel it sits in).
+              <div key={action.id} className="space-y-2 rounded-md border border-border bg-surface-sunken p-2 dark:bg-surface-raised">
                 <div className="flex items-start gap-2">
                   <input
                     type="checkbox"
@@ -837,72 +846,74 @@ export function AnalysisReview({
                     <span className="text-[10px] font-medium text-muted-foreground">
                       {proposedActionLabel(action.type)}
                     </span>
-                    <input
+                    <Input
                       value={edit.title ?? ""}
                       disabled={!editable || readOnly}
                       onChange={(event) => updateOverride(action.id, { title: event.target.value })}
-                      className="mt-1.5 h-8 w-full rounded border border-input bg-background px-2 text-[11px] text-foreground"
+                      className={cn("mt-1.5 h-8 text-[11px]", darkFieldClass)}
                     />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <select
+                  <Select
                     value={edit.projectId ?? ""}
                     disabled={!editable || readOnly}
                     onChange={(event) => updateOverride(action.id, { projectId: event.target.value || null })}
-                    className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                    className={cn("h-7 text-[10px]", darkFieldClass)}
                   >
                     <option value="">{meetProjectName}</option>
                     {projects.map((project) => (
                       <option key={project.id} value={project.id}>{project.name}</option>
                     ))}
-                  </select>
-                  <select
+                  </Select>
+                  <Select
                     value={edit.status ?? action.proposedStatus}
                     disabled={!editable || readOnly}
                     onChange={(event) => updateOverride(action.id, { status: event.target.value as Status })}
-                    className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                    className={cn("h-7 text-[10px]", darkFieldClass)}
                   >
                     {statusOptions.map((status) => <option key={status}>{status}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 {(action.type === "CreateWaitingTask" || (edit.status ?? action.proposedStatus) === "WAIT") && (
-                  <input
+                  <Input
                     value={edit.waitingFor ?? ""}
                     disabled={!editable || readOnly}
                     placeholder="Waiting for"
                     onChange={(event) => updateOverride(action.id, { waitingFor: event.target.value })}
-                    className="h-7 w-full rounded border border-input bg-background px-2 text-[10px] text-foreground"
+                    className={cn("h-7 text-[10px]", darkFieldClass)}
                   />
                 )}
                 <div className="grid grid-cols-2 gap-1.5">
                   <label className="text-[9px] uppercase text-muted-foreground">
                     Deadline
-                    <input
+                    <Input
                       type="datetime-local"
                       value={toLocalInput(edit.deadlineAtUtc)}
                       disabled={!editable || readOnly}
                       onChange={(event) => updateOverride(action.id, { deadlineAtUtc: fromLocalInput(event.target.value) })}
-                      className="mt-1 h-7 w-full rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                      className={cn("mt-1 h-7 text-[10px]", darkFieldClass)}
                     />
                   </label>
                   <label className="text-[9px] uppercase text-muted-foreground">
                     Reminder
-                    <input
+                    <Input
                       type="datetime-local"
                       value={toLocalInput(edit.reminderAtUtc)}
                       disabled={!editable || readOnly}
                       onChange={(event) => updateOverride(action.id, { reminderAtUtc: fromLocalInput(event.target.value) })}
-                      className="mt-1 h-7 w-full rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                      className={cn("mt-1 h-7 text-[10px]", darkFieldClass)}
                     />
                   </label>
                 </div>
                 {action.sourceExcerpt && (
-                  <blockquote className="border-l-2 border-status-meet/40 pl-2 text-[10px] italic text-muted-foreground">
+                  <blockquote className="border-l-2 border-status-meet/40 pl-2 text-[11px] italic leading-relaxed text-muted-foreground">
                     {formatSegment(action)} {action.sourceExcerpt}
                   </blockquote>
                 )}
-                {action.rationale && <p className="text-[10px] text-muted-foreground">{action.rationale}</p>}
+                {action.rationale && (
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">{action.rationale}</p>
+                )}
                 {editable && (
                   <button
                     type="button"
@@ -924,27 +935,38 @@ export function AnalysisReview({
               </div>
             )
           })}
-          <button
-            type="button"
-            disabled={readOnly || selectedIds.size === 0}
-            onClick={() => {
-              const ids = [...selectedIds].filter((id) => pending.some((action) => action.id === id))
-              if (ids.length > 0 && window.confirm(
-                `Create/apply ${ids.length} selected action${ids.length === 1 ? "" : "s"} through TaskOverlay services?`,
-              )) {
-                send({
-                  type: "applyMeetingProposedActions",
-                  analysisId: analysis.id,
-                  actionIds: ids,
-                  overrides: ids.map((id) => overrides[id] ?? { actionId: id }),
-                })
-              }
-            }}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-primary text-[11px] font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Check className="size-3.5" />
-            Apply selected actions
-          </button>
+          {/*
+            Primary action, but bounded to its natural width and right-
+            aligned rather than a full-width slab - the canonical Button
+            primary tone is already the strongest color statement on the
+            surface; filling the entire card width on top of that made it
+            dominate the transcript/proposal content instead of just being
+            easy to find.
+          */}
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              tone="primary"
+              size="sm"
+              disabled={readOnly || selectedIds.size === 0}
+              onClick={() => {
+                const ids = [...selectedIds].filter((id) => pending.some((action) => action.id === id))
+                if (ids.length > 0 && window.confirm(
+                  `Create/apply ${ids.length} selected action${ids.length === 1 ? "" : "s"} through TaskOverlay services?`,
+                )) {
+                  send({
+                    type: "applyMeetingProposedActions",
+                    analysisId: analysis.id,
+                    actionIds: ids,
+                    overrides: ids.map((id) => overrides[id] ?? { actionId: id }),
+                  })
+                }
+              }}
+            >
+              <Check className="size-3.5" />
+              Apply selected actions
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -986,8 +1008,10 @@ function TrackHealth({
   label: string
   value: MeetingRecordingSnapshot["microphoneHealth"]
 }) {
+  // Read-only status, not an editable field: a distinct recessed
+  // (bg-surface-sunken) chip rather than the --field surface real inputs use.
   return (
-    <span className="flex min-w-0 items-center gap-1.5 rounded border border-border px-2 py-1 text-muted-foreground">
+    <span className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-border bg-surface-sunken px-2 text-[10px] text-muted-foreground">
       <Icon className="size-3 shrink-0" />
       <span className="truncate">{label}: {value}</span>
     </span>
@@ -1012,9 +1036,9 @@ function RecordingOperationStatus({ operation }: { operation: MeetingOperationSn
       role="status"
       aria-live="polite"
       aria-busy="true"
-      className="space-y-1.5 rounded border border-status-meet/30 bg-status-meet/10 p-2 text-[10px]"
+      className="space-y-1.5 rounded border border-primary/30 bg-primary/10 p-2 text-[10px]"
     >
-      <div className="flex items-center gap-2 font-medium text-status-meet">
+      <div className="flex items-center gap-2 font-medium text-primary">
         <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
         <span>{label}</span>
         <span className="ml-auto font-mono" aria-hidden="true">{elapsed}</span>
@@ -1040,24 +1064,30 @@ function ActionButton({
   danger?: boolean
   busy?: boolean
 }) {
+  // Delegates to the canonical Button primitive (same tone/loading contract
+  // as everywhere else in the app) instead of a parallel hand-rolled
+  // primary/danger treatment - callers/props are unchanged.
+  //
+  // Button's solid "primary" tone is `bg-primary text-primary-foreground`:
+  // in Light, --primary (accent) is a near-black ink, a normal high-contrast
+  // CTA look. In Dark it's a near-white ink, so the same solid fill reads as
+  // a harsh bright-white block against the dark modal. Dark-only overrides
+  // swap it for the same restrained soft-tint treatment already used for
+  // notices elsewhere (border/bg/text at reduced opacity) - Light is
+  // untouched.
   return (
-    <button
+    <Button
       type="button"
+      size="sm"
+      tone={danger ? "destructive" : primary ? "primary" : "secondary"}
       disabled={disabled}
-      aria-busy={busy}
+      loading={busy}
       onClick={onClick}
-      className={cn(
-        "flex h-7 items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
-        primary && "border-status-meet/50 bg-status-meet/10 text-status-meet",
-        danger && "border-destructive/40 text-destructive hover:bg-destructive/10",
-        !primary && !danger && "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
+      className={primary ? "dark:border-primary/40 dark:bg-primary/10 dark:text-primary dark:hover:not-disabled:bg-primary/20" : undefined}
     >
-      {busy
-        ? <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
-        : <Icon className="size-3" />}
+      {!busy && <Icon className="size-3" />}
       {label}
-    </button>
+    </Button>
   )
 }
 

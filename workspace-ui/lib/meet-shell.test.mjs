@@ -51,12 +51,12 @@ test("geometry constants describe a bounded, clearly intentional shell", () => {
   assert.ok(MEET_SHELL_GEOMETRY.maxHeightPx < 1000)
 })
 
-test("modal geometry is bounded, viewport-clamped, and stable across tabs", () => {
-  // Bounded clamp, applied once on the shell box independent of the tab.
-  assert.match(component, /min\(1280px,90vw\)/)
-  assert.match(component, /min\(820px,88dvh\)/)
-  assert.equal(component.match(/w-\[min\(1280px/g)?.length, 1)
-  assert.equal(component.match(/h-\[min\(820px/g)?.length, 1)
+test("modal geometry is bounded, viewport-clamped, and stable across tabs - applied once through ModalShell's typed geometry props, not a raw className string", () => {
+  assert.match(component, /import \{\s*\n?\s*buildMeetSecondaryLine,\s*\n?\s*MEET_SHELL_GEOMETRY,/)
+  // Bounded clamp, applied once on the shell box independent of the tab,
+  // via the authoritative MEET_SHELL_GEOMETRY constant (see the geometry
+  // constants test above) spread onto ModalShell's typed numeric props.
+  assert.equal(component.match(/<ModalShell titleId="meet-details-title" \{\.\.\.MEET_SHELL_GEOMETRY\}>/g)?.length, 1)
   // The rejected near-fullscreen geometry must be fully gone.
   assert.doesNotMatch(component, /1600px|calc\(100vw-16px\)|calc\(100dvh-16px\)/)
 })
@@ -67,7 +67,7 @@ test("Details uses a wider editable column than Context (not 50/50)", () => {
 })
 
 test("compact linked task exposes an inline Open action, not a duplicated card", () => {
-  assert.match(component, /aria-label="Open linked task"/)
+  assert.match(component, /label="Open linked task"/)
   // Open-task navigation still flushes autosave first via requestClose.
   assert.match(component, /if \(await requestClose\("navigate"\)\) onOpenLinkedTask/)
   // The missing-linked-task warning is preserved.
@@ -109,7 +109,7 @@ test("Sources and Review keep their existing props and command wiring", () => {
 test("MEET tabs delegate ARIA roles/keyboard nav to the canonical Tabs primitive, not a hand-rolled tablist", () => {
   assert.match(component, /import \{ Tabs, TabList, Tab, TabPanel \} from ["']@\/components\/ui\/tabs["']/)
   assert.match(component, /<Tabs\s*\n\s*value=\{activeTab\}/)
-  assert.match(component, /<TabList activateOnFocus aria-label="MEET sections"/)
+  assert.match(component, /<TabList\s*\n\s*activateOnFocus\s*\n\s*aria-label="MEET sections"/)
   // No hand-rolled ARIA attributes duplicating what Tabs/TabList/Tab/TabPanel
   // already own internally (role, aria-selected, aria-controls, tabIndex).
   assert.doesNotMatch(component, /role="tablist"/)
@@ -121,7 +121,7 @@ test("all three MEET tabs are wired through matching Tab/TabPanel value pairs wi
   for (const tab of ["details", "sources", "review"]) {
     assert.match(component, new RegExp(`<TabPanel\\s*\\n\\s*value="${tab}"\\s*\\n\\s*id=\\{meetTabPanelId\\("${tab}"\\)\\}`))
   }
-  assert.match(component, /\{MEET_WORKSPACE_TABS.map\(\(tab\) => \(\s*\n\s*<Tab key=\{tab\} value=\{tab\} id=\{meetTabButtonId\(tab\)\}>/)
+  assert.match(component, /\{MEET_WORKSPACE_TABS.map\(\(tab\) => \(\s*\n\s*<Tab\s*\n\s*key=\{tab\}\s*\n\s*value=\{tab\}\s*\n\s*id=\{meetTabButtonId\(tab\)\}/)
 })
 
 test("tab switching still routes through the transcript-edit-exit guard (switchTab), and a canceled switch cancels the Tabs change event", () => {
@@ -144,9 +144,9 @@ test("no Save or Revert controls, and no legacy onApply path", () => {
 })
 
 test("one stable footer renders across every tab", () => {
-  assert.equal(component.match(/<footer/g)?.length, 1)
+  assert.equal(component.match(/<ModalFooter/g)?.length, 1)
   // Delete meeting is footer-scoped to Details only.
-  assert.match(component, /isDetails && \(\s*\n\s*<button/)
+  assert.match(component, /isDetails && \(\s*\n\s*<Button/)
 })
 
 test("migrated MEET surface avoids unreadable 8-9px metadata", () => {
@@ -154,12 +154,14 @@ test("migrated MEET surface avoids unreadable 8-9px metadata", () => {
   assert.doesNotMatch(component, /text-\[9px\]/)
 })
 
-test("visual foundation is MEET-scoped, not global", () => {
-  assert.match(component, /className="meet-shell /)
-  assert.match(globals, /\.meet-shell\s*\{/)
-  // The scope raises border + metadata contrast without touching :root/.dark.
-  assert.match(globals, /\.meet-shell[\s\S]*--border:\s*oklch\(1 0 0 \/ 16%\)/)
-  assert.match(globals, /\.meet-shell[\s\S]*--muted-foreground:/)
+test("MEET modal composes the canonical ModalShell - no dark-only .meet-shell override remains", () => {
+  assert.match(component, /import \{ ModalShell, ModalHeader, ModalBody, ModalFooter \} from ["']@\/components\/ui\/modal-shell["']/)
+  assert.match(component, /<ModalShell titleId="meet-details-title"/)
+  // Note: `from "@/lib/meet-shell"` (the unrelated tab-id/geometry helper
+  // module) legitimately still contains the substring "meet-shell" - only
+  // the CSS class usage/definition is checked here.
+  assert.doesNotMatch(component, /className="meet-shell\b/)
+  assert.doesNotMatch(globals, /\.meet-shell\b/)
 })
 
 test("recording start still flushes autosave before recording", () => {

@@ -20,7 +20,7 @@ test("Sources has no call-link action; Details owns a compact validated open con
   assert.doesNotMatch(sourcesReview, /Join call|Open meeting link/)
   assert.doesNotMatch(assistant, /openMeetingLink/)
   // Details: icon-only control, labeled, shown only for a valid http(s) URL.
-  assert.match(details, /aria-label="Open call link"/)
+  assert.match(details, /label="Open call link"/)
   assert.match(details, /isValidMeetingLinkUrl\(draft\.link\) && onMeetingAssistantCommand/)
   assert.match(details, /type: "openMeetingLink"/)
 })
