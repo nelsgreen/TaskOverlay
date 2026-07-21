@@ -48,6 +48,7 @@ import type {
   WorkspaceMeetingAssistantCommand,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import {
   selectActiveMeetingTranscript,
   selectReviewAnalysis,
@@ -182,7 +183,7 @@ export function MeetingSourcesWorkspace({
           <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">
             Transcripts &amp; screenshots
           </h4>
-          <section className="space-y-2 rounded-lg border border-border bg-card p-3" role="radiogroup" aria-label="Transcript versions">
+          <section className="space-y-2 rounded-lg border border-border bg-surface-sunken p-3" role="radiogroup" aria-label="Transcript versions">
             <div className="flex items-center gap-2">
               <FileText className="size-4 text-status-meet" />
               <h3 className="text-[11px] font-semibold text-foreground">Transcripts</h3>
@@ -209,7 +210,7 @@ export function MeetingSourcesWorkspace({
             ))}
           </section>
 
-          <section className="space-y-2 rounded-lg border border-border bg-card p-3">
+          <section className="space-y-2 rounded-lg border border-border bg-surface-sunken p-3">
             <div className="flex items-center gap-2">
               <ImageIcon className="size-4 text-status-meet" />
               <h3 className="text-[11px] font-semibold text-foreground">Screenshots</h3>
@@ -467,6 +468,7 @@ export function MeetingReviewWorkspace({
       </div>
 
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4 [scrollbar-gutter:stable]">
+          {/* Peer panel to "Active transcript" on the left - same bg-card tier. */}
           <section className="space-y-2 rounded-lg border border-border bg-card p-3">
             {commandNotice && !analysisOperation && (
               <NeutralNotice message={commandNotice} onDismiss={onClearNotice} />
@@ -543,6 +545,7 @@ export function MeetingReviewWorkspace({
             )}
           </section>
 
+          {/* Peer panel to Active transcript / Meeting Assistant - same tier. */}
           <section className="space-y-2 rounded-lg border border-border bg-card p-3">
             <div className="flex items-center gap-2">
               <ImageIcon className="size-4 text-status-meet" />
@@ -667,7 +670,7 @@ function TranscriptLineage({
         </>
       )}
       {lineage.previousEdits.length > 0 && (
-        <details className="rounded border border-border bg-background/35 px-2 py-1.5">
+        <details className="rounded border border-border bg-card px-2 py-1.5">
           <summary className="cursor-pointer text-[10px] font-medium text-muted-foreground hover:text-foreground">
             Previous revisions ({lineage.previousEdits.length})
           </summary>
@@ -718,10 +721,15 @@ function TranscriptSourceCard({
     })
   }
   return (
-    // Whole-card selection with identical geometry in both states: the active
-    // treatment is a lighter neutral surface + stronger light-neutral border,
-    // and the header keeps a reserved slot for the Active label so nothing
-    // moves when the selection changes.
+    // Whole-card selection with identical geometry in both states. Resting
+    // cards use the canonical --card surface (already distinct from the
+    // section's own --surface-sunken tray, see TranscriptLineage/screenshot
+    // section wrappers). Selected uses the canonical row-selected pair
+    // (--row-selected/--row-selected-border, the same tokens Tree row
+    // selection already uses): mixing --selection into --surface reads as
+    // RAISED/lighter in Dark and TINTED/slightly darker in Light - never
+    // "sunken" or disabled in either theme - plus a stronger selection-tinted
+    // border and the existing Active check as a second, explicit marker.
     <div
       role="radio"
       aria-checked={transcript.isActive}
@@ -735,18 +743,18 @@ function TranscriptSourceCard({
       className={cn(
       "space-y-2 rounded-md border p-2.5 outline-none transition-colors focus-visible:shadow-[var(--focus-ring)]",
       transcript.isActive
-        ? "border-border-strong bg-surface-sunken"
+        ? "border-row-selected-border bg-row-selected"
         : "border-border bg-card",
-      !readOnly && !transcript.isActive && "cursor-pointer hover:border-border-strong hover:bg-secondary",
+      !readOnly && !transcript.isActive && "cursor-pointer hover:border-border-strong hover:bg-surface-raised",
     )}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className={cn(
-          "rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase",
+          "rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ring-1 ring-inset",
           transcript.origin === "Imported"
-            ? "bg-sky-500/15 text-sky-300"
+            ? "bg-status-wait/10 text-status-wait ring-status-wait/30"
             : transcript.origin === "UserEdited"
-              ? "bg-emerald-500/15 text-emerald-300"
-              : "bg-status-meet/15 text-status-meet",
+              ? "bg-status-focus/10 text-status-focus ring-status-focus/30"
+              : "bg-status-meet/10 text-status-meet ring-status-meet/30",
         )}>
           {transcriptOriginLabel(transcript.origin)}
         </span>
@@ -881,7 +889,7 @@ function TranscriptEditor({
         else onCancel()
       }}
     >
-      <p className="rounded border border-border bg-background/40 p-2 text-[10px] text-muted-foreground">
+      <p className="rounded border border-border bg-surface-sunken p-2 text-[10px] text-muted-foreground">
         Saving creates a new revision; the current transcript stays unchanged.
         Ctrl+Enter saves, Escape cancels.
       </p>
@@ -891,7 +899,7 @@ function TranscriptEditor({
         </div>
       )}
       {draft.speakers.length > 0 && (
-        <section className="space-y-2 rounded-md border border-border bg-background/40 p-2.5">
+        <section className="space-y-2 rounded-md border border-border bg-surface-sunken p-2.5">
           <h4 className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
             <Users className="size-3" /> Speakers
           </h4>
@@ -1199,7 +1207,7 @@ function TranscriptPlayback({
   return (
     <div className="space-y-2">
       {audioAvailable && playbackMode === "Browser" && (
-        <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card/95 px-2.5 py-2 shadow-sm backdrop-blur-sm">
+        <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card px-2.5 py-2 shadow-sm">
           <div className="flex items-center gap-2">
             <audio
               ref={audioRef}
@@ -1243,12 +1251,13 @@ function TranscriptPlayback({
         </div>
       )}
       {audioAvailable && playbackMode === "Native" && transcript.recordingId && (
-        <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card/95 px-2.5 py-2 shadow-sm backdrop-blur-sm">
+        <div className="sticky top-0 z-10 space-y-1.5 rounded-md border border-border bg-card px-2.5 py-2 shadow-sm">
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              tone="secondary"
+              size="sm"
               disabled={nativeCommandPending}
-              className="rounded border border-border px-2 py-1 text-[10px] text-foreground"
               onClick={() => {
                 const action = isPlaying ? "pause" : "play"
                 const posted = postNativeAudioPlaybackCommand({
@@ -1262,7 +1271,7 @@ function TranscriptPlayback({
               }}
             >
               {nativeCommandPending ? "Loading…" : isPlaying ? "Pause" : "Play"}
-            </button>
+            </Button>
             <input
               type="range"
               min={0}
@@ -1435,7 +1444,7 @@ function ScreenshotCard({
   compact?: boolean
 }) {
   return (
-    <div className="min-w-0 overflow-hidden rounded-md border border-border bg-background/50">
+    <div className="min-w-0 overflow-hidden rounded-md border border-border bg-card">
       {screenshot.thumbnailDataUrl ? (
         <button
           type="button"

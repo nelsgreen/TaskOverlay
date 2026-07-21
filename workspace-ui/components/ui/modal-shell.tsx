@@ -103,10 +103,15 @@ interface ModalFooterProps {
   children: React.ReactNode
 }
 
-/** Fixed footer region: never scrolls, always reachable. */
+/**
+ * Fixed footer region: never scrolls, always reachable. Generous vertical
+ * padding (py-4) so the footer reads as a real action bar proportionate to
+ * a large modal, not a thin strip - matching ModalHeader's own visual
+ * weight (py-3) rather than a cramped compact-density row.
+ */
 function ModalFooter({ children }: ModalFooterProps) {
   return (
-    <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-surface-sunken px-4 py-2.5">
+    <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-surface-sunken px-5 py-4">
       {children}
     </footer>
   )

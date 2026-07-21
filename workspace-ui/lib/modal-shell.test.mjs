@@ -195,7 +195,6 @@ test("Sources/Review: no button, field, hover, focus-ring, selected/active-segme
   }
   // The transcript-playback active-segment highlight (a generic "currently
   // playing" state, not MEET identity) is accent/selection-driven.
-  assert.doesNotMatch(meetSourcesReviewSrc, /ring-status-meet/)
   assert.match(meetSourcesReviewSrc, /activeSegmentIndex === row\.segment\.index && "bg-primary\/10 ring-1 ring-inset ring-primary\/35"/)
   // The "Edit transcript" / "Save revision" / "Analyze transcript" primary
   // action buttons and the recording-policy toggle no longer soft-fill with
@@ -217,7 +216,7 @@ test("Sources/Review: legitimate MEET identity markers are retained - section ic
   assert.match(meetSourcesReviewSrc, /<ImageIcon className="size-4 text-status-meet" \/>/)
   assert.match(meetSourcesReviewSrc, /<Bot className="size-4 text-status-meet" \/>/)
   // "Generated" transcript-origin type badge (sibling to the Imported/UserEdited badges).
-  assert.match(meetSourcesReviewSrc, /"bg-status-meet\/15 text-status-meet"/)
+  assert.match(meetSourcesReviewSrc, /"bg-status-meet\/10 text-status-meet ring-status-meet\/30"/)
   // The restrained secondary "Active" check - the card's own selected state
   // (border/surface) already reads canonical tokens; only this small icon
   // keeps the domain accent.

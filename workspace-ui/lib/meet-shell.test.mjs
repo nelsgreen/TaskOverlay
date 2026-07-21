@@ -109,7 +109,7 @@ test("Sources and Review keep their existing props and command wiring", () => {
 test("MEET tabs delegate ARIA roles/keyboard nav to the canonical Tabs primitive, not a hand-rolled tablist", () => {
   assert.match(component, /import \{ Tabs, TabList, Tab, TabPanel \} from ["']@\/components\/ui\/tabs["']/)
   assert.match(component, /<Tabs\s*\n\s*value=\{activeTab\}/)
-  assert.match(component, /<TabList activateOnFocus aria-label="MEET sections"/)
+  assert.match(component, /<TabList\s*\n\s*activateOnFocus\s*\n\s*aria-label="MEET sections"/)
   // No hand-rolled ARIA attributes duplicating what Tabs/TabList/Tab/TabPanel
   // already own internally (role, aria-selected, aria-controls, tabIndex).
   assert.doesNotMatch(component, /role="tablist"/)
@@ -121,7 +121,7 @@ test("all three MEET tabs are wired through matching Tab/TabPanel value pairs wi
   for (const tab of ["details", "sources", "review"]) {
     assert.match(component, new RegExp(`<TabPanel\\s*\\n\\s*value="${tab}"\\s*\\n\\s*id=\\{meetTabPanelId\\("${tab}"\\)\\}`))
   }
-  assert.match(component, /\{MEET_WORKSPACE_TABS.map\(\(tab\) => \(\s*\n\s*<Tab key=\{tab\} value=\{tab\} id=\{meetTabButtonId\(tab\)\}>/)
+  assert.match(component, /\{MEET_WORKSPACE_TABS.map\(\(tab\) => \(\s*\n\s*<Tab\s*\n\s*key=\{tab\}\s*\n\s*value=\{tab\}\s*\n\s*id=\{meetTabButtonId\(tab\)\}/)
 })
 
 test("tab switching still routes through the transcript-edit-exit guard (switchTab), and a canceled switch cancels the Tabs change event", () => {

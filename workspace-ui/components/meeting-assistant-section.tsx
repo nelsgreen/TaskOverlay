@@ -34,6 +34,10 @@ import { cn } from "@/lib/utils"
 import { deriveMeetingRecordingControlState } from "@/lib/meeting-recording-controls"
 import { resolveMeetingRecordingSelection } from "@/lib/meeting-recording-selection"
 import { proposedActionLabel } from "@/lib/meeting-proposed-action"
+import { Button } from "@/components/ui/button"
+import { Select } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
+import { SegmentedControl, SegmentedControlItem } from "@/components/ui/segmented-control"
 
 interface Props {
   meet: MeetItem
@@ -200,24 +204,18 @@ export function MeetingAssistantSection({
             </span>
           )}
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <SegmentedControl
+          value={meet.recordingPolicy ?? "Inherit"}
+          onValueChange={(value) => onRecordingPolicyChange?.(value)}
+          aria-label="Recording policy"
+          disabled={readOnly || !onRecordingPolicyChange}
+        >
           {policyOptions.map((option) => (
-            <button
-              type="button"
-              key={option.value}
-              disabled={readOnly || !onRecordingPolicyChange}
-              onClick={() => onRecordingPolicyChange?.(option.value)}
-              className={cn(
-                "rounded-md border px-2 py-1 text-[10px] font-medium",
-                (meet.recordingPolicy ?? "Inherit") === option.value
-                  ? "border-primary/50 bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:bg-accent",
-              )}
-            >
+            <SegmentedControlItem key={option.value} value={option.value}>
               {option.label}
-            </button>
+            </SegmentedControlItem>
           ))}
-        </div>
+        </SegmentedControl>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -304,17 +302,16 @@ export function MeetingAssistantSection({
       ) : (
         <>
           {meetingRecordings.length > 1 && (
-            <select
+            <Select
               value={selectedRecording?.id ?? ""}
               onChange={(event) => setSelectedRecordingId(event.target.value)}
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-[11px] text-foreground"
             >
               {meetingRecordings.map((recording, index) => (
                 <option key={recording.id} value={recording.id}>
                   {index === 0 ? "Latest" : `Recording ${meetingRecordings.length - index}`} - {formatRecordingTimestamp(recording)}
                 </option>
               ))}
-            </select>
+            </Select>
           )}
 
           {selectedRecording && (
@@ -355,7 +352,7 @@ export function MeetingAssistantSection({
             </p>
           </div>
           {unclassifiedRecordings.slice(0, 5).map((recording) => (
-            <div key={recording.id} className="rounded-md border border-border bg-background/50 p-2">
+            <div key={recording.id} className="rounded-md border border-border bg-card p-2">
               <div className="flex items-center justify-between gap-2 text-[10px]">
                 <span className="font-medium text-foreground">{formatRecordingTimestamp(recording)}</span>
                 <span className="text-muted-foreground">{recording.state}</span>
@@ -488,7 +485,7 @@ function RecordingCard({
         <TrackHealth icon={Mic} label="Microphone" value={recording.microphoneHealth} />
       </div>
 
-      <div className="space-y-1 rounded bg-background/40 p-2 text-[10px] text-muted-foreground">
+      <div className="space-y-1 rounded bg-surface-sunken p-2 text-[10px] text-muted-foreground">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span>Format: <strong className="text-foreground">{formatRecordingFormat(recording.recordingFormat)}</strong></span>
           <span>{formatDuration(recording.durationSeconds)} - {formatBytes(recording.totalBytes)}</span>
@@ -534,16 +531,16 @@ function RecordingCard({
             </button>
           </div>
           <div className="grid grid-cols-[1fr_1fr_auto_auto] items-center gap-1.5">
-            <input
+            <Input
               type="number"
               min={0}
               step="0.1"
               value={rangeFrom}
               onChange={(event) => setRangeFrom(event.target.value)}
               placeholder="From"
-              className="h-7 min-w-0 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+              className="h-7 min-w-0 text-[10px]"
             />
-            <input
+            <Input
               type="number"
               min={0}
               max={recording.durationSeconds || undefined}
@@ -551,10 +548,12 @@ function RecordingCard({
               value={rangeUntil}
               onChange={(event) => setRangeUntil(event.target.value)}
               placeholder="Until"
-              className="h-7 min-w-0 rounded border border-input bg-background px-2 text-[10px] text-foreground"
+              className="h-7 min-w-0 text-[10px]"
             />
-            <button
+            <Button
               type="button"
+              tone="secondary"
+              size="sm"
               disabled={readOnly || isProcessing}
               onClick={() => {
                 const from = rangeFrom.trim() ? Number(rangeFrom) : null
@@ -568,10 +567,9 @@ function RecordingCard({
                   untilSeconds: until,
                 })) confirmRangeSaved()
               }}
-              className="h-7 rounded border border-border px-2 text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
             >
               Save range
-            </button>
+            </Button>
             {/* Fixed-size confirmation slot — feedback appears here without
                 moving the recording selector, cards, or columns. */}
             <span className="flex w-12 shrink-0 items-center gap-1 text-[10px] text-status-focus" aria-live="polite">
@@ -590,7 +588,7 @@ function RecordingCard({
       )}
 
       {transcriptionSource && (
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded bg-background/40 px-2 py-1.5 text-[10px] text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded bg-surface-sunken px-2 py-1.5 text-[10px] text-muted-foreground">
           <span>
             Transcription source:{" "}
             <strong className="text-foreground">{transcriptionSource.fileName}</strong>
@@ -611,7 +609,7 @@ function RecordingCard({
       {operation && <RecordingOperationStatus operation={operation} />}
 
       {technicalErrors.length > 0 && (
-        <details className="min-w-0 rounded border border-border/70 bg-card/30 p-2">
+        <details className="min-w-0 rounded border border-border bg-surface-sunken p-2">
           <summary className="cursor-pointer text-[10px] font-semibold text-muted-foreground">
             Show technical details
           </summary>
@@ -819,7 +817,7 @@ export function AnalysisReview({
             const edit = overrides[action.id] ?? { actionId: action.id }
             const editable = action.reviewState === "Pending" || action.reviewState === "Failed"
             return (
-              <div key={action.id} className="space-y-2 rounded-md border border-border bg-background/60 p-2">
+              <div key={action.id} className="space-y-2 rounded-md border border-border bg-surface-sunken p-2">
                 <div className="flex items-start gap-2">
                   <input
                     type="checkbox"
@@ -924,27 +922,38 @@ export function AnalysisReview({
               </div>
             )
           })}
-          <button
-            type="button"
-            disabled={readOnly || selectedIds.size === 0}
-            onClick={() => {
-              const ids = [...selectedIds].filter((id) => pending.some((action) => action.id === id))
-              if (ids.length > 0 && window.confirm(
-                `Create/apply ${ids.length} selected action${ids.length === 1 ? "" : "s"} through TaskOverlay services?`,
-              )) {
-                send({
-                  type: "applyMeetingProposedActions",
-                  analysisId: analysis.id,
-                  actionIds: ids,
-                  overrides: ids.map((id) => overrides[id] ?? { actionId: id }),
-                })
-              }
-            }}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-primary text-[11px] font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Check className="size-3.5" />
-            Apply selected actions
-          </button>
+          {/*
+            Primary action, but bounded to its natural width and right-
+            aligned rather than a full-width slab - the canonical Button
+            primary tone is already the strongest color statement on the
+            surface; filling the entire card width on top of that made it
+            dominate the transcript/proposal content instead of just being
+            easy to find.
+          */}
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              tone="primary"
+              size="sm"
+              disabled={readOnly || selectedIds.size === 0}
+              onClick={() => {
+                const ids = [...selectedIds].filter((id) => pending.some((action) => action.id === id))
+                if (ids.length > 0 && window.confirm(
+                  `Create/apply ${ids.length} selected action${ids.length === 1 ? "" : "s"} through TaskOverlay services?`,
+                )) {
+                  send({
+                    type: "applyMeetingProposedActions",
+                    analysisId: analysis.id,
+                    actionIds: ids,
+                    overrides: ids.map((id) => overrides[id] ?? { actionId: id }),
+                  })
+                }
+              }}
+            >
+              <Check className="size-3.5" />
+              Apply selected actions
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -986,8 +995,10 @@ function TrackHealth({
   label: string
   value: MeetingRecordingSnapshot["microphoneHealth"]
 }) {
+  // Read-only status, not an editable field: a distinct recessed
+  // (bg-surface-sunken) chip rather than the --field surface real inputs use.
   return (
-    <span className="flex min-w-0 items-center gap-1.5 rounded border border-border px-2 py-1 text-muted-foreground">
+    <span className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-border bg-surface-sunken px-2 text-[10px] text-muted-foreground">
       <Icon className="size-3 shrink-0" />
       <span className="truncate">{label}: {value}</span>
     </span>
@@ -1040,24 +1051,21 @@ function ActionButton({
   danger?: boolean
   busy?: boolean
 }) {
+  // Delegates to the canonical Button primitive (same tone/loading contract
+  // as everywhere else in the app) instead of a parallel hand-rolled
+  // primary/danger treatment - callers/props are unchanged.
   return (
-    <button
+    <Button
       type="button"
+      size="sm"
+      tone={danger ? "destructive" : primary ? "primary" : "secondary"}
       disabled={disabled}
-      aria-busy={busy}
+      loading={busy}
       onClick={onClick}
-      className={cn(
-        "flex h-7 items-center gap-1.5 rounded-md border px-2 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
-        primary && "border-primary/50 bg-primary/10 text-primary",
-        danger && "border-destructive/40 text-destructive hover:bg-destructive/10",
-        !primary && !danger && "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
     >
-      {busy
-        ? <span className="size-3 animate-spin rounded-full border border-current border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
-        : <Icon className="size-3" />}
+      {!busy && <Icon className="size-3" />}
       {label}
-    </button>
+    </Button>
   )
 }
 

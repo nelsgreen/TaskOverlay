@@ -404,9 +404,28 @@ export function MeetDetailsModal({
           }}
           className="min-h-0 flex-1"
         >
-          <TabList activateOnFocus aria-label="MEET sections" className="bg-background/40">
+          {/*
+            Centered, equal-width, prominent primary navigation - a filled
+            surface-sunken tray holding three flex-1 tabs, with the active
+            tab raised (bg-surface-raised + shadow-1 + selection-tinted inset
+            ring). This is the same "pressed/selected" visual contract as the
+            canonical SegmentedControl (components/ui/segmented-control.tsx),
+            applied here via Tab's own className extension point rather than
+            a new primitive - Tab still owns real aria-selected semantics and
+            keyboard nav, only its appearance is extended.
+          */}
+          <TabList
+            activateOnFocus
+            aria-label="MEET sections"
+            className="mx-auto w-full max-w-md justify-center gap-1 rounded-lg border-b-0 bg-surface-sunken p-1"
+          >
             {MEET_WORKSPACE_TABS.map((tab) => (
-              <Tab key={tab} value={tab} id={meetTabButtonId(tab)}>
+              <Tab
+                key={tab}
+                value={tab}
+                id={meetTabButtonId(tab)}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-md px-4 py-2.5 text-[13px] aria-selected:bg-surface-raised aria-selected:shadow-[var(--shadow-1),inset_0_0_0_1px_color-mix(in_oklch,var(--selection)_40%,transparent)] aria-selected:after:hidden"
+              >
                 {meetTabLabel(tab)}
               </Tab>
             ))}
@@ -452,7 +471,7 @@ export function MeetDetailsModal({
                 </div>
 
                 {/* Scheduling — one compact card */}
-                <div className="rounded-lg border border-border bg-card/50">
+                <div className="rounded-lg border border-border bg-card">
                   <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
                     <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground">
                       <CalendarDays className="size-3.5 text-status-meet" />
@@ -761,15 +780,16 @@ export function MeetDetailsModal({
             </Button>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           {!readOnly && (
             <SavedState
               status={saveStatus}
               failedLabel="Save failed"
               onRetry={() => void autosaveRef.current?.retry()}
+              className="text-[12.5px]"
             />
           )}
-          <Button type="button" tone="secondary" size="sm" onClick={() => void requestClose("explicit")}>
+          <Button type="button" tone="secondary" onClick={() => void requestClose("explicit")}>
             Close
           </Button>
         </div>
