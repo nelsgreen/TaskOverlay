@@ -108,10 +108,16 @@ interface ModalFooterProps {
  * padding (py-4) so the footer reads as a real action bar proportionate to
  * a large modal, not a thin strip - matching ModalHeader's own visual
  * weight (py-3) rather than a cramped compact-density row.
+ *
+ * `bg-surface-sunken` is a light-theme-only choice: in Dark, `--surface-
+ * sunken` (0.155) is darker than the app's own base background (0.185),
+ * which reads as a separate near-black slab rather than part of the shell.
+ * `dark:bg-card` keeps the footer integrated with ModalShell's own
+ * `bg-surface-raised` body in Dark while leaving Light untouched.
  */
 function ModalFooter({ children }: ModalFooterProps) {
   return (
-    <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-surface-sunken px-5 py-4">
+    <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-surface-sunken px-5 py-4 dark:bg-card">
       {children}
     </footer>
   )

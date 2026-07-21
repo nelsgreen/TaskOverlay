@@ -183,7 +183,7 @@ export function MeetingSourcesWorkspace({
           <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground">
             Transcripts &amp; screenshots
           </h4>
-          <section className="space-y-2 rounded-lg border border-border bg-surface-sunken p-3" role="radiogroup" aria-label="Transcript versions">
+          <section className="space-y-2 rounded-lg border border-border bg-surface-sunken p-3 dark:bg-card" role="radiogroup" aria-label="Transcript versions">
             <div className="flex items-center gap-2">
               <FileText className="size-4 text-status-meet" />
               <h3 className="text-[11px] font-semibold text-foreground">Transcripts</h3>
@@ -210,7 +210,7 @@ export function MeetingSourcesWorkspace({
             ))}
           </section>
 
-          <section className="space-y-2 rounded-lg border border-border bg-surface-sunken p-3">
+          <section className="space-y-2 rounded-lg border border-border bg-surface-sunken p-3 dark:bg-card">
             <div className="flex items-center gap-2">
               <ImageIcon className="size-4 text-status-meet" />
               <h3 className="text-[11px] font-semibold text-foreground">Screenshots</h3>
@@ -491,7 +491,11 @@ export function MeetingReviewWorkspace({
                 Meeting Assistant
               </h3>
               {selectedAnalysis && (selectedAnalysis.isStale || isStaleForActive) && (
-                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300">
+                // Canonical --warning/--warning-ink pair, not raw amber-*:
+                // amber-300 is a light-mode-illegible foreground (designed
+                // for dark surfaces only), the same pale-text-on-pale-bg bug
+                // already fixed for the EDITED transcript badge.
+                <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[9px] font-semibold text-warning-ink ring-1 ring-inset ring-warning/30">
                   Stale transcript revision
                 </span>
               )}
@@ -742,10 +746,22 @@ function TranscriptSourceCard({
       }}
       className={cn(
       "space-y-2 rounded-md border p-2.5 outline-none transition-colors focus-visible:shadow-[var(--focus-ring)]",
+      // Resting cards sit inside a tray that is itself bg-card in Dark
+      // (dark:bg-card on the section wrapper) - bump the card one tier
+      // above its tray (dark:bg-surface-raised) so it doesn't merge back
+      // into the tray. Light is unchanged (bg-card resting on a lighter
+      // bg-surface-sunken tray already reads correctly).
+      //
+      // Selected is theme-conditional by design, not a shared token: in
+      // Light a clean bg-surface-raised (no gray/beige tint - a tinted fill
+      // there previously read as muted/disabled) plus a clearly stronger
+      // selection-mixed border is the active marker. In Dark the canonical
+      // row-selected pair (same tokens Tree row selection already uses)
+      // already reads as raised/lighter than the resting card, so it stays.
       transcript.isActive
-        ? "border-row-selected-border bg-row-selected"
-        : "border-border bg-card",
-      !readOnly && !transcript.isActive && "cursor-pointer hover:border-border-strong hover:bg-surface-raised",
+        ? "bg-surface-raised border-[color-mix(in_oklch,var(--selection)_55%,var(--border-strong))] dark:bg-row-selected dark:border-row-selected-border"
+        : "border-border bg-card dark:bg-surface-raised",
+      !readOnly && !transcript.isActive && "cursor-pointer hover:border-border-strong hover:bg-surface-raised dark:hover:shadow-[var(--shadow-1)]",
     )}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className={cn(
@@ -1444,7 +1460,7 @@ function ScreenshotCard({
   compact?: boolean
 }) {
   return (
-    <div className="min-w-0 overflow-hidden rounded-md border border-border bg-card">
+    <div className="min-w-0 overflow-hidden rounded-md border border-border bg-card dark:bg-surface-raised">
       {screenshot.thumbnailDataUrl ? (
         <button
           type="button"

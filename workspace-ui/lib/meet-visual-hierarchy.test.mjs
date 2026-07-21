@@ -63,15 +63,16 @@ test("Source/Item/Status context badges share one geometry class (height/radius/
 // 4/5. Transcript cards: distinct resting/selected, never disabled-looking
 // ---------------------------------------------------------------------------
 
-test("transcript cards use the canonical row-selected pair for the selected state - never --surface-sunken/--border-strong (which read as sunken/disabled), and resting/selected are visibly distinct", () => {
+test("transcript cards use a theme-conditional selected treatment - Dark reuses the canonical row-selected pair, Light uses a clean raised surface plus a stronger selection-mixed border - never --surface-sunken/--border-strong (which read as sunken/disabled), and resting/selected are visibly distinct", () => {
   const cardFn = meetSourcesReviewSrc.slice(
     meetSourcesReviewSrc.indexOf("function TranscriptSourceCard"),
     meetSourcesReviewSrc.indexOf("function transcriptOriginBadgeClass") === -1
       ? meetSourcesReviewSrc.indexOf("function TranscriptSourceCard") + 3000
       : meetSourcesReviewSrc.indexOf("function transcriptOriginBadgeClass"),
   )
-  assert.match(cardFn, /border-row-selected-border bg-row-selected/)
-  assert.match(cardFn, /border-border bg-card/)
+  assert.match(cardFn, /dark:bg-row-selected dark:border-row-selected-border/)
+  assert.match(cardFn, /bg-surface-raised border-\[color-mix\(in_oklch,var\(--selection\)_55%,var\(--border-strong\)\)\]/)
+  assert.match(cardFn, /border-border bg-card dark:bg-surface-raised/)
   assert.doesNotMatch(cardFn, /transcript\.isActive\s*\n?\s*\?\s*"border-border-strong bg-surface-sunken"/)
 })
 
@@ -166,4 +167,43 @@ test("recording select and transcription-range fields keep their existing state/
   assert.match(meetingAssistantSrc, /<Select\s*\n\s*value=\{selectedRecording\?\.id \?\? ""\}\s*\n\s*onChange=\{\(event\) => setSelectedRecordingId\(event\.target\.value\)\}/)
   assert.match(meetingAssistantSrc, /value=\{rangeFrom\}\s*\n\s*onChange=\{\(event\) => setRangeFrom\(event\.target\.value\)\}/)
   assert.match(meetSourcesReviewSrc, /onClick=\{\(\) => \{\s*\n\s*const action = isPlaying \? "pause" : "play"/)
+})
+
+// ---------------------------------------------------------------------------
+// Dark hierarchy correction: chrome (tab tray/footer/section trays) no
+// longer shares --surface-sunken with genuinely-recessed nested details
+// ---------------------------------------------------------------------------
+
+test("tab tray, ModalFooter, and the Transcripts/Screenshots section trays keep their Light bg-surface-sunken but add a Dark-only override so they integrate with ModalShell instead of reading as separate near-black slabs", () => {
+  assert.match(modalShellSrc, /bg-surface-sunken px-5 py-4 dark:bg-card/)
+  assert.match(meetDetailsSrc, /bg-surface-sunken p-1 dark:bg-card/)
+  assert.equal((meetSourcesReviewSrc.match(/rounded-lg border border-border bg-surface-sunken p-3 dark:bg-card/g) ?? []).length, 2)
+})
+
+test("resting transcript/screenshot cards stay bg-card in Light but move up to bg-surface-raised in Dark, so they don't merge into their now-lighter Dark tray", () => {
+  assert.match(meetSourcesReviewSrc, /border-border bg-card dark:bg-surface-raised/)
+  assert.match(meetSourcesReviewSrc, /rounded-md border border-border bg-card dark:bg-surface-raised"/)
+})
+
+test("nested recessed detail/status boxes (format details, transcription source, speakers, technical details, track health, proposed actions) keep bg-surface-sunken in both themes - only chrome containers were too dark, not genuinely-recessed details", () => {
+  assert.equal((meetingAssistantSrc.match(/bg-surface-sunken/g) ?? []).length >= 4, true)
+})
+
+test("ActionButton's primary tone is Dark-only softened (soft border/bg/text tint) instead of Button's harsh solid near-white fill, while Light keeps the unchanged solid primary CTA look", () => {
+  const actionButtonFn = meetingAssistantSrc.slice(meetingAssistantSrc.indexOf("function ActionButton"))
+  assert.match(actionButtonFn, /tone=\{danger \? "destructive" : primary \? "primary" : "secondary"\}/)
+  assert.match(actionButtonFn, /dark:border-primary\/40 dark:bg-primary\/10 dark:text-primary/)
+})
+
+// ---------------------------------------------------------------------------
+// Light correction: Stale transcript revision badge contrast
+// ---------------------------------------------------------------------------
+
+test("the Stale transcript revision badge uses the canonical --warning/--warning-ink pair, not raw amber-300 (a light-illegible foreground)", () => {
+  assert.match(meetSourcesReviewSrc, /bg-warning\/15 px-1\.5 py-0\.5 text-\[9px\] font-semibold text-warning-ink ring-1 ring-inset ring-warning\/30/)
+  const staleBlock = meetSourcesReviewSrc.slice(
+    meetSourcesReviewSrc.indexOf("Stale transcript revision") - 300,
+    meetSourcesReviewSrc.indexOf("Stale transcript revision") + 50,
+  )
+  assert.doesNotMatch(staleBlock, /amber-300|amber-500/)
 })

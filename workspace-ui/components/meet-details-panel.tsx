@@ -406,18 +406,24 @@ export function MeetDetailsModal({
         >
           {/*
             Centered, equal-width, prominent primary navigation - a filled
-            surface-sunken tray holding three flex-1 tabs, with the active
-            tab raised (bg-surface-raised + shadow-1 + selection-tinted inset
-            ring). This is the same "pressed/selected" visual contract as the
+            tray holding three flex-1 tabs, with the active tab raised
+            (bg-surface-raised + shadow-1 + selection-tinted inset ring).
+            This is the same "pressed/selected" visual contract as the
             canonical SegmentedControl (components/ui/segmented-control.tsx),
             applied here via Tab's own className extension point rather than
             a new primitive - Tab still owns real aria-selected semantics and
             keyboard nav, only its appearance is extended.
+
+            The tray itself is bg-surface-sunken in Light (unchanged) but
+            dark:bg-card in Dark: --surface-sunken (0.155) is darker than the
+            app's own base background there, reading as a separate near-black
+            slab instead of a tray integrated with ModalShell's own
+            bg-surface-raised body.
           */}
           <TabList
             activateOnFocus
             aria-label="MEET sections"
-            className="mx-auto w-full max-w-md justify-center gap-1 rounded-lg border-b-0 bg-surface-sunken p-1"
+            className="mx-auto w-full max-w-md justify-center gap-1 rounded-lg border-b-0 bg-surface-sunken p-1 dark:bg-card"
           >
             {MEET_WORKSPACE_TABS.map((tab) => (
               <Tab

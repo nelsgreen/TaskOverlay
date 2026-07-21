@@ -54,12 +54,14 @@ test("active and inactive transcript cards keep identical geometry", () => {
   // appearing and disappearing, and no state-dependent action is rendered.
   assert.match(source, /!transcript\.isActive && "invisible"/)
   assert.doesNotMatch(source, /\{!transcript\.isActive && \(\s*<SourceAction/)
-  // Selection uses the same canonical row-selected pair Tree row selection
-  // already uses (--row-selected/--row-selected-border): mixing --selection
-  // into --surface reads as raised/lighter in Dark and tinted/slightly
-  // darker in Light - never sunken or disabled in either theme - with the
-  // violet check only as a secondary cue.
-  assert.match(source, /border-row-selected-border bg-row-selected/)
+  // Selection is theme-conditional: Dark reuses the canonical row-selected
+  // pair Tree rows already use (--row-selected/--row-selected-border, reads
+  // raised/lighter than the resting card); Light uses a clean raised surface
+  // plus a clearly stronger selection-mixed border instead of a gray/beige
+  // tinted fill (which previously read as muted/disabled). Never sunken or
+  // disabled in either theme - with the violet check only as a secondary cue.
+  assert.match(source, /dark:bg-row-selected dark:border-row-selected-border/)
+  assert.match(source, /bg-surface-raised border-\[color-mix\(in_oklch,var\(--selection\)_55%,var\(--border-strong\)\)\]/)
 })
 
 test("Sources and Review no longer rely on a page-level scroll wrapper", () => {

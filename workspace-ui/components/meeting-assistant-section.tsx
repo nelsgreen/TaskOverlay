@@ -1054,6 +1054,14 @@ function ActionButton({
   // Delegates to the canonical Button primitive (same tone/loading contract
   // as everywhere else in the app) instead of a parallel hand-rolled
   // primary/danger treatment - callers/props are unchanged.
+  //
+  // Button's solid "primary" tone is `bg-primary text-primary-foreground`:
+  // in Light, --primary (accent) is a near-black ink, a normal high-contrast
+  // CTA look. In Dark it's a near-white ink, so the same solid fill reads as
+  // a harsh bright-white block against the dark modal. Dark-only overrides
+  // swap it for the same restrained soft-tint treatment already used for
+  // notices elsewhere (border/bg/text at reduced opacity) - Light is
+  // untouched.
   return (
     <Button
       type="button"
@@ -1062,6 +1070,7 @@ function ActionButton({
       disabled={disabled}
       loading={busy}
       onClick={onClick}
+      className={primary ? "dark:border-primary/40 dark:bg-primary/10 dark:text-primary dark:hover:not-disabled:bg-primary/20" : undefined}
     >
       {!busy && <Icon className="size-3" />}
       {label}
