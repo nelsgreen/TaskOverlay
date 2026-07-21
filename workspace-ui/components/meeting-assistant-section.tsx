@@ -791,6 +791,14 @@ export function AnalysisReview({
       [id]: { ...(current[id] ?? { actionId: id }), ...patch },
     }))
 
+  // Dark-only, neutral (no hue) field treatment for the Proposed Actions
+  // card below: mixing toward --text/--text-muted (both near-zero-chroma
+  // tokens) only changes lightness, never introduces a color - so fields
+  // read clearly lighter than the (also lightened) card without any tint.
+  const darkFieldClass =
+    "dark:bg-[color-mix(in_oklch,var(--surface-raised)_85%,var(--text)_15%)] " +
+    "dark:text-[color-mix(in_oklch,var(--text)_80%,var(--text-muted)_20%)]"
+
   return (
     <div className="space-y-2 rounded-md border border-border bg-card p-2.5">
       <div className="flex items-center gap-2">
@@ -817,7 +825,10 @@ export function AnalysisReview({
             const edit = overrides[action.id] ?? { actionId: action.id }
             const editable = action.reviewState === "Pending" || action.reviewState === "Failed"
             return (
-              <div key={action.id} className="space-y-2 rounded-md border border-border bg-surface-sunken p-2">
+              // Dark-only bg-surface-raised: slightly lighter than the
+              // parent Meeting Assistant panel (bg-card), not the previous
+              // bg-surface-sunken (darker than the panel it sits in).
+              <div key={action.id} className="space-y-2 rounded-md border border-border bg-surface-sunken p-2 dark:bg-surface-raised">
                 <div className="flex items-start gap-2">
                   <input
                     type="checkbox"
@@ -835,72 +846,74 @@ export function AnalysisReview({
                     <span className="text-[10px] font-medium text-muted-foreground">
                       {proposedActionLabel(action.type)}
                     </span>
-                    <input
+                    <Input
                       value={edit.title ?? ""}
                       disabled={!editable || readOnly}
                       onChange={(event) => updateOverride(action.id, { title: event.target.value })}
-                      className="mt-1.5 h-8 w-full rounded border border-input bg-background px-2 text-[11px] text-foreground"
+                      className={cn("mt-1.5 h-8 text-[11px]", darkFieldClass)}
                     />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <select
+                  <Select
                     value={edit.projectId ?? ""}
                     disabled={!editable || readOnly}
                     onChange={(event) => updateOverride(action.id, { projectId: event.target.value || null })}
-                    className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                    className={cn("h-7 text-[10px]", darkFieldClass)}
                   >
                     <option value="">{meetProjectName}</option>
                     {projects.map((project) => (
                       <option key={project.id} value={project.id}>{project.name}</option>
                     ))}
-                  </select>
-                  <select
+                  </Select>
+                  <Select
                     value={edit.status ?? action.proposedStatus}
                     disabled={!editable || readOnly}
                     onChange={(event) => updateOverride(action.id, { status: event.target.value as Status })}
-                    className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                    className={cn("h-7 text-[10px]", darkFieldClass)}
                   >
                     {statusOptions.map((status) => <option key={status}>{status}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 {(action.type === "CreateWaitingTask" || (edit.status ?? action.proposedStatus) === "WAIT") && (
-                  <input
+                  <Input
                     value={edit.waitingFor ?? ""}
                     disabled={!editable || readOnly}
                     placeholder="Waiting for"
                     onChange={(event) => updateOverride(action.id, { waitingFor: event.target.value })}
-                    className="h-7 w-full rounded border border-input bg-background px-2 text-[10px] text-foreground"
+                    className={cn("h-7 text-[10px]", darkFieldClass)}
                   />
                 )}
                 <div className="grid grid-cols-2 gap-1.5">
                   <label className="text-[9px] uppercase text-muted-foreground">
                     Deadline
-                    <input
+                    <Input
                       type="datetime-local"
                       value={toLocalInput(edit.deadlineAtUtc)}
                       disabled={!editable || readOnly}
                       onChange={(event) => updateOverride(action.id, { deadlineAtUtc: fromLocalInput(event.target.value) })}
-                      className="mt-1 h-7 w-full rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                      className={cn("mt-1 h-7 text-[10px]", darkFieldClass)}
                     />
                   </label>
                   <label className="text-[9px] uppercase text-muted-foreground">
                     Reminder
-                    <input
+                    <Input
                       type="datetime-local"
                       value={toLocalInput(edit.reminderAtUtc)}
                       disabled={!editable || readOnly}
                       onChange={(event) => updateOverride(action.id, { reminderAtUtc: fromLocalInput(event.target.value) })}
-                      className="mt-1 h-7 w-full rounded border border-input bg-background px-1.5 text-[10px] text-foreground"
+                      className={cn("mt-1 h-7 text-[10px]", darkFieldClass)}
                     />
                   </label>
                 </div>
                 {action.sourceExcerpt && (
-                  <blockquote className="border-l-2 border-status-meet/40 pl-2 text-[10px] italic text-muted-foreground">
+                  <blockquote className="border-l-2 border-status-meet/40 pl-2 text-[11px] italic leading-relaxed text-muted-foreground">
                     {formatSegment(action)} {action.sourceExcerpt}
                   </blockquote>
                 )}
-                {action.rationale && <p className="text-[10px] text-muted-foreground">{action.rationale}</p>}
+                {action.rationale && (
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">{action.rationale}</p>
+                )}
                 {editable && (
                   <button
                     type="button"

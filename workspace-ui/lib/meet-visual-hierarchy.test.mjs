@@ -207,3 +207,56 @@ test("the Stale transcript revision badge uses the canonical --warning/--warning
   )
   assert.doesNotMatch(staleBlock, /amber-300|amber-500/)
 })
+
+// ---------------------------------------------------------------------------
+// Proposed Actions readability: canonical fields (both themes) + Dark-only
+// NEUTRAL (no hue/--warning) graphite lightening
+// ---------------------------------------------------------------------------
+
+function proposedActionCardBlock() {
+  const start = meetingAssistantSrc.indexOf("analysis.proposedActions.map((action) => {")
+  const end = meetingAssistantSrc.indexOf("{/*\n            Primary action")
+  return meetingAssistantSrc.slice(start, end)
+}
+
+test("Proposed Actions fields (title/project/status/waiting-for/deadline/reminder) use the canonical Input/Select primitives, not raw <input>/<select> - visibly distinct field surface/border/focus from the card in both themes", () => {
+  const cardBlock = proposedActionCardBlock()
+  assert.equal((cardBlock.match(/<Input\b/g) ?? []).length, 4)
+  assert.equal((cardBlock.match(/<Select\b/g) ?? []).length, 2)
+  assert.doesNotMatch(cardBlock, /<input\s*\n\s*value=/)
+  assert.doesNotMatch(cardBlock, /<select\s*\n\s*value=/)
+  // The plain checkbox is untouched - not a text/date field this correction targets.
+  assert.match(cardBlock, /<input\s*\n\s*type="checkbox"/)
+})
+
+test("the proposal card and its editable fields never mix in --warning or any hued token - only neutral (near-zero-chroma) --surface-raised/--text/--text-muted tokens", () => {
+  const cardBlock = proposedActionCardBlock()
+  assert.doesNotMatch(cardBlock, /--warning/)
+  assert.doesNotMatch(cardBlock, /brown|amber|tan\b/)
+  assert.doesNotMatch(meetingAssistantSrc, /darkFieldClass[\s\S]{0,200}--warning/)
+})
+
+test("the proposal card is Dark-only slightly lighter than its parent Meeting Assistant panel (dark:bg-surface-raised vs the panel's bg-card), not the previous bg-surface-sunken (darker than the panel it sits in)", () => {
+  assert.match(meetingAssistantSrc, /bg-surface-sunken p-2 dark:bg-surface-raised/)
+})
+
+test("editable fields are Dark-only neutrally lightened clearly above the (also-lightened) card, and their text is a neutral soft off-white - both via color-mix toward already-neutral --text/--text-muted tokens, never a hued one", () => {
+  assert.match(meetingAssistantSrc, /const darkFieldClass =\s*\n\s*"dark:bg-\[color-mix\(in_oklch,var\(--surface-raised\)_85%,var\(--text\)_15%\)\] " \+\s*\n\s*"dark:text-\[color-mix\(in_oklch,var\(--text\)_80%,var\(--text-muted\)_20%\)\]"/)
+  const cardBlock = proposedActionCardBlock()
+  assert.equal((cardBlock.match(/darkFieldClass/g) ?? []).length, 6)
+})
+
+test("rationale/quote (secondary text) are slightly larger with relaxed line-height in both themes, with no color change (already-adequate --text-muted-foreground, now against a lighter Dark card)", () => {
+  const cardBlock = proposedActionCardBlock()
+  assert.equal((cardBlock.match(/text-\[11px\] italic leading-relaxed text-muted-foreground"/g) ?? []).length, 1)
+  assert.equal((cardBlock.match(/text-\[11px\] leading-relaxed text-muted-foreground"/g) ?? []).length, 1)
+  // No more of the old cramped 9-10px secondary text for these two roles.
+  assert.doesNotMatch(cardBlock, /text-\[10px\] italic text-muted-foreground/)
+})
+
+test("Proposed Actions hierarchy (section -> card -> field -> quote -> explanation) and behavior are unchanged: same overrides state, same send/updateOverride wiring, same Reject/Apply actions", () => {
+  assert.match(meetingAssistantSrc, /const updateOverride = \(id: string, patch: Partial<MeetingProposedActionOverride>\) =>/)
+  assert.match(meetingAssistantSrc, /Reject suggestion/)
+  assert.match(meetingAssistantSrc, /Apply selected actions/)
+  assert.match(meetingAssistantSrc, /window\.confirm\("Reject this proposed action\? No task or context item will be created\."\)/)
+})
