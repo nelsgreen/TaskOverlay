@@ -270,7 +270,8 @@ internal static class Program
             ("long audio failure message is sanitized", LongAudioFailureMessageIsSanitized),
             ("long audio schema v9 to v10 migration", LongAudioSchemaV9ToV10Migration),
             ("long audio final persistence failure keeps partials", LongAudioFinalPersistenceFailureKeepsPartials),
-            ("long audio orphan job cleanup", LongAudioOrphanJobCleanup)
+            ("long audio orphan job cleanup", LongAudioOrphanJobCleanup),
+            ("long audio timestamp round trip contract", LongAudioTimestampRoundTripContract)
         };
 
         foreach (var test in tests)
@@ -9740,6 +9741,72 @@ internal static class Program
         Assert(
             service.RemoveOrphans().Count == 0,
             "Re-sweeping orphans should be a no-op.");
+    }
+
+    private static void LongAudioTimestampRoundTripContract()
+    {
+        // Contract, per DECISIONS.md "bounded playback":
+        //   1. merging works on the ORIGINAL RECORDING timeline internally;
+        //   2. persisted segment timestamps are TRANSCRIPT-RELATIVE;
+        //   3. SourceAudioStartSeconds maps them back to the recording;
+        //   4. so C# adding SourceAudioStartSeconds recovers the original.
+        const double RangeStart = 900;
+        const double RangeEnd = 3000;
+        var chunks = new List<MeetingTranscriptChunkInput>
+        {
+            new(0, RangeStart, 1960, "a", "en", new List<TranscriptSegment>
+            {
+                Segment(900, 906, "first utterance on the recording timeline", "A"),
+                Segment(1500, 1507, "second utterance on the recording timeline", "A")
+            }),
+            new(1, 1950, RangeEnd, "b", "en", new List<TranscriptSegment>
+            {
+                Segment(2400, 2408, "third utterance on the recording timeline", "S0")
+            })
+        };
+
+        // (1) Merge output is on the original-recording timeline.
+        var merged = MeetingTranscriptChunkMerger.Merge(chunks);
+        Assert(
+            Math.Abs(merged.Segments[0].StartSeconds - 900) < 0.001 &&
+            Math.Abs(merged.Segments[2].StartSeconds - 2400) < 0.001,
+            "Merging must work on the original-recording timeline.");
+
+        // (2) Persisted segments are transcript-relative.
+        var persisted = MeetingTranscriptChunkMerger.RebaseToTranscriptTimeline(
+            merged.Segments,
+            RangeStart);
+        Assert(
+            Math.Abs(persisted[0].StartSeconds) < 0.001,
+            "The first persisted segment must be transcript-relative zero.");
+        Assert(
+            persisted.All(segment => segment.StartSeconds <= RangeEnd - RangeStart + 0.001),
+            "Persisted timestamps must stay inside the transcript's own span.");
+
+        // (3)/(4) SourceAudioStartSeconds restores the recording timeline.
+        var range = MeetingTranscriptAudioRange.Resolve(3600, RangeStart, RangeEnd);
+        Assert(
+            Math.Abs(range.SourceStartSeconds - RangeStart) < 0.001 &&
+            Math.Abs(range.SourceEndSeconds - RangeEnd) < 0.001,
+            "The stored source range must describe the selected interval.");
+        for (var index = 0; index < persisted.Count; index++)
+        {
+            Assert(
+                Math.Abs(
+                    persisted[index].StartSeconds + range.SourceStartSeconds -
+                    merged.Segments[index].StartSeconds) < 0.001,
+                "Adding SourceAudioStartSeconds must recover the original-recording time.");
+        }
+
+        // A job starting at zero makes both timelines identical, which is why
+        // the reported production failure is unaffected by the rebase.
+        var atZero = MeetingTranscriptChunkMerger.RebaseToTranscriptTimeline(merged.Segments, 0);
+        for (var index = 0; index < atZero.Count; index++)
+        {
+            Assert(
+                Math.Abs(atZero[index].StartSeconds - merged.Segments[index].StartSeconds) < 0.001,
+                "A range starting at zero must leave timestamps unchanged.");
+        }
     }
 
     private static TranscriptSegment Segment(

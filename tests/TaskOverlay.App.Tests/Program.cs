@@ -74,7 +74,12 @@ internal static class Program
             ("long audio chunk failure preserves earlier parts", LongAudioChunkFailurePreservesEarlierParts),
             ("long audio restart resumes persisted job", LongAudioRestartResumesPersistedJob),
             ("long audio rejects an oversized extraction", LongAudioRejectsOversizedExtraction),
-            ("long audio progress reports parts", LongAudioProgressReportsParts)
+            ("long audio progress reports parts", LongAudioProgressReportsParts),
+            ("long legacy multi-track audio is duration bounded", LongLegacyMultiTrackAudioIsDurationBounded),
+            ("long single-source layouts are duration bounded", LongSingleSourceLayoutsAreDurationBounded),
+            ("long legacy audio honors the selected range", LongLegacyAudioHonorsSelectedRange),
+            ("long legacy audio resumes after a failed part", LongLegacyAudioResumesAfterFailedPart),
+            ("every provider request stays within the safe limit", EveryProviderRequestStaysWithinSafeLimit)
         };
 
         foreach (var test in tests)
@@ -3516,6 +3521,62 @@ internal static class Program
             return recording;
         }
 
+        /// <summary>
+        /// Long legacy/multi-track source with NO mixed file: the mixed audio
+        /// only exists after the historical mixing step, so this is the layout
+        /// that used to bypass the duration-bounded planner entirely.
+        /// Set <paramref name="includeSystem"/>/<paramref name="includeMicrophone"/>
+        /// to cover loopback-only and microphone-only recordings.
+        /// </summary>
+        public MeetingRecording AddLongLegacyTracks(
+            double seconds,
+            bool includeSystem = true,
+            bool includeMicrophone = true)
+        {
+            var id = Guid.NewGuid();
+            var layout = Storage.CreateLayout(Meeting.Id, id);
+            var tracks = new List<MeetingRecordingTrackArtifact>();
+            var recording = new MeetingRecording
+            {
+                Id = id,
+                MeetId = Meeting.Id,
+                SourceKind = MeetingRecordingSourceKind.ManualMeet,
+                State = MeetingRecordingState.Recorded,
+                RecordingFormat = MeetingRecordingFormat.Wav,
+                RecordingFolderRelativePath = layout.RelativeFolder,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+
+            if (includeSystem)
+            {
+                WriteSilentWave(layout.SystemAudioPath, seconds);
+                recording.SystemAudioFile = Path.GetFileName(layout.SystemAudioPath);
+                tracks.Add(CreateFinalTrackArtifact(
+                    MeetingRecordingTrackKind.System,
+                    recording.SystemAudioFile,
+                    new FileInfo(layout.SystemAudioPath).Length,
+                    seconds));
+            }
+
+            if (includeMicrophone)
+            {
+                WriteSilentWave(layout.MicrophonePath, seconds);
+                recording.MicrophoneFile = Path.GetFileName(layout.MicrophonePath);
+                tracks.Add(CreateFinalTrackArtifact(
+                    MeetingRecordingTrackKind.Microphone,
+                    recording.MicrophoneFile,
+                    new FileInfo(layout.MicrophonePath).Length,
+                    seconds));
+            }
+
+            // Deliberately no Mixed track and no MixedAudioFile.
+            recording.Tracks = tracks;
+            State.MeetingRecordings.Add(recording);
+            Store.Save(State);
+            return recording;
+        }
+
         public MeetingRecording AddCompactWithoutMixed()
         {
             var id = Guid.NewGuid();
@@ -3921,6 +3982,264 @@ internal static class Program
             "The transient operation should not persist after completion.");
     }
 
+    private static async Task LongLegacyMultiTrackAudioIsDurationBounded()
+    {
+        // The historical multi-track path had no mixed file at decision time,
+        // so it bypassed the planner and was bounded only by a byte budget.
+        var processor = new SyntheticChunkAudioProcessor
+        {
+            LegacyMixedSeconds = LongRecordingSeconds
+        };
+        await using var fixture = new TranscriptionFixture(audioProcessor: processor);
+        var recording = fixture.AddLongLegacyTracks(LongRecordingSeconds);
+        Assert(
+            recording.MixedAudioFile.Length == 0,
+            "The legacy fixture must start without a mixed file.");
+
+        var result = await fixture.SendAsync(recording.Id);
+        Assert(result.Success, $"Legacy multi-track transcription should succeed: {result.ErrorMessage}");
+
+        // It now goes through the same duration-bounded planner.
+        Assert(
+            processor.Extractions.Count == 3,
+            "A 52:45 legacy recording should be planned as three safe parts.");
+        Assert(
+            fixture.Provider.Requests.Count == 3,
+            "Each planned part should be submitted exactly once.");
+        foreach (var extraction in processor.Extractions)
+        {
+            Assert(
+                extraction.MeasuredSeconds <= MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                "Every legacy part must be within the safe measured duration.");
+        }
+
+        // The historical byte-split artifacts are neither submitted nor left behind.
+        Assert(
+            processor.LegacyByteSplitChunks.Count > 1,
+            "The fixture should have produced historical byte-split parts.");
+        foreach (var legacyChunk in processor.LegacyByteSplitChunks)
+        {
+            Assert(
+                fixture.Provider.Requests.All(request =>
+                    !PathsMatch(request.AudioPath, legacyChunk)),
+                "A byte-split part must never be submitted once chunking takes over.");
+            Assert(
+                !File.Exists(legacyChunk),
+                "Byte-split parts must be cleaned up when chunking takes over.");
+        }
+
+        Assert(
+            fixture.State.MeetingTranscripts.Count == 1,
+            "Exactly one final revision should be created for a legacy recording.");
+        Assert(
+            fixture.State.MeetingTranscriptionJobs.Single().IsFinalized,
+            "The legacy job should be finalized.");
+    }
+
+    private static async Task LongSingleSourceLayoutsAreDurationBounded()
+    {
+        // Microphone-only and loopback-only recordings also have no mixed file.
+        var layouts = new[]
+        {
+            (Label: "microphone-only", IncludeSystem: false, IncludeMicrophone: true),
+            (Label: "loopback-only", IncludeSystem: true, IncludeMicrophone: false)
+        };
+
+        foreach (var layout in layouts)
+        {
+            var processor = new SyntheticChunkAudioProcessor
+            {
+                LegacyMixedSeconds = LongRecordingSeconds
+            };
+            await using var fixture = new TranscriptionFixture(audioProcessor: processor);
+            var recording = fixture.AddLongLegacyTracks(
+                LongRecordingSeconds,
+                layout.IncludeSystem,
+                layout.IncludeMicrophone);
+
+            var result = await fixture.SendAsync(recording.Id);
+            Assert(
+                result.Success,
+                $"A long {layout.Label} recording should transcribe: {result.ErrorMessage}");
+            Assert(
+                processor.Extractions.Count == 3,
+                $"A long {layout.Label} recording should be split into three parts.");
+            foreach (var extraction in processor.Extractions)
+            {
+                Assert(
+                    extraction.MeasuredSeconds <=
+                        MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                    $"Every {layout.Label} part must be within the safe limit.");
+            }
+
+            Assert(
+                fixture.State.MeetingTranscripts.Count == 1,
+                $"A long {layout.Label} recording should create one final revision.");
+        }
+
+        // A long imported WAV keeps its managed original as the mixed source.
+        var importProcessor = new SyntheticChunkAudioProcessor();
+        await using var importFixture = new TranscriptionFixture(audioProcessor: importProcessor);
+        var imported = importFixture.AddLongRecordedWav(LongRecordingSeconds);
+        var importResult = await importFixture.SendAsync(imported.Id);
+        Assert(
+            importResult.Success,
+            $"A long imported WAV should transcribe: {importResult.ErrorMessage}");
+        Assert(
+            importProcessor.Extractions.Count == 3,
+            "A long imported WAV should be split into three safe parts.");
+        foreach (var extraction in importProcessor.Extractions)
+        {
+            Assert(
+                extraction.MeasuredSeconds <= MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                "Every imported-WAV part must be within the safe limit.");
+        }
+    }
+
+    private static async Task LongLegacyAudioHonorsSelectedRange()
+    {
+        // The historical multi-track path ignored the selected range entirely
+        // and always transcribed the whole recording.
+        var processor = new SyntheticChunkAudioProcessor
+        {
+            LegacyMixedSeconds = LongRecordingSeconds
+        };
+        await using var fixture = new TranscriptionFixture(audioProcessor: processor);
+        var recording = fixture.AddLongLegacyTracks(LongRecordingSeconds);
+
+        const double RangeStart = 900;
+        const double RangeEnd = 3000;
+        Assert(
+            fixture.Coordinator.SetImportedAudioRange(recording.Id, RangeStart, RangeEnd),
+            "The selected range should be accepted.");
+
+        var result = await fixture.SendAsync(recording.Id);
+        Assert(result.Success, $"A ranged legacy transcription should succeed: {result.ErrorMessage}");
+
+        Assert(
+            Math.Abs(processor.Extractions[0].Request.StartSeconds - RangeStart) < 0.01,
+            "The first part must start at the selected range start.");
+        Assert(
+            Math.Abs(processor.Extractions[^1].Request.EndSeconds - RangeEnd) < 0.01,
+            "The last part must end at the selected range end.");
+        foreach (var extraction in processor.Extractions)
+        {
+            Assert(
+                extraction.Request.StartSeconds >= RangeStart - 0.01 &&
+                extraction.Request.EndSeconds <= RangeEnd + 0.01,
+                "No legacy part may read outside the selected range.");
+            Assert(
+                extraction.MeasuredSeconds <= MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                "Every ranged legacy part must stay within the safe limit.");
+        }
+
+        // Timestamps stay transcript-relative, with SourceAudioStartSeconds
+        // mapping back to the original recording.
+        var transcript = fixture.State.MeetingTranscripts.Single();
+        Assert(
+            transcript.SourceAudioStartSeconds is double start &&
+            Math.Abs(start - RangeStart) < 0.01,
+            "The transcript should record its source-range start.");
+        Assert(
+            transcript.SourceAudioEndSeconds is double end && Math.Abs(end - RangeEnd) < 0.01,
+            "The transcript should record its source-range end.");
+    }
+
+    private static async Task LongLegacyAudioResumesAfterFailedPart()
+    {
+        var processor = new SyntheticChunkAudioProcessor
+        {
+            LegacyMixedSeconds = LongRecordingSeconds
+        };
+        await using var fixture = new TranscriptionFixture(audioProcessor: processor);
+        var recording = fixture.AddLongLegacyTracks(LongRecordingSeconds);
+
+        fixture.Provider.FailOnRequest = (index, _) => index == 1
+            ? new HttpRequestException("synthetic provider failure")
+            : null;
+        var failed = await fixture.SendAsync(recording.Id);
+        Assert(!failed.Success, "The seeded legacy run should fail at part 2.");
+        Assert(
+            recording.LastError == "Could not transcribe part 2 of 3.",
+            $"The legacy failure should be sanitized, was: {recording.LastError}");
+
+        var job = fixture.State.MeetingTranscriptionJobs.Single();
+        Assert(
+            job.CompletedChunkCount == 1,
+            "A legacy job must keep part 1 after part 2 fails.");
+
+        fixture.Provider.FailOnRequest = null;
+        var extractionsBeforeRetry = processor.Extractions.Count;
+        var retry = await fixture.SendAsync(recording.Id);
+        Assert(retry.Success, $"The legacy retry should succeed: {retry.ErrorMessage}");
+        Assert(
+            processor.Extractions.Count == extractionsBeforeRetry + 2,
+            "A legacy retry must not re-extract the completed part.");
+        Assert(
+            fixture.Provider.Requests.Count == 3,
+            "A legacy retry must submit only the remaining parts.");
+        Assert(
+            fixture.State.MeetingTranscripts.Count == 1,
+            "A legacy retry should produce exactly one final revision.");
+    }
+
+    private static async Task EveryProviderRequestStaysWithinSafeLimit()
+    {
+        // One assertion over every supported source layout: no submitted part
+        // may exceed the safe limit, whatever produced it.
+        var observed = 0;
+
+        async Task VerifyAsync(
+            string label,
+            Func<TranscriptionFixture, MeetingRecording> arrange,
+            SyntheticChunkAudioProcessor processor)
+        {
+            await using var fixture = new TranscriptionFixture(audioProcessor: processor);
+            var recording = arrange(fixture);
+            var result = await fixture.SendAsync(recording.Id);
+            Assert(result.Success, $"{label} should transcribe: {result.ErrorMessage}");
+            Assert(fixture.Provider.Requests.Count > 0, $"{label} should submit at least one part.");
+
+            foreach (var extraction in processor.Extractions)
+            {
+                Assert(
+                    extraction.MeasuredSeconds <=
+                        MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                    $"{label} submitted a part above the safe measured limit.");
+                Assert(
+                    extraction.Request.EndSeconds - extraction.Request.StartSeconds <=
+                        MeetingTranscriptionChunkPolicy.MaxChunkSeconds + 0.01,
+                    $"{label} planned a part above the safe limit.");
+                observed++;
+            }
+        }
+
+        await VerifyAsync(
+            "A long legacy multi-track recording",
+            fixture => fixture.AddLongLegacyTracks(LongRecordingSeconds),
+            new SyntheticChunkAudioProcessor { LegacyMixedSeconds = LongRecordingSeconds });
+        await VerifyAsync(
+            "A long microphone-only recording",
+            fixture => fixture.AddLongLegacyTracks(LongRecordingSeconds, false, true),
+            new SyntheticChunkAudioProcessor { LegacyMixedSeconds = LongRecordingSeconds });
+        await VerifyAsync(
+            "A long loopback-only recording",
+            fixture => fixture.AddLongLegacyTracks(LongRecordingSeconds, true, false),
+            new SyntheticChunkAudioProcessor { LegacyMixedSeconds = LongRecordingSeconds });
+        await VerifyAsync(
+            "A long imported WAV",
+            fixture => fixture.AddLongRecordedWav(LongRecordingSeconds),
+            new SyntheticChunkAudioProcessor());
+
+        Assert(observed == 12, $"Every layout should contribute three parts, saw {observed}.");
+    }
+
+    private static bool PathsMatch(string left, string right) =>
+        string.Equals(
+            Path.GetFullPath(left),
+            Path.GetFullPath(right),
+            StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// Coordinator-level audio processor: it records the requested intervals
     /// and fabricates a small artifact per part. Real extraction and
@@ -3938,11 +4257,56 @@ internal static class Program
         /// <summary>Forces an unsafe measured duration to prove local rejection.</summary>
         public double? OverrideMeasuredSeconds { get; set; }
 
+        /// <summary>
+        /// Enables the historical multi-track behaviour: build the mixed file
+        /// on demand and byte-split it, exactly as the legacy path did.
+        /// </summary>
+        public double? LegacyMixedSeconds { get; set; }
+
+        public List<MeetingAudioProcessingRequest> ProcessRequests { get; } = new();
+        public List<string> LegacyByteSplitChunks { get; } = new();
+
         public Task<MeetingAudioProcessingResult> ProcessAsync(
             MeetingAudioProcessingRequest request,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException(
-                "Long audio must use bounded chunk extraction.");
+            CancellationToken cancellationToken = default)
+        {
+            if (LegacyMixedSeconds is not double seconds)
+            {
+                throw new NotSupportedException(
+                    "Long audio must use bounded chunk extraction.");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            ProcessRequests.Add(request);
+
+            // The legacy multi-track path only materializes its mixed file here.
+            var mixedPath = request.ExistingMixedAudioPath ??
+                Path.Combine(request.RecordingFolder, "mixed.wav");
+            if (!File.Exists(mixedPath))
+            {
+                WriteSilentWave(mixedPath, seconds);
+            }
+
+            // Historical byte-only split: 16 kHz mono 16-bit against a 20 MiB
+            // budget, i.e. ~655 s per part, derived from bytes and never from
+            // measured duration. These must be discarded, not submitted.
+            LegacyByteSplitChunks.Clear();
+            var byteBudgetSeconds = request.MaximumChunkBytes / 32_000.0;
+            var partCount = Math.Max(1, (int)Math.Ceiling(seconds / byteBudgetSeconds));
+            for (var index = 0; index < partCount; index++)
+            {
+                var chunkPath = Path.Combine(
+                    request.RecordingFolder,
+                    $"transcription-{index:D3}.wav");
+                WriteSilentWave(chunkPath, 1);
+                LegacyByteSplitChunks.Add(chunkPath);
+            }
+
+            return Task.FromResult(new MeetingAudioProcessingResult(
+                mixedPath,
+                LegacyByteSplitChunks.ToArray(),
+                TimeSpan.FromSeconds(seconds)));
+        }
 
         public Task<MeetingAudioChunkExtractionResult> ExtractChunkAsync(
             MeetingAudioChunkExtractionRequest request,

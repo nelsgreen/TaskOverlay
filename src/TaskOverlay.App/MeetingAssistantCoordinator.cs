@@ -493,17 +493,11 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             Persist(recording);
             var mixedBitrate = recording.Tracks.FirstOrDefault(track =>
                 track.Kind == MeetingRecordingTrackKind.Mixed)?.Bitrate ?? 96_000;
-            var sourceDuration = recording.Tracks.FirstOrDefault(track =>
-                track.Kind == MeetingRecordingTrackKind.Mixed)?.DurationSeconds ?? 0;
-            var appliedRange = MeetingTranscriptAudioRange.Resolve(
-                sourceDuration,
-                recording.ProcessFromSeconds,
-                recording.ProcessUntilSeconds);
 
-            // A resolvable single mixed source is what makes bounded chunked
-            // extraction possible. Legacy multi-track WAV recordings have no
-            // mixed file yet and keep the historical path, where the 16 kHz
-            // mono byte budget is already well inside the duration limit.
+            // Bounded chunked extraction needs one resolvable mixed source.
+            // Imported audio and compact recordings already have one here;
+            // legacy multi-track recordings only get theirs from ProcessAsync
+            // below, and are routed through the same planner afterwards.
             if (mixedPath is not null)
             {
                 var chunkedResult = await TryRunChunkedTranscriptionAsync(
@@ -512,7 +506,6 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                     folder,
                     mixedPath,
                     mixedBitrate,
-                    appliedRange,
                     token);
                 if (chunkedResult is not null)
                 {
@@ -534,9 +527,36 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                     ProcessFromSeconds: recording.ProcessFromSeconds,
                     ProcessUntilSeconds: recording.ProcessUntilSeconds),
                 token);
+
+            // Legacy multi-track recordings produce their mixed file only
+            // here. Route it through the same duration-bounded planner so the
+            // measured 1200 s guarantee - and the selected range, which the
+            // historical multi-track path ignored entirely - apply to every
+            // supported source layout.
+            if (mixedPath is null)
+            {
+                var legacyChunked = await TryRunChunkedTranscriptionAsync(
+                    recording,
+                    service,
+                    folder,
+                    processing.MixedAudioPath,
+                    mixedBitrate,
+                    token,
+                    onChunkingCommitted: () =>
+                        ClearPreviousTranscriptionChunks(recording, folder));
+                if (legacyChunked is not null)
+                {
+                    return legacyChunked;
+                }
+            }
+
             var sourceFingerprint = await TranscriptionAudioDiagnostics.InspectAsync(
                 processing.MixedAudioPath,
                 token);
+            var appliedRange = MeetingTranscriptAudioRange.Resolve(
+                sourceFingerprint.Duration.TotalSeconds,
+                recording.ProcessFromSeconds,
+                recording.ProcessUntilSeconds);
             if (recording.RecordingFormat == MeetingRecordingFormat.AacM4a &&
                 !PathsEqual(sourceFingerprint.FullPath, mixedPath))
             {
@@ -575,6 +595,17 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 var fingerprint = await TranscriptionAudioDiagnostics.InspectAsync(
                     chunkPath,
                     token);
+                // Final backstop for the single-request path: whatever produced
+                // this file, its measured duration decides whether it may be
+                // submitted. The provider is never asked to enforce the limit.
+                if (fingerprint.Duration.TotalSeconds >
+                    MeetingTranscriptionChunkPolicy.MaxChunkSeconds +
+                    MeetingTranscriptionChunkPolicy.MeasurementToleranceSeconds)
+                {
+                    throw new InvalidDataException(
+                        "A transcription part exceeded the safe audio limit and was not submitted.");
+                }
+
                 chunkFingerprints.Add(fingerprint);
                 Report(
                     $"MEET transcription chunk prepared: recordingId={recordingId:N}; " +
@@ -1023,8 +1054,16 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     public bool SetImportedAudioRange(Guid recordingId, double? fromSeconds, double? untilSeconds)
     {
         var recording = new MeetingRecordingService(_state).Find(recordingId);
+        // Legacy multi-track recordings have no mixed track to measure against;
+        // their longest source track bounds the selectable range instead, so a
+        // manual range is usable on every supported source layout.
         var duration = recording?.Tracks.FirstOrDefault(track =>
             track.Kind == MeetingRecordingTrackKind.Mixed)?.DurationSeconds ?? 0;
+        if (duration <= 0 && recording is not null && recording.Tracks.Count > 0)
+        {
+            duration = recording.Tracks.Max(track => track.DurationSeconds);
+        }
+
         if (recording is null ||
             fromSeconds is < 0 || untilSeconds is <= 0 ||
             fromSeconds is double from && untilSeconds is double until && until <= from ||
@@ -1688,14 +1727,22 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         string folder,
         string mixedPath,
         int mixedBitrate,
-        MeetingTranscriptAudioRange appliedRange,
-        CancellationToken token)
+        CancellationToken token,
+        Action? onChunkingCommitted = null)
     {
         var recordingId = recording.Id;
         var sourceFingerprint = await TranscriptionAudioDiagnostics.InspectAsync(
             mixedPath,
             token);
+
+        // The range is resolved against the measured file duration, not track
+        // metadata: legacy multi-track recordings have no mixed-track metadata
+        // to read, and a measured value cannot drift from the real audio.
         var measuredSourceSeconds = sourceFingerprint.Duration.TotalSeconds;
+        var appliedRange = MeetingTranscriptAudioRange.Resolve(
+            measuredSourceSeconds,
+            recording.ProcessFromSeconds,
+            recording.ProcessUntilSeconds);
         var rangeStart = recording.ProcessFromSeconds ?? 0;
         var rangeEnd = recording.ProcessUntilSeconds ?? measuredSourceSeconds;
         if (rangeEnd > measuredSourceSeconds)
@@ -1713,6 +1760,10 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         {
             return null;
         }
+
+        // Past this point the chunked path owns the job; the caller may drop
+        // any artifacts the historical path produced on the way here.
+        onChunkingCommitted?.Invoke();
 
         var jobService = new MeetingTranscriptionJobService(_state);
         var fingerprint = MeetingTranscriptionJobFingerprint.Compute(
