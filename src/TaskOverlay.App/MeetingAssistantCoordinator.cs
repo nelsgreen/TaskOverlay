@@ -977,12 +977,18 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         }
     }
 
+    // Bounded transcription range: not restricted to imported audio. Any
+    // completed recording's mixed audio can be re-transcribed with a
+    // narrower [fromSeconds, untilSeconds) range - e.g. when the provider
+    // rejected the full recording for exceeding its length limit. Duration/
+    // ordering bounds below are unchanged; only the source-kind gate is
+    // removed.
     public bool SetImportedAudioRange(Guid recordingId, double? fromSeconds, double? untilSeconds)
     {
         var recording = new MeetingRecordingService(_state).Find(recordingId);
         var duration = recording?.Tracks.FirstOrDefault(track =>
             track.Kind == MeetingRecordingTrackKind.Mixed)?.DurationSeconds ?? 0;
-        if (recording is null || recording.SourceKind != MeetingRecordingSourceKind.Imported ||
+        if (recording is null ||
             fromSeconds is < 0 || untilSeconds is <= 0 ||
             fromSeconds is double from && untilSeconds is double until && until <= from ||
             fromSeconds is double start && start >= duration ||

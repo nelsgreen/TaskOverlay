@@ -258,7 +258,7 @@ public sealed class MeetingAssistantWorkspaceCommandHandler
             : WorkspaceCommandResult.Failed(
                 commandId,
                 "mutationRejected",
-                "The imported audio processing range is invalid.");
+                "The audio processing range is invalid.");
     }
 
     private WorkspaceCommandResult SaveTranscriptRevision(string commandId, JsonElement payload)

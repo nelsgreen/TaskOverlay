@@ -457,6 +457,13 @@ function RecordingCard({
   const canTranscribe = !recording.keepLocalOnly
     && recording.hasMixedAudio
     && ["Recorded", "TranscriptReady", "Ready", "Failed"].includes(recording.state)
+  // Bounded transcription range: available whenever a completed audio
+  // source can still be (re)transcribed and there is no usable transcript
+  // yet, or the last transcription attempt failed (e.g. the provider
+  // rejected the full recording for exceeding its length limit) - not just
+  // for Imported audio. This lets the user pick a shorter range and retry
+  // instead of being stuck with no recovery path.
+  const showTranscriptionRange = canTranscribe && (!recording.hasTranscript || recording.state === "Failed")
   const canAnalyze = recording.hasTranscript && !isProcessing
   const technicalErrors = recording.tracks.filter((track) => track.error.trim().length > 0)
   const transcriptionSource = recording.tracks.find((track) =>
@@ -506,7 +513,7 @@ function RecordingCard({
         )}
       </div>
 
-      {recording.sourceKind === "Imported" && (
+      {showTranscriptionRange && (
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
