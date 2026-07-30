@@ -21,6 +21,7 @@ public static class StateMigrator
         state.MeetingTranscripts ??= new List<MeetingTranscript>();
         state.MeetingScreenshots ??= new List<MeetingScreenshot>();
         state.MeetingAnalyses ??= new List<MeetingAnalysis>();
+        state.MeetingTranscriptionJobs ??= new List<MeetingTranscriptionJob>();
         state.WorkspaceSettings ??= new WorkspaceSettings();
         state.TelegramCapture ??= new TelegramCaptureSettings();
 
@@ -72,6 +73,14 @@ public static class StateMigrator
                     state.WorkspaceSettings ??= new WorkspaceSettings();
                     state.WorkspaceSettings.NormalizeAppearance();
                     state.SchemaVersion = 9;
+                    break;
+                case 9:
+                    // Schema 10 is additive: it adds resumable chunked
+                    // transcription jobs. Schema-9 states simply have none, so
+                    // the first long transcription plans a fresh job. Nothing
+                    // is rewritten and no existing transcript is touched.
+                    state.MeetingTranscriptionJobs ??= new List<MeetingTranscriptionJob>();
+                    state.SchemaVersion = 10;
                     break;
                 default:
                     throw new InvalidDataException(

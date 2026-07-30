@@ -70,7 +70,12 @@ test("connected controls expose immediate busy, cancellation, live status, and r
   assert.match(sources, /aria-busy/)
   assert.match(sources, /A new analysis is running/)
   assert.match(sources, /cancelMeetingProcessing/)
-  assert.match(assistant, /Preparing audio\.\.\./)
+  // Stage labels now live in one shared progress module used by every
+  // surface, rather than being duplicated per component.
+  const progress = fs.readFileSync(new URL("./meeting-operation-progress.ts", import.meta.url), "utf8")
+  assert.match(progress, /Preparing audio\.\.\./)
+  assert.match(assistant, /describeMeetingOperationStage\(operation\)/)
+  assert.match(sources, /describeMeetingOperationStage\(operation\)/)
   assert.match(assistant, /motion-reduce:animate-none/)
 })
 

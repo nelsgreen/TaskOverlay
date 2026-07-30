@@ -75,10 +75,38 @@ public sealed record MeetingAudioProcessingResult(
     IReadOnlyList<string> OrderedChunkPaths,
     TimeSpan Duration);
 
+/// <summary>
+/// Extraction of one bounded interval from the original managed audio into an
+/// isolated artifact. The original file is only ever read.
+/// </summary>
+public sealed record MeetingAudioChunkExtractionRequest(
+    string SourceAudioPath,
+    string DestinationFolder,
+    string DestinationBaseName,
+    double StartSeconds,
+    double EndSeconds,
+    int Bitrate,
+    double MaximumDurationSeconds,
+    long MaximumBytes);
+
+/// <summary>
+/// <paramref name="MeasuredDurationSeconds"/> is read back from the generated
+/// file, never assumed from the planned boundaries. Container, codec,
+/// rounding, and seek behaviour all move the real duration off the plan.
+/// </summary>
+public sealed record MeetingAudioChunkExtractionResult(
+    string ChunkPath,
+    double MeasuredDurationSeconds,
+    long Bytes);
+
 public interface IMeetingAudioProcessor
 {
     Task<MeetingAudioProcessingResult> ProcessAsync(
         MeetingAudioProcessingRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<MeetingAudioChunkExtractionResult> ExtractChunkAsync(
+        MeetingAudioChunkExtractionRequest request,
         CancellationToken cancellationToken = default);
 }
 

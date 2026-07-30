@@ -247,7 +247,31 @@ internal static class Program
             ("meeting source schema v6 to v7 migration", MeetingSourceSchemaV6ToV7Migration),
             ("meeting source persistence and snapshot", MeetingSourcePersistenceAndSnapshot),
             ("meeting source malformed state repair", MeetingSourceMalformedStateRepair),
-            ("meeting assistant secrets excluded from shared state", MeetingAssistantSecretsExcludedFromSharedState)
+            ("meeting assistant secrets excluded from shared state", MeetingAssistantSecretsExcludedFromSharedState),
+            ("long audio short range uses one request", LongAudioShortRangeUsesOneRequest),
+            ("long audio 52m45s splits into three safe chunks", LongAudioSplitsIntoThreeSafeChunks),
+            ("long audio chunk plan never exceeds safe limit", LongAudioChunkPlanNeverExceedsSafeLimit),
+            ("long audio manual range is the outer boundary", LongAudioManualRangeIsOuterBoundary),
+            ("long audio merge keeps recording timeline", LongAudioMergeKeepsRecordingTimeline),
+            ("long audio merge removes overlap duplicates", LongAudioMergeRemovesOverlapDuplicates),
+            ("long audio merge keeps repeats outside overlap", LongAudioMergeKeepsRepeatsOutsideOverlap),
+            ("long audio merge stabilizes speakers", LongAudioMergeStabilizesSpeakers),
+            ("long audio ambiguous speakers stay unresolved", LongAudioAmbiguousSpeakersStayUnresolved),
+            ("long audio failed chunk preserves earlier chunk", LongAudioFailedChunkPreservesEarlierChunk),
+            ("long audio retry resumes at failed chunk", LongAudioRetryResumesAtFailedChunk),
+            ("long audio restart resumes persisted job", LongAudioRestartResumesPersistedJob),
+            ("long audio source change invalidates partials", LongAudioSourceChangeInvalidatesPartials),
+            ("long audio range change invalidates partials", LongAudioRangeChangeInvalidatesPartials),
+            ("long audio model change invalidates partials", LongAudioModelChangeInvalidatesPartials),
+            ("long audio finalization is single and idempotent", LongAudioFinalizationIsSingleAndIdempotent),
+            ("long audio meet deletion cleans job artifacts", LongAudioMeetDeletionCleansJobArtifacts),
+            ("long audio recording deletion cleans job artifacts", LongAudioRecordingDeletionCleansJobArtifacts),
+            ("long audio cancellation preserves partials", LongAudioCancellationPreservesPartials),
+            ("long audio failure message is sanitized", LongAudioFailureMessageIsSanitized),
+            ("long audio schema v9 to v10 migration", LongAudioSchemaV9ToV10Migration),
+            ("long audio final persistence failure keeps partials", LongAudioFinalPersistenceFailureKeepsPartials),
+            ("long audio orphan job cleanup", LongAudioOrphanJobCleanup),
+            ("long audio timestamp round trip contract", LongAudioTimestampRoundTripContract)
         };
 
         foreach (var test in tests)
@@ -4599,8 +4623,8 @@ internal static class Program
             File.WriteAllText(store.StatePath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
             var loaded = store.Load();
-            Assert(loaded.SchemaVersion == 9,
-                "Schema-8 state should migrate additively to schema 9.");
+            Assert(loaded.SchemaVersion == AppState.CurrentSchemaVersion,
+                "Schema-8 state should migrate additively to the current schema.");
             Assert(loaded.WorkspaceSettings.Theme == WorkspaceTheme.System &&
                    loaded.WorkspaceSettings.Accent == WorkspaceAccent.Neutral,
                 "Missing appearance fields should default to System + Neutral.");
@@ -8927,6 +8951,958 @@ internal static class Program
         Assert(task.RemindAtUtc is null, "Reminder time should be empty.");
         Assert(task.RemindEveryMinutes is null, "Reminder repeat should be empty.");
     }
+
+    // ---------------------------------------------------------------------
+    // Long-audio chunked transcription
+    //
+    // The production failure these cover: the historical path bounded a
+    // transcription fragment only by bytes, so at 96 kbps a 20 MiB budget
+    // produced a 1485.48 s fragment - above the provider's per-request
+    // duration limit. Duration is now a primary, measured bound.
+    // ---------------------------------------------------------------------
+
+    private const double FiftyTwoFortyFive = (52 * 60) + 45;
+
+    private static void LongAudioShortRangeUsesOneRequest()
+    {
+        // A short recording must stay on the single-request path.
+        var plan = MeetingTranscriptionChunkPlanner.Plan(0, 600);
+        Assert(plan.Count == 1, "A 10-minute recording should need one request.");
+        Assert(plan[0].SourceStartSeconds == 0, "The single chunk should start at zero.");
+        Assert(plan[0].SourceEndSeconds == 600, "The single chunk should cover the range.");
+
+        // Exactly at the safe limit is still one request.
+        var atLimit = MeetingTranscriptionChunkPlanner.Plan(
+            0,
+            MeetingTranscriptionChunkPolicy.MaxChunkSeconds);
+        Assert(atLimit.Count == 1, "A range at the safe limit should need one request.");
+    }
+
+    private static void LongAudioSplitsIntoThreeSafeChunks()
+    {
+        var plan = MeetingTranscriptionChunkPlanner.Plan(0, FiftyTwoFortyFive);
+        Assert(plan.Count == 3, "A 52:45 recording should split into three parts.");
+        Assert(plan[0].SourceStartSeconds == 0, "The job should start at the range start.");
+        Assert(
+            Math.Abs(plan[2].SourceEndSeconds - FiftyTwoFortyFive) < 0.001,
+            "The job should end exactly at the range end.");
+
+        for (var index = 0; index < plan.Count; index++)
+        {
+            Assert(
+                plan[index].PlannedDurationSeconds <=
+                    MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                $"Part {index} must not exceed the safe duration limit.");
+        }
+
+        // The historical byte-only budget produced exactly this fragment
+        // length; the planner must never reproduce it.
+        const double HistoricalFailureSeconds = 1485.4826666666668;
+        foreach (var item in plan)
+        {
+            Assert(
+                item.PlannedDurationSeconds < HistoricalFailureSeconds,
+                "No planned part may reach the historical 1485.48 s fragment length.");
+        }
+
+        // Consecutive parts overlap by the target amount.
+        for (var index = 1; index < plan.Count; index++)
+        {
+            var overlap = plan[index - 1].SourceEndSeconds - plan[index].SourceStartSeconds;
+            Assert(
+                Math.Abs(overlap - MeetingTranscriptionChunkPolicy.OverlapSeconds) < 0.01,
+                $"Parts {index - 1} and {index} should overlap by ~10 seconds.");
+        }
+
+        // Full coverage: no gap between parts.
+        for (var index = 1; index < plan.Count; index++)
+        {
+            Assert(
+                plan[index].SourceStartSeconds < plan[index - 1].SourceEndSeconds,
+                "Consecutive parts must not leave a gap.");
+        }
+    }
+
+    private static void LongAudioChunkPlanNeverExceedsSafeLimit()
+    {
+        // Every planned part stays inside the safe limit across a wide sweep
+        // of durations, including values just above each multiple of it.
+        var durations = new List<double>
+        {
+            1, 60, 1199, 1200, 1201, 2399, 2400, 2401, FiftyTwoFortyFive,
+            3600, 7200, 12_345.678, 36_000
+        };
+        foreach (var duration in durations)
+        {
+            var plan = MeetingTranscriptionChunkPlanner.Plan(0, duration);
+            foreach (var item in plan)
+            {
+                Assert(
+                    item.PlannedDurationSeconds <=
+                        MeetingTranscriptionChunkPolicy.MaxChunkSeconds + 0.001,
+                    $"A {duration}s range produced a part above the safe limit.");
+                Assert(
+                    item.PlannedDurationSeconds > 0,
+                    "A planned part must have positive duration.");
+            }
+
+            Assert(
+                Math.Abs(plan[plan.Count - 1].SourceEndSeconds - duration) < 0.001,
+                $"A {duration}s range must end exactly at its end.");
+        }
+    }
+
+    private static void LongAudioManualRangeIsOuterBoundary()
+    {
+        // A manual Transcription Range bounds the whole job: no part may read
+        // audio before its start or after its end.
+        const double RangeStart = 900;
+        const double RangeEnd = 3900;
+        var plan = MeetingTranscriptionChunkPlanner.Plan(RangeStart, RangeEnd);
+        Assert(plan.Count == 3, "A 50-minute selected range should split into three parts.");
+        Assert(
+            Math.Abs(plan[0].SourceStartSeconds - RangeStart) < 0.001,
+            "The first part must start exactly at the selected range start.");
+        Assert(
+            Math.Abs(plan[plan.Count - 1].SourceEndSeconds - RangeEnd) < 0.001,
+            "The last part must end exactly at the selected range end.");
+        foreach (var item in plan)
+        {
+            Assert(
+                item.SourceStartSeconds >= RangeStart - 0.001 &&
+                item.SourceEndSeconds <= RangeEnd + 0.001,
+                "No part may read outside the selected range.");
+            Assert(
+                item.PlannedDurationSeconds <= MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                "A part inside a selected range must still respect the safe limit.");
+        }
+    }
+
+    private static void LongAudioMergeKeepsRecordingTimeline()
+    {
+        // Chunk-local timestamps are converted onto the original recording
+        // timeline, including a range that does not begin at zero.
+        const double RangeStart = 900;
+        var chunks = new List<MeetingTranscriptChunkInput>
+        {
+            new(0, 900, 2000, "first", "en", new List<TranscriptSegment>
+            {
+                Segment(900, 905, "opening statement about the plan", "A"),
+                Segment(1500, 1506, "middle of the first part discussion", "A")
+            }),
+            new(1, 1990, 3000, "second", "en", new List<TranscriptSegment>
+            {
+                Segment(2500, 2506, "closing statement about the plan", "A")
+            })
+        };
+
+        var merged = MeetingTranscriptChunkMerger.Merge(chunks);
+        Assert(merged.Segments.Count == 3, "All three utterances should survive the merge.");
+        Assert(
+            Math.Abs(merged.Segments[0].StartSeconds - 900) < 0.001,
+            "The first segment should keep its original-recording timestamp.");
+        Assert(
+            Math.Abs(merged.Segments[2].StartSeconds - 2500) < 0.001,
+            "A second-part segment should keep its original-recording timestamp.");
+
+        for (var index = 1; index < merged.Segments.Count; index++)
+        {
+            Assert(
+                merged.Segments[index].StartSeconds >= merged.Segments[index - 1].StartSeconds,
+                "Merged segments must be ordered by start time.");
+            Assert(
+                merged.Segments[index].EndSeconds >= merged.Segments[index].StartSeconds,
+                "A merged segment must not have a decreasing time range.");
+            Assert(
+                merged.Segments[index].Index == index,
+                "Merged segment indexes must be sequential.");
+        }
+
+        // The durable transcript stays transcript-relative so existing bounded
+        // playback and screenshot mapping keep working.
+        var rebased = MeetingTranscriptChunkMerger.RebaseToTranscriptTimeline(
+            merged.Segments,
+            RangeStart);
+        Assert(
+            Math.Abs(rebased[0].StartSeconds) < 0.001,
+            "The first segment of a selected range should be transcript-relative zero.");
+        Assert(
+            Math.Abs(rebased[2].StartSeconds - 1600) < 0.001,
+            "Rebasing should subtract exactly the range start.");
+    }
+
+    private static void LongAudioMergeRemovesOverlapDuplicates()
+    {
+        // The same utterance heard by both requests appears once.
+        var chunks = new List<MeetingTranscriptChunkInput>
+        {
+            new(0, 0, 1200, "a", "en", new List<TranscriptSegment>
+            {
+                Segment(1100, 1105, "we should ship the release on Friday", "A"),
+                Segment(1192, 1197, "let us confirm the deployment window", "B")
+            }),
+            new(1, 1190, 2400, "b", "en", new List<TranscriptSegment>
+            {
+                // Same utterance, different casing/punctuation and a small
+                // timestamp difference - exactly what two requests produce.
+                Segment(1192.4, 1197.6, "Let us confirm the deployment window.", "S0"),
+                Segment(1300, 1306, "the staging environment is ready", "S1")
+            })
+        };
+
+        var merged = MeetingTranscriptChunkMerger.Merge(chunks);
+        Assert(
+            merged.RemovedOverlapDuplicateCount == 1,
+            "Exactly one overlap duplicate should be removed.");
+        var confirmCount = merged.Segments.Count(segment =>
+            MeetingTranscriptChunkMerger.NormalizeText(segment.Text) ==
+            "let us confirm the deployment window");
+        Assert(confirmCount == 1, "The overlapping utterance should appear once.");
+        Assert(merged.Segments.Count == 3, "Only the duplicate should be dropped.");
+    }
+
+    private static void LongAudioMergeKeepsRepeatsOutsideOverlap()
+    {
+        // Legitimate repetition far away from the overlap must be preserved.
+        var chunks = new List<MeetingTranscriptChunkInput>
+        {
+            new(0, 0, 1200, "a", "en", new List<TranscriptSegment>
+            {
+                Segment(100, 104, "please review the document carefully", "A"),
+                Segment(700, 704, "please review the document carefully", "A")
+            }),
+            new(1, 1190, 2400, "b", "en", new List<TranscriptSegment>
+            {
+                Segment(1800, 1804, "please review the document carefully", "S0")
+            })
+        };
+
+        var merged = MeetingTranscriptChunkMerger.Merge(chunks);
+        Assert(
+            merged.RemovedOverlapDuplicateCount == 0,
+            "Repetition outside the overlap is not a duplicate.");
+        Assert(
+            merged.Segments.Count == 3,
+            "All legitimate repeats outside the overlap should be preserved.");
+    }
+
+    private static void LongAudioMergeStabilizesSpeakers()
+    {
+        // Provider labels restart per request; the overlap proves that the
+        // second request's "S0" is the first request's "A".
+        var chunks = new List<MeetingTranscriptChunkInput>
+        {
+            new(0, 0, 1200, "a", "en", new List<TranscriptSegment>
+            {
+                Segment(10, 15, "good morning everyone and welcome", "A"),
+                Segment(1192, 1198, "the migration plan needs another review", "A"),
+                Segment(1194, 1199, "i agree with that assessment entirely", "B")
+            }),
+            new(1, 1190, 2400, "b", "en", new List<TranscriptSegment>
+            {
+                Segment(1192.3, 1198.2, "The migration plan needs another review.", "S1"),
+                Segment(1194.2, 1199.1, "I agree with that assessment entirely.", "S0"),
+                Segment(1500, 1505, "let us schedule the follow up session", "S1")
+            })
+        };
+
+        var merged = MeetingTranscriptChunkMerger.Merge(chunks);
+        var opening = merged.Segments.First(segment =>
+            segment.Text.StartsWith("good morning", StringComparison.OrdinalIgnoreCase));
+        var followUp = merged.Segments.First(segment =>
+            segment.Text.StartsWith("let us schedule", StringComparison.OrdinalIgnoreCase));
+        Assert(
+            !string.IsNullOrWhiteSpace(opening.Speaker),
+            "The first chunk should have a canonical speaker.");
+        Assert(
+            opening.Speaker == followUp.Speaker,
+            "Overlap evidence should map the second request's label onto the same speaker.");
+        Assert(merged.MappedSpeakerCount >= 2, "Both overlapping labels should map.");
+        Assert(
+            merged.UnresolvedSpeakerCount == 0,
+            "Unambiguous overlap evidence should leave nothing unresolved.");
+
+        // Distinct people must stay distinct.
+        var agreement = merged.Segments.First(segment =>
+            segment.Text.StartsWith("i agree", StringComparison.OrdinalIgnoreCase));
+        Assert(
+            agreement.Speaker != opening.Speaker,
+            "A different speaker must not be merged into the first one.");
+    }
+
+    private static void LongAudioAmbiguousSpeakersStayUnresolved()
+    {
+        // Both first-chunk speakers say the same sentence in the overlap, so
+        // the evidence is tied. Guessing would silently merge two people.
+        var chunks = new List<MeetingTranscriptChunkInput>
+        {
+            new(0, 0, 1200, "a", "en", new List<TranscriptSegment>
+            {
+                Segment(1192, 1196, "that sounds completely reasonable to me", "A"),
+                Segment(1193, 1197, "that sounds completely reasonable to me", "B")
+            }),
+            new(1, 1190, 2400, "b", "en", new List<TranscriptSegment>
+            {
+                Segment(1192.5, 1196.5, "That sounds completely reasonable to me.", "S0"),
+                Segment(1600, 1605, "moving on to the next agenda item", "S0")
+            })
+        };
+
+        var merged = MeetingTranscriptChunkMerger.Merge(chunks);
+        Assert(
+            merged.UnresolvedSpeakerCount >= 1,
+            "Tied overlap evidence must be left unresolved rather than guessed.");
+
+        var first = merged.Segments.First(segment =>
+            Math.Abs(segment.StartSeconds - 1192) < 0.01);
+        var later = merged.Segments.First(segment =>
+            Math.Abs(segment.StartSeconds - 1600) < 0.01);
+        Assert(
+            later.Speaker != first.Speaker,
+            "An ambiguous label must not be assigned to a first-chunk speaker.");
+        Assert(
+            !string.IsNullOrWhiteSpace(later.Speaker),
+            "An unresolved speaker keeps its own distinct identity.");
+    }
+
+    private static void LongAudioFailedChunkPreservesEarlierChunk()
+    {
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, "fingerprint-a");
+
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+        service.MarkFailed(job, MeetingTranscriptionFailureMessage.ForPart(2, 3));
+
+        Assert(job.CompletedChunkCount == 1, "The first part must remain completed.");
+        Assert(job.Chunks[0].IsCompleted, "Part 1 must survive a later part's failure.");
+        Assert(
+            job.Chunks[0].ResultFileName == "part-000.json",
+            "Part 1's persisted result must remain addressable.");
+        Assert(!job.Chunks[1].IsCompleted, "The failed part must stay incomplete.");
+        Assert(
+            job.State == MeetingTranscriptionJobState.Failed,
+            "The job should record the failure.");
+    }
+
+    private static void LongAudioRetryResumesAtFailedChunk()
+    {
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, "fingerprint-a");
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+        service.MarkFailed(job, MeetingTranscriptionFailureMessage.ForPart(2, 3));
+
+        // Retry re-resolves with the same inputs: the persisted job is reused.
+        var plan = MeetingTranscriptionChunkPlanner.Plan(0, FiftyTwoFortyFive);
+        var resumed = service.Resolve(
+            recording.Id,
+            recording.MeetId,
+            "fingerprint-a",
+            0,
+            FiftyTwoFortyFive,
+            "meet/recording/transcription-job",
+            plan,
+            out var invalidated);
+        Assert(invalidated.Count == 0, "A matching retry must not invalidate partial results.");
+        Assert(ReferenceEquals(resumed, job), "Retry should reuse the persisted job.");
+
+        var next = service.NextIncompleteChunk(resumed);
+        Assert(next is not null, "Retry should have work left.");
+        Assert(next!.Index == 1, "Retry must resume at part 2, not resubmit part 1.");
+        Assert(
+            state.MeetingTranscriptionJobs.Count == 1,
+            "Retry must not create a second job.");
+
+        // Finishing the job never revisits the completed first part.
+        service.MarkChunkCompleted(resumed, 1, "part-001.json", 1061.5, 9);
+        Assert(
+            service.NextIncompleteChunk(resumed)!.Index == 2,
+            "Processing should continue with the remaining incomplete part.");
+        service.MarkChunkCompleted(resumed, 2, "part-002.json", 1061.5, 7);
+        Assert(
+            service.NextIncompleteChunk(resumed) is null,
+            "All parts should be complete.");
+        Assert(
+            resumed.Chunks[0].CompletedAtUtc is not null &&
+            resumed.Chunks[0].ResultFileName == "part-000.json",
+            "Part 1's original result must be untouched by the retry.");
+    }
+
+    private static void LongAudioRestartResumesPersistedJob()
+    {
+        // Save, reload from disk, and confirm the job resumes at the first
+        // incomplete part - no real user state is involved.
+        WithTemporaryDirectory(directory =>
+        {
+            var state = CreateTranscriptionJobState(out var recording, out _);
+            var service = new MeetingTranscriptionJobService(state);
+            var job = ResolveThreePartJob(service, recording, "fingerprint-a");
+            service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+            service.MarkFailed(job, MeetingTranscriptionFailureMessage.ForPart(2, 3));
+
+            new AppStateStore(directory).Save(state);
+
+            var reloaded = new AppStateStore(directory).Load();
+            Assert(
+                reloaded.SchemaVersion == AppState.CurrentSchemaVersion,
+                "The reloaded state should be at the current schema.");
+            Assert(
+                reloaded.MeetingTranscriptionJobs.Count == 1,
+                "The job should survive an application restart.");
+
+            var reloadedService = new MeetingTranscriptionJobService(reloaded);
+            var reloadedJob = reloadedService.Find(recording.Id);
+            Assert(reloadedJob is not null, "The job should be found after restart.");
+            Assert(
+                reloadedJob!.CompletedChunkCount == 1,
+                "The completed part should survive restart.");
+            Assert(
+                reloadedService.NextIncompleteChunk(reloadedJob)!.Index == 1,
+                "A restarted job resumes from the first incomplete part.");
+            Assert(
+                reloadedJob.Chunks[0].ResultFileName == "part-000.json",
+                "The persisted partial result pointer should survive restart.");
+            Assert(
+                reloadedJob.LastError == "Could not transcribe part 2 of 3.",
+                "Only the sanitized failure text should be persisted.");
+        });
+    }
+
+    private static void LongAudioSourceChangeInvalidatesPartials()
+    {
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, FingerprintFor(sha: "AAA"));
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+
+        var plan = MeetingTranscriptionChunkPlanner.Plan(0, FiftyTwoFortyFive);
+        var replaced = service.Resolve(
+            recording.Id,
+            recording.MeetId,
+            FingerprintFor(sha: "BBB"),
+            0,
+            FiftyTwoFortyFive,
+            "meet/recording/transcription-job",
+            plan,
+            out var invalidated);
+        Assert(
+            !ReferenceEquals(replaced, job),
+            "A different source audio must start a new job.");
+        Assert(
+            replaced.CompletedChunkCount == 0,
+            "Stale partial results must not be reused after the source changes.");
+        Assert(invalidated.Count == 1, "The abandoned job's artifacts should be reported.");
+        Assert(
+            invalidated[0].JobFolderRelativePath == "meet/recording/transcription-job",
+            "Cleanup should point at the abandoned job folder.");
+        Assert(
+            state.MeetingTranscriptionJobs.Count == 1,
+            "The invalidated job should be replaced, not accumulated.");
+    }
+
+    private static void LongAudioRangeChangeInvalidatesPartials()
+    {
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, FingerprintFor(rangeStart: 0));
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+
+        // A narrower selected range changes both the fingerprint and the plan.
+        var plan = MeetingTranscriptionChunkPlanner.Plan(600, FiftyTwoFortyFive);
+        var replaced = service.Resolve(
+            recording.Id,
+            recording.MeetId,
+            FingerprintFor(rangeStart: 600),
+            600,
+            FiftyTwoFortyFive,
+            "meet/recording/transcription-job",
+            plan,
+            out var invalidated);
+        Assert(
+            replaced.CompletedChunkCount == 0,
+            "Changing the selected range must invalidate partial results.");
+        Assert(invalidated.Count == 1, "The abandoned job's artifacts should be reported.");
+        Assert(
+            Math.Abs(replaced.RangeStartSeconds - 600) < 0.001,
+            "The new job should use the new range.");
+    }
+
+    private static void LongAudioModelChangeInvalidatesPartials()
+    {
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, FingerprintFor(model: "model-a"));
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+
+        var plan = MeetingTranscriptionChunkPlanner.Plan(0, FiftyTwoFortyFive);
+        var replaced = service.Resolve(
+            recording.Id,
+            recording.MeetId,
+            FingerprintFor(model: "model-b"),
+            0,
+            FiftyTwoFortyFive,
+            "meet/recording/transcription-job",
+            plan,
+            out _);
+        Assert(
+            replaced.CompletedChunkCount == 0,
+            "Changing the model must invalidate partial results.");
+
+        // Provider, language, and the chunking policy are material too.
+        Assert(
+            FingerprintFor(provider: "OpenAI") != FingerprintFor(provider: "Local"),
+            "The provider must be part of the job identity.");
+        Assert(
+            FingerprintFor(language: "en") != FingerprintFor(language: "ru"),
+            "Transcription language must be part of the job identity.");
+        Assert(
+            FingerprintFor(policyVersion: 1) != FingerprintFor(policyVersion: 2),
+            "The chunking policy version must be part of the job identity.");
+        Assert(
+            FingerprintFor(maxChunkSeconds: 1200) != FingerprintFor(maxChunkSeconds: 900),
+            "The chunk-boundary policy must be part of the job identity.");
+        Assert(
+            FingerprintFor(bytes: 10) != FingerprintFor(bytes: 11),
+            "Source audio size must be part of the job identity.");
+
+        // Identical inputs must fingerprint identically.
+        Assert(
+            FingerprintFor() == FingerprintFor(),
+            "The fingerprint must be deterministic for identical inputs.");
+    }
+
+    private static void LongAudioFinalizationIsSingleAndIdempotent()
+    {
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, "fingerprint-a");
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+        service.MarkChunkCompleted(job, 1, "part-001.json", 1061.5, 9);
+        service.MarkChunkCompleted(job, 2, "part-002.json", 1061.5, 7);
+        Assert(!job.IsFinalized, "The job is not final until the revision is persisted.");
+
+        var transcriptId = Guid.NewGuid();
+        var revisionId = Guid.NewGuid();
+        service.MarkFinalized(job, transcriptId, revisionId);
+        Assert(job.IsFinalized, "Finalization should bind the single final revision.");
+        Assert(
+            job.State == MeetingTranscriptionJobState.Completed,
+            "A finalized job should be completed.");
+
+        // A retry or restart re-resolves the same job and finds it finalized,
+        // which is what prevents a second final revision.
+        var plan = MeetingTranscriptionChunkPlanner.Plan(0, FiftyTwoFortyFive);
+        var resumed = service.Resolve(
+            recording.Id,
+            recording.MeetId,
+            "fingerprint-a",
+            0,
+            FiftyTwoFortyFive,
+            "meet/recording/transcription-job",
+            plan,
+            out _);
+        Assert(resumed.IsFinalized, "A re-run must see the job as already finalized.");
+        Assert(
+            resumed.FinalTranscriptId == transcriptId,
+            "The bound final transcript must not change.");
+        Assert(
+            service.NextIncompleteChunk(resumed) is null,
+            "A finalized job has no remaining work.");
+    }
+
+    private static void LongAudioMeetDeletionCleansJobArtifacts()
+    {
+        var state = CreateTranscriptionJobState(out var recording, out var meeting);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, "fingerprint-a");
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+
+        var deleted = new MeetingService(state).Delete(meeting.Id, out var cleanup);
+        Assert(deleted, "The MEET should be deleted.");
+        Assert(
+            state.MeetingTranscriptionJobs.Count == 0,
+            "Deleting a MEET must clean up its incomplete transcription job.");
+        Assert(cleanup.Count == 1, "The MEET's job artifacts should be reported for deletion.");
+        Assert(
+            cleanup[0].JobFolderRelativePath == "meet/recording/transcription-job",
+            "Cleanup should point at the job folder.");
+        Assert(
+            state.MeetingRecordings.Count == 1,
+            "The recording itself is retained, matching existing MEET-delete semantics.");
+    }
+
+    private static void LongAudioRecordingDeletionCleansJobArtifacts()
+    {
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, "fingerprint-a");
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+
+        var removed = new MeetingRecordingService(state).RemoveMetadata(recording.Id);
+        Assert(removed, "The recording should be removed.");
+        Assert(
+            state.MeetingTranscriptionJobs.Count == 0,
+            "Deleting the source recording must invalidate its transcription job.");
+    }
+
+    private static void LongAudioCancellationPreservesPartials()
+    {
+        // Cancellation is neutral: it returns the recording to Ready and does
+        // not discard completed parts, the source audio, or a prior transcript.
+        var state = CreateTranscriptionJobState(out var recording, out var meeting);
+        var recordingService = new MeetingRecordingService(state);
+        var jobService = new MeetingTranscriptionJobService(state);
+
+        var existingTranscript = new MeetingTranscript
+        {
+            Id = Guid.NewGuid(),
+            MeetId = meeting.Id,
+            RecordingId = recording.Id,
+            Origin = MeetingTranscriptOrigin.Generated
+        };
+        state.MeetingTranscripts.Add(existingTranscript);
+        meeting.ActiveTranscriptId = existingTranscript.Id;
+
+        var job = ResolveThreePartJob(jobService, recording, "fingerprint-a");
+        jobService.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+
+        recording.State = MeetingRecordingState.Transcribing;
+        var restored = recordingService.MarkReadyAfterCancellation(recording.Id);
+        Assert(restored, "Cancellation should return the recording to Ready.");
+        Assert(
+            recording.State == MeetingRecordingState.Ready,
+            "Cancellation is a neutral outcome, not a failure.");
+        Assert(recording.LastError.Length == 0, "Cancellation must not record an error.");
+        Assert(
+            recording.MixedAudioFile == "mixed.m4a",
+            "Cancellation must not damage the original audio reference.");
+        Assert(
+            state.MeetingTranscripts.Count == 1 &&
+            meeting.ActiveTranscriptId == existingTranscript.Id,
+            "Cancellation must not damage or replace an existing final transcript.");
+        Assert(
+            jobService.Find(recording.Id)!.CompletedChunkCount == 1,
+            "A recoverable cancellation keeps completed parts usable.");
+    }
+
+    private static void LongAudioFailureMessageIsSanitized()
+    {
+        var message = MeetingTranscriptionFailureMessage.ForPart(2, 3);
+        Assert(
+            message == "Could not transcribe part 2 of 3.",
+            "The user-visible failure text should name the failing part.");
+
+        // A raw provider error must never survive into user-visible state.
+        const string RawProviderError =
+            "HTTP 400 from api.openai.com: {\"error\":{\"message\":\"Maximum content size " +
+            "limit exceeded: audio duration 1485.48 seconds is longer than 1400 seconds\"," +
+            "\"type\":\"invalid_request_error\"},\"request_id\":\"req_abc123\"}";
+        foreach (var fragment in new[]
+                 {
+                     "openai", "http", "request_id", "1485", "invalid_request_error", "{"
+                 })
+        {
+            Assert(
+                !message.Contains(fragment, StringComparison.OrdinalIgnoreCase),
+                $"The sanitized message must not leak '{fragment}'.");
+        }
+
+        Assert(
+            RawProviderError.Contains("1485.48", StringComparison.Ordinal),
+            "The raw diagnostic detail remains available for logs.");
+
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, "fingerprint-a");
+        service.MarkFailed(job, message);
+        Assert(
+            job.LastError == message,
+            "Only the sanitized description is persisted on the job.");
+
+        new MeetingRecordingService(state).MarkFailed(recording.Id, message);
+        Assert(
+            recording.LastError == message,
+            "Only the sanitized description reaches recording state.");
+
+        Assert(
+            MeetingTranscriptionFailureMessage.ForPart(0, 0) ==
+                "Could not transcribe the recording.",
+            "A non-chunked failure should use the generic sanitized text.");
+    }
+
+    private static void LongAudioSchemaV9ToV10Migration()
+    {
+        // Synthetic schema-9 fixture: no real user state is read.
+        WithTemporaryDirectory(directory =>
+        {
+            var seed = CreateTranscriptionJobState(out var seedRecording, out var seedMeeting);
+            seedRecording.RecordingFolderRelativePath =
+                $"meetings/{seedRecording.MeetId:N}/recordings/{seedRecording.Id:N}";
+            var store = new AppStateStore(directory);
+            store.Save(seed);
+            var path = store.StatePath;
+
+            // Downgrade the saved state into a synthetic schema-9 fixture by
+            // removing exactly what schema 10 adds.
+            var root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+            root["schemaVersion"] = 9;
+            root.Remove("meetingTranscriptionJobs");
+            Assert(
+                root["meetingRecordings"]!.AsArray().Count == 1,
+                "The synthetic schema-9 fixture should contain the recording.");
+            File.WriteAllText(path, root.ToJsonString());
+
+            var loaded = new AppStateStore(directory).Load();
+            Assert(
+                loaded.SchemaVersion == 10,
+                "A schema-9 state should migrate to schema 10.");
+            Assert(
+                loaded.MeetingTranscriptionJobs is not null &&
+                loaded.MeetingTranscriptionJobs.Count == 0,
+                "The migration is additive: an old state simply has no jobs.");
+            Assert(
+                loaded.MeetingRecordings.Count == 1 &&
+                loaded.MeetingRecordings[0].MixedAudioFile == "mixed.m4a",
+                "The migration must not disturb existing recording metadata.");
+            Assert(
+                loaded.Meetings.Any(meeting => meeting.Id == seedMeeting.Id),
+                "The migration must not disturb existing MEETs.");
+
+            // Idempotent: migrating an already-current state changes nothing.
+            new AppStateStore(directory).Save(loaded);
+            var again = new AppStateStore(directory).Load();
+            Assert(
+                again.SchemaVersion == 10 && again.MeetingTranscriptionJobs.Count == 0,
+                "Re-loading a migrated state should be stable.");
+        });
+    }
+
+    private static void LongAudioFinalPersistenceFailureKeepsPartials()
+    {
+        // If the final revision cannot be persisted, the completed parts must
+        // stay reusable: the job is only marked finalized after the write.
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, "fingerprint-a");
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+        service.MarkChunkCompleted(job, 1, "part-001.json", 1061.5, 9);
+        service.MarkChunkCompleted(job, 2, "part-002.json", 1061.5, 7);
+
+        // Simulated failure at the persistence boundary: MarkFinalized is
+        // never reached, so nothing is discarded.
+        service.MarkFailed(job, "Could not save the transcript.");
+        Assert(!job.IsFinalized, "A failed final write must not mark the job finalized.");
+        Assert(
+            job.CompletedChunkCount == 3,
+            "Every completed part must remain after a failed final write.");
+        foreach (var chunk in job.Chunks)
+        {
+            Assert(
+                chunk.IsCompleted && chunk.ResultFileName.Length > 0,
+                "Completed partial results must stay addressable for the next attempt.");
+        }
+
+        var plan = MeetingTranscriptionChunkPlanner.Plan(0, FiftyTwoFortyFive);
+        var resumed = service.Resolve(
+            recording.Id,
+            recording.MeetId,
+            "fingerprint-a",
+            0,
+            FiftyTwoFortyFive,
+            "meet/recording/transcription-job",
+            plan,
+            out _);
+        Assert(
+            service.NextIncompleteChunk(resumed) is null,
+            "The retry should go straight to merging, not resubmit any part.");
+    }
+
+    private static void LongAudioOrphanJobCleanup()
+    {
+        var state = CreateTranscriptionJobState(out var recording, out _);
+        var service = new MeetingTranscriptionJobService(state);
+        var job = ResolveThreePartJob(service, recording, "fingerprint-a");
+        service.MarkChunkCompleted(job, 0, "part-000.json", 1061.5, 12);
+
+        // A job whose recording vanished (e.g. replaced outside the delete
+        // path) leaves orphaned artifacts that must be swept safely.
+        state.MeetingRecordings.Clear();
+        var cleanup = service.RemoveOrphans();
+        Assert(cleanup.Count == 1, "The orphaned job should be reported for cleanup.");
+        Assert(
+            cleanup[0].JobFolderRelativePath == "meet/recording/transcription-job",
+            "Cleanup should identify the orphaned job folder.");
+        Assert(
+            state.MeetingTranscriptionJobs.Count == 0,
+            "Orphaned job metadata should not accumulate in state.");
+
+        // Sweeping again is safe and does nothing.
+        Assert(
+            service.RemoveOrphans().Count == 0,
+            "Re-sweeping orphans should be a no-op.");
+    }
+
+    private static void LongAudioTimestampRoundTripContract()
+    {
+        // Contract, per DECISIONS.md "bounded playback":
+        //   1. merging works on the ORIGINAL RECORDING timeline internally;
+        //   2. persisted segment timestamps are TRANSCRIPT-RELATIVE;
+        //   3. SourceAudioStartSeconds maps them back to the recording;
+        //   4. so C# adding SourceAudioStartSeconds recovers the original.
+        const double RangeStart = 900;
+        const double RangeEnd = 3000;
+        var chunks = new List<MeetingTranscriptChunkInput>
+        {
+            new(0, RangeStart, 1960, "a", "en", new List<TranscriptSegment>
+            {
+                Segment(900, 906, "first utterance on the recording timeline", "A"),
+                Segment(1500, 1507, "second utterance on the recording timeline", "A")
+            }),
+            new(1, 1950, RangeEnd, "b", "en", new List<TranscriptSegment>
+            {
+                Segment(2400, 2408, "third utterance on the recording timeline", "S0")
+            })
+        };
+
+        // (1) Merge output is on the original-recording timeline.
+        var merged = MeetingTranscriptChunkMerger.Merge(chunks);
+        Assert(
+            Math.Abs(merged.Segments[0].StartSeconds - 900) < 0.001 &&
+            Math.Abs(merged.Segments[2].StartSeconds - 2400) < 0.001,
+            "Merging must work on the original-recording timeline.");
+
+        // (2) Persisted segments are transcript-relative.
+        var persisted = MeetingTranscriptChunkMerger.RebaseToTranscriptTimeline(
+            merged.Segments,
+            RangeStart);
+        Assert(
+            Math.Abs(persisted[0].StartSeconds) < 0.001,
+            "The first persisted segment must be transcript-relative zero.");
+        Assert(
+            persisted.All(segment => segment.StartSeconds <= RangeEnd - RangeStart + 0.001),
+            "Persisted timestamps must stay inside the transcript's own span.");
+
+        // (3)/(4) SourceAudioStartSeconds restores the recording timeline.
+        var range = MeetingTranscriptAudioRange.Resolve(3600, RangeStart, RangeEnd);
+        Assert(
+            Math.Abs(range.SourceStartSeconds - RangeStart) < 0.001 &&
+            Math.Abs(range.SourceEndSeconds - RangeEnd) < 0.001,
+            "The stored source range must describe the selected interval.");
+        for (var index = 0; index < persisted.Count; index++)
+        {
+            Assert(
+                Math.Abs(
+                    persisted[index].StartSeconds + range.SourceStartSeconds -
+                    merged.Segments[index].StartSeconds) < 0.001,
+                "Adding SourceAudioStartSeconds must recover the original-recording time.");
+        }
+
+        // A job starting at zero makes both timelines identical, which is why
+        // the reported production failure is unaffected by the rebase.
+        var atZero = MeetingTranscriptChunkMerger.RebaseToTranscriptTimeline(merged.Segments, 0);
+        for (var index = 0; index < atZero.Count; index++)
+        {
+            Assert(
+                Math.Abs(atZero[index].StartSeconds - merged.Segments[index].StartSeconds) < 0.001,
+                "A range starting at zero must leave timestamps unchanged.");
+        }
+    }
+
+    private static TranscriptSegment Segment(
+        double start,
+        double end,
+        string text,
+        string speaker) => new()
+        {
+            StartSeconds = start,
+            EndSeconds = end,
+            Text = text,
+            Speaker = speaker
+        };
+
+    private static AppState CreateTranscriptionJobState(
+        out MeetingRecording recording,
+        out MeetingItem meeting)
+    {
+        var state = AppState.CreateDefault();
+        meeting = new MeetingItem
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = state.Projects[0].Id,
+            Title = "Long MEET",
+            StartsAtUtc = new DateTimeOffset(2026, 7, 30, 9, 0, 0, TimeSpan.Zero),
+            DurationMinutes = 60
+        };
+        state.Meetings.Add(meeting);
+
+        recording = new MeetingRecording
+        {
+            Id = Guid.NewGuid(),
+            MeetId = meeting.Id,
+            State = MeetingRecordingState.Recorded,
+            RecordingFormat = MeetingRecordingFormat.AacM4a,
+            RecordingFolderRelativePath = "meet/recording",
+            MixedAudioFile = "mixed.m4a"
+        };
+        recording.Tracks.Add(new MeetingRecordingTrackArtifact
+        {
+            Kind = MeetingRecordingTrackKind.Mixed,
+            FileName = "mixed.m4a",
+            Bitrate = 96_000,
+            DurationSeconds = FiftyTwoFortyFive,
+            FinalizationState = MeetingRecordingFinalizationState.Finalized,
+            ValidationState = MeetingRecordingValidationState.Valid
+        });
+        state.MeetingRecordings.Add(recording);
+        return state;
+    }
+
+    private static MeetingTranscriptionJob ResolveThreePartJob(
+        MeetingTranscriptionJobService service,
+        MeetingRecording recording,
+        string fingerprint)
+    {
+        var plan = MeetingTranscriptionChunkPlanner.Plan(0, FiftyTwoFortyFive);
+        var job = service.Resolve(
+            recording.Id,
+            recording.MeetId,
+            fingerprint,
+            0,
+            FiftyTwoFortyFive,
+            "meet/recording/transcription-job",
+            plan,
+            out _);
+        Assert(job.TotalChunkCount == 3, "The 52:45 fixture should plan three parts.");
+        return job;
+    }
+
+    private static string FingerprintFor(
+        string sha = "AAA",
+        long bytes = 1234,
+        double rangeStart = 0,
+        double rangeEnd = FiftyTwoFortyFive,
+        string provider = "OpenAI",
+        string model = "model-a",
+        string language = "en",
+        int policyVersion = 1,
+        double maxChunkSeconds = 1200,
+        double overlapSeconds = 10) =>
+        MeetingTranscriptionJobFingerprint.Compute(
+            new MeetingTranscriptionJobInputs(
+                Guid.Empty,
+                "mixed.m4a",
+                bytes,
+                sha,
+                rangeStart,
+                rangeEnd,
+                provider,
+                model,
+                language,
+                policyVersion,
+                maxChunkSeconds,
+                overlapSeconds,
+                "plan"));
 
     private static void Assert(bool condition, string message)
     {

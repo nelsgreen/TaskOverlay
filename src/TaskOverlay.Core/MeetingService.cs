@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
@@ -81,12 +82,28 @@ public sealed class MeetingService
         return true;
     }
 
-    public bool Delete(Guid meetingId, DateTimeOffset? now = null)
+    public bool Delete(Guid meetingId, DateTimeOffset? now = null) =>
+        Delete(meetingId, out _, now);
+
+    /// <summary>
+    /// Deletes a MEET and reports the transcription-job artifacts the caller
+    /// must remove. Unfinished chunked transcription work belongs to the MEET
+    /// request that started it, so it is dropped here rather than left behind
+    /// as unreachable partial results.
+    /// </summary>
+    public bool Delete(
+        Guid meetingId,
+        out IReadOnlyList<MeetingTranscriptionJobCleanup> transcriptionJobCleanup,
+        DateTimeOffset? now = null)
     {
+        transcriptionJobCleanup = Array.Empty<MeetingTranscriptionJobCleanup>();
         if (_state.Meetings.RemoveAll(item => item.Id == meetingId) == 0)
         {
             return false;
         }
+
+        transcriptionJobCleanup = new MeetingTranscriptionJobService(_state)
+            .RemoveForMeeting(meetingId);
 
         // Project memory outlives the meeting: clear navigation links only.
         new ContextService(_state).ClearMeetingLinks(meetingId, now);

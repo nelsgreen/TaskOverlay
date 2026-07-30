@@ -205,6 +205,27 @@ public sealed class MeetingRecordingService
         return true;
     }
 
+    /// <summary>
+    /// Restores TranscriptReady when a re-run finds the job already finalized.
+    /// Used only on the idempotent path, so a completed transcript is never
+    /// left stuck in Processing/Transcribing.
+    /// </summary>
+    public bool MarkTranscriptReadyIfProcessing(Guid recordingId, DateTimeOffset? now = null)
+    {
+        var recording = Find(recordingId);
+        if (recording is null ||
+            recording.State is not (MeetingRecordingState.Processing or
+                MeetingRecordingState.Transcribing))
+        {
+            return false;
+        }
+
+        recording.State = MeetingRecordingState.TranscriptReady;
+        recording.LastError = string.Empty;
+        recording.UpdatedAtUtc = now ?? DateTimeOffset.UtcNow;
+        return true;
+    }
+
     public bool MarkAnalyzing(Guid recordingId, DateTimeOffset? now = null) =>
         TryTransition(
             recordingId,
@@ -299,6 +320,9 @@ public sealed class MeetingRecordingService
     public bool RemoveMetadata(Guid recordingId)
     {
         _state.MeetingAnalyses.RemoveAll(analysis => analysis.RecordingId == recordingId);
+        // The recording is the source audio of any chunked transcription job,
+        // so removing it invalidates that job's partial results.
+        new MeetingTranscriptionJobService(_state).Remove(recordingId);
         return _state.MeetingRecordings.RemoveAll(recording => recording.Id == recordingId) > 0;
     }
 
