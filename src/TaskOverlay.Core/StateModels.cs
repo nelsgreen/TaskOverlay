@@ -7,7 +7,7 @@ namespace TaskOverlay.Core;
 
 public sealed class AppState
 {
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public List<TaskItem> Tasks { get; set; } = new();
@@ -21,6 +21,7 @@ public sealed class AppState
     public List<MeetingTranscript> MeetingTranscripts { get; set; } = new();
     public List<MeetingScreenshot> MeetingScreenshots { get; set; } = new();
     public List<MeetingAnalysis> MeetingAnalyses { get; set; } = new();
+    public List<MeetingTranscriptionJob> MeetingTranscriptionJobs { get; set; } = new();
     public OverlaySettings OverlaySettings { get; set; } = new();
     public WindowPlacement WindowPlacement { get; set; } = new();
     public TreeManagerSettings TreeManagerSettings { get; set; } = new();

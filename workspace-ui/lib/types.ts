@@ -259,12 +259,25 @@ export interface MeetingAnalysisSnapshot {
 export interface MeetingOperationSnapshot {
   id: string
   kind: "Transcription" | "Analysis"
-  stage: "StartingTranscription" | "PreparingAudio" | "Transcribing" | "StartingAnalysis" | "Analyzing" | "Cancelling"
+  stage:
+    | "StartingTranscription"
+    | "PreparingAudio"
+    | "PreparingParts"
+    | "Transcribing"
+    | "TranscribingPart"
+    | "MergingTranscript"
+    | "StartingAnalysis"
+    | "Analyzing"
+    | "Cancelling"
   meetingId: string | null
   recordingId: string | null
   transcriptId: string | null
   startedAtUtc: string
   cancellationRequested: boolean
+  /** 1-based part number for multi-part stages; 0 or absent otherwise. */
+  stageIndex?: number
+  /** Total part count for multi-part stages; 0 or absent otherwise. */
+  stageTotal?: number
 }
 
 export interface MeetingTranscriptSegmentSnapshot {

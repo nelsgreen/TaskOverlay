@@ -68,7 +68,13 @@ internal static class Program
             ("transcription cancellation is neutral and preserves sources", TranscriptionCancellationIsNeutralAndPreservesSources),
             ("analysis cancellation preserves previous success", AnalysisCancellationPreservesPreviousSuccess),
             ("recording format setting is local and defaults compact", RecordingFormatSettingIsLocalAndDefaultsCompact),
-            ("legacy WAV migration and interrupted recovery are idempotent", LegacyWavMigrationAndInterruptedRecoveryAreIdempotent)
+            ("legacy WAV migration and interrupted recovery are idempotent", LegacyWavMigrationAndInterruptedRecoveryAreIdempotent),
+            ("short audio uses one transcription request", ShortAudioUsesOneTranscriptionRequest),
+            ("long audio transcribes in safe chunks", LongAudioTranscribesInSafeChunks),
+            ("long audio chunk failure preserves earlier parts", LongAudioChunkFailurePreservesEarlierParts),
+            ("long audio restart resumes persisted job", LongAudioRestartResumesPersistedJob),
+            ("long audio rejects an oversized extraction", LongAudioRejectsOversizedExtraction),
+            ("long audio progress reports parts", LongAudioProgressReportsParts)
         };
 
         foreach (var test in tests)
@@ -2988,6 +2994,21 @@ internal static class Program
         writer.Write(samples, 0, samples.Length);
     }
 
+    private static void WriteSilentWave(string path, double seconds)
+    {
+        const int sampleRate = 4_000;
+        var format = new WaveFormat(sampleRate, 16, 1);
+        using var writer = new WaveFileWriter(path, format);
+        var block = new byte[sampleRate * sizeof(short)];
+        var remaining = (long)Math.Round(seconds * sampleRate) * sizeof(short);
+        while (remaining > 0)
+        {
+            var take = (int)Math.Min(block.Length, remaining);
+            writer.Write(block, 0, take);
+            remaining -= take;
+        }
+    }
+
     private static string ComputeFileSha256(string path) =>
         Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
 
@@ -3350,7 +3371,8 @@ internal static class Program
 
         public TranscriptionFixture(
             IMeetingSourceInteraction? sourceInteraction = null,
-            IMeetingAnalysisProvider? analysisProvider = null)
+            IMeetingAnalysisProvider? analysisProvider = null,
+            IMeetingAudioProcessor? audioProcessor = null)
         {
             State = AppState.CreateDefault();
             Meeting = new MeetingItem
@@ -3399,7 +3421,7 @@ internal static class Program
                     }
                 },
                 new FakeMeetingRecorder(),
-                Processor,
+                audioProcessor ?? Processor,
                 Provider,
                 analysisProvider ?? new UnusedAnalysisProvider(),
                 (message, _) => Diagnostics.Add(message));
@@ -3449,6 +3471,43 @@ internal static class Program
                         reader.TotalTime.TotalSeconds)
                 },
                 LastError = label,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            State.MeetingRecordings.Add(recording);
+            Store.Save(State);
+            return recording;
+        }
+
+        /// <summary>
+        /// Writes a synthetic recording long enough to require chunking. A low
+        /// sample rate keeps the fixture small while the real duration - which
+        /// is what the planner reads - stays realistic.
+        /// </summary>
+        public MeetingRecording AddLongRecordedWav(double seconds)
+        {
+            var id = Guid.NewGuid();
+            var layout = Storage.CreateLayout(Meeting.Id, id);
+            WriteSilentWave(layout.MixedAudioPath, seconds);
+            using var reader = new WaveFileReader(layout.MixedAudioPath);
+            var info = new FileInfo(layout.MixedAudioPath);
+            var recording = new MeetingRecording
+            {
+                Id = id,
+                MeetId = Meeting.Id,
+                SourceKind = MeetingRecordingSourceKind.ManualMeet,
+                State = MeetingRecordingState.Recorded,
+                RecordingFormat = MeetingRecordingFormat.Wav,
+                RecordingFolderRelativePath = layout.RelativeFolder,
+                MixedAudioFile = Path.GetFileName(layout.MixedAudioPath),
+                Tracks = new List<MeetingRecordingTrackArtifact>
+                {
+                    CreateFinalTrackArtifact(
+                        MeetingRecordingTrackKind.Mixed,
+                        Path.GetFileName(layout.MixedAudioPath),
+                        info.Length,
+                        reader.TotalTime.TotalSeconds)
+                },
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
@@ -3547,6 +3606,16 @@ internal static class Program
                 new[] { path },
                 reader.TotalTime));
         }
+
+        /// <summary>
+        /// Short audio must stay on the single-request path, so bounded chunk
+        /// extraction is never reached here.
+        /// </summary>
+        public Task<MeetingAudioChunkExtractionResult> ExtractChunkAsync(
+            MeetingAudioChunkExtractionRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException(
+                "Short audio must not use chunked extraction.");
     }
 
     private sealed class FakeNativeAudioBackend : IMeetingNativeAudioBackend
@@ -3579,6 +3648,325 @@ internal static class Program
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Long-audio chunked transcription (coordinator level)
+    // ---------------------------------------------------------------------
+
+    private const double LongRecordingSeconds = (52 * 60) + 45;
+
+    private static async Task ShortAudioUsesOneTranscriptionRequest()
+    {
+        // The passthrough processor throws if bounded chunk extraction is
+        // reached, so this proves short audio stays on the single-request path.
+        await using var fixture = new TranscriptionFixture();
+        var recording = fixture.AddRecordedWav("short", 440);
+
+        var result = await fixture.SendAsync(recording.Id);
+        Assert(result.Success, "Short-audio transcription should succeed.");
+        Assert(
+            fixture.Provider.Requests.Count == 1,
+            "Short audio should use exactly one provider request.");
+        Assert(
+            fixture.State.MeetingTranscriptionJobs.Count == 0,
+            "Short audio should not create a chunked transcription job.");
+        Assert(
+            fixture.State.MeetingTranscripts.Count == 1,
+            "Short audio should create exactly one transcript.");
+    }
+
+    private static async Task LongAudioTranscribesInSafeChunks()
+    {
+        var processor = new SyntheticChunkAudioProcessor();
+        await using var fixture = new TranscriptionFixture(audioProcessor: processor);
+        var recording = fixture.AddLongRecordedWav(LongRecordingSeconds);
+
+        var result = await fixture.SendAsync(recording.Id);
+        Assert(result.Success, $"Long-audio transcription should succeed: {result.ErrorMessage}");
+        Assert(
+            processor.Extractions.Count == 3,
+            "A 52:45 recording should be extracted as three parts.");
+        Assert(
+            fixture.Provider.Requests.Count == 3,
+            "Each part should be submitted exactly once.");
+
+        foreach (var extraction in processor.Extractions)
+        {
+            Assert(
+                extraction.MeasuredSeconds <= MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                "Every submitted part must be within the safe measured duration.");
+            Assert(
+                extraction.Request.MaximumDurationSeconds ==
+                    MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                "The safe duration limit must be passed to extraction.");
+        }
+
+        // The whole selected range is covered, starting and ending exactly.
+        Assert(
+            Math.Abs(processor.Extractions[0].Request.StartSeconds) < 0.001,
+            "The first part should start at the range start.");
+        Assert(
+            Math.Abs(processor.Extractions[2].Request.EndSeconds - LongRecordingSeconds) < 0.01,
+            "The last part should end at the range end.");
+
+        // Exactly one final revision, and the job is completed and cleaned.
+        Assert(
+            fixture.State.MeetingTranscripts.Count == 1,
+            "Exactly one final transcript revision should be created.");
+        var job = fixture.State.MeetingTranscriptionJobs.Single();
+        Assert(
+            job.State == MeetingTranscriptionJobState.Completed && job.IsFinalized,
+            "The job should be completed and bound to its final revision.");
+        Assert(
+            job.FinalTranscriptId == fixture.State.MeetingTranscripts[0].Id,
+            "The job should point at the created transcript.");
+        Assert(
+            recording.State == MeetingRecordingState.TranscriptReady,
+            "Analysis becomes eligible only once the merged transcript exists.");
+        Assert(
+            !Directory.Exists(Path.Combine(
+                fixture.Storage.ResolveFolder(recording.RecordingFolderRelativePath),
+                "transcription-job")),
+            "Partial artifacts should be removed after successful finalization.");
+
+        // A repeat run must not create a second final revision.
+        var repeat = await fixture.SendAsync(recording.Id);
+        Assert(repeat.Success, "A repeated run on a finalized job should succeed.");
+        Assert(
+            fixture.State.MeetingTranscripts.Count == 1,
+            "A repeat must not create another final revision.");
+        Assert(
+            fixture.Provider.Requests.Count == 3,
+            "A repeat must not resubmit any part.");
+    }
+
+    private static async Task LongAudioChunkFailurePreservesEarlierParts()
+    {
+        var processor = new SyntheticChunkAudioProcessor();
+        await using var fixture = new TranscriptionFixture(audioProcessor: processor);
+        var recording = fixture.AddLongRecordedWav(LongRecordingSeconds);
+
+        // Fail the second part with a raw provider-style error.
+        const string RawProviderError =
+            "HTTP 400 api.openai.com {\"error\":{\"message\":\"audio duration 1485.48 seconds " +
+            "is longer than 1400 seconds\"},\"request_id\":\"req_abc\"}";
+        fixture.Provider.FailOnRequest = (index, _) => index == 1
+            ? new HttpRequestException(RawProviderError)
+            : null;
+
+        var failed = await fixture.SendAsync(recording.Id);
+        Assert(!failed.Success, "A failing part should fail the operation.");
+        Assert(
+            fixture.Provider.Requests.Count == 1,
+            "Only part 1 should have been accepted before the failure.");
+        Assert(
+            processor.Extractions.Count == 2,
+            "Processing should stop after the failing part.");
+
+        var job = fixture.State.MeetingTranscriptionJobs.Single();
+        Assert(
+            job.Chunks[0].IsCompleted,
+            "Part 1's result must survive part 2's failure.");
+        Assert(job.CompletedChunkCount == 1, "Only part 1 should be complete.");
+        Assert(
+            fixture.State.MeetingTranscripts.Count == 0,
+            "No final revision should exist while parts remain incomplete.");
+
+        // The user-visible error is sanitized; the raw text stays in logs.
+        Assert(
+            recording.LastError == "Could not transcribe part 2 of 3.",
+            $"The persisted error should be sanitized, was: {recording.LastError}");
+        foreach (var fragment in new[] { "openai", "request_id", "1485", "HTTP 400" })
+        {
+            Assert(
+                !recording.LastError.Contains(fragment, StringComparison.OrdinalIgnoreCase),
+                $"The sanitized error must not leak '{fragment}'.");
+        }
+
+        Assert(
+            fixture.Diagnostics.Any(message =>
+                message.Contains("transcription failed", StringComparison.OrdinalIgnoreCase)),
+            "The failure should still be reported to diagnostics.");
+
+        // Retry resumes at the failed part and never resubmits part 1.
+        fixture.Provider.FailOnRequest = null;
+        var extractionsBeforeRetry = processor.Extractions.Count;
+        var retry = await fixture.SendAsync(recording.Id);
+        Assert(retry.Success, $"Retry should succeed: {retry.ErrorMessage}");
+        Assert(
+            fixture.Provider.Requests.Count == 3,
+            "Retry should submit only the two remaining parts.");
+        Assert(
+            processor.Extractions.Count == extractionsBeforeRetry + 2,
+            "Retry must not re-extract the completed part.");
+
+        var resumed = fixture.Provider.Requests.Skip(1).ToList();
+        Assert(
+            resumed.All(request => request.ChunkOffset.TotalSeconds > 0),
+            "Retry must resume at a later part, not restart from the beginning.");
+        Assert(
+            fixture.State.MeetingTranscripts.Count == 1,
+            "Retry should produce exactly one final revision.");
+    }
+
+    private static async Task LongAudioRestartResumesPersistedJob()
+    {
+        var processor = new SyntheticChunkAudioProcessor();
+        var fixture = new TranscriptionFixture(audioProcessor: processor);
+        MeetingRecording recording;
+        string stateDirectory;
+        try
+        {
+            recording = fixture.AddLongRecordedWav(LongRecordingSeconds);
+            stateDirectory = fixture.StateDirectory;
+            fixture.Provider.FailOnRequest = (index, _) => index == 1
+                ? new HttpRequestException("synthetic provider failure")
+                : null;
+            var failed = await fixture.SendAsync(recording.Id);
+            Assert(!failed.Success, "The seeded run should fail at part 2.");
+        }
+        finally
+        {
+            await fixture.Coordinator.DisposeAsync();
+        }
+
+        try
+        {
+            // Simulated application restart: a fresh store reads the same
+            // state directory and must resume the persisted job.
+            var reloaded = new AppStateStore(stateDirectory).Load();
+            var job = new MeetingTranscriptionJobService(reloaded).Find(recording.Id);
+            Assert(job is not null, "The job should survive restart.");
+            Assert(
+                job!.CompletedChunkCount == 1,
+                "The completed part should survive restart.");
+            Assert(
+                new MeetingTranscriptionJobService(reloaded)
+                    .NextIncompleteChunk(job)!.Index == 1,
+                "A restarted job resumes from the first incomplete part.");
+
+            var jobFolder = Path.Combine(
+                stateDirectory,
+                recording.RecordingFolderRelativePath.Replace('/', Path.DirectorySeparatorChar),
+                "transcription-job");
+            Assert(
+                File.Exists(Path.Combine(jobFolder, "part-000.json")),
+                "The persisted partial result file should survive restart.");
+            Assert(
+                !Directory.EnumerateFiles(jobFolder, "*.m4a").Any(),
+                "Extracted audio should not be left behind between parts.");
+        }
+        finally
+        {
+            DeleteTemporaryDirectory(stateDirectory);
+        }
+    }
+
+    private static async Task LongAudioRejectsOversizedExtraction()
+    {
+        // If an extracted file measures above the safe limit it must be
+        // rejected locally - never submitted for the provider to reject.
+        var processor = new SyntheticChunkAudioProcessor
+        {
+            OverrideMeasuredSeconds = 1485.48
+        };
+        await using var fixture = new TranscriptionFixture(audioProcessor: processor);
+        var recording = fixture.AddLongRecordedWav(LongRecordingSeconds);
+
+        var result = await fixture.SendAsync(recording.Id);
+        Assert(!result.Success, "An oversized part must fail the operation.");
+        Assert(
+            fixture.Provider.Requests.Count == 0,
+            "An oversized part must never reach the provider.");
+        Assert(
+            fixture.State.MeetingTranscripts.Count == 0,
+            "No transcript should be created from a rejected part.");
+        Assert(
+            recording.LastError == "Could not transcribe part 1 of 3.",
+            $"The rejection should be sanitized, was: {recording.LastError}");
+    }
+
+    private static async Task LongAudioProgressReportsParts()
+    {
+        var processor = new SyntheticChunkAudioProcessor();
+        var stages = new List<(string Stage, int Index, int Total)>();
+        await using var fixture = new TranscriptionFixture(audioProcessor: processor);
+        var recording = fixture.AddLongRecordedWav(LongRecordingSeconds);
+
+        // Capture the authoritative runtime operation on every state change.
+        fixture.Provider.BeforeTranscribe = () =>
+        {
+            var operation = fixture.Coordinator.ProcessingOperations
+                .FirstOrDefault(item => item.RecordingId == recording.Id.ToString("N"));
+            if (operation is not null)
+            {
+                stages.Add((operation.Stage, operation.StageIndex, operation.StageTotal));
+            }
+        };
+
+        var result = await fixture.SendAsync(recording.Id);
+        Assert(result.Success, $"Long-audio transcription should succeed: {result.ErrorMessage}");
+        Assert(stages.Count == 3, "Each part should report its own progress stage.");
+        for (var index = 0; index < stages.Count; index++)
+        {
+            Assert(
+                stages[index].Stage == "TranscribingPart",
+                "Parts should report the multi-part transcription stage.");
+            Assert(
+                stages[index].Index == index + 1 && stages[index].Total == 3,
+                $"Part {index + 1} should report '{index + 1} of 3'.");
+        }
+
+        Assert(
+            fixture.Coordinator.ProcessingOperations.Count == 0,
+            "The transient operation should not persist after completion.");
+    }
+
+    /// <summary>
+    /// Coordinator-level audio processor: it records the requested intervals
+    /// and fabricates a small artifact per part. Real extraction and
+    /// measurement are exercised by the production processor; this keeps the
+    /// orchestration test deterministic and fast.
+    /// </summary>
+    private sealed class SyntheticChunkAudioProcessor : IMeetingAudioProcessor
+    {
+        public sealed record Extraction(
+            MeetingAudioChunkExtractionRequest Request,
+            double MeasuredSeconds);
+
+        public List<Extraction> Extractions { get; } = new();
+
+        /// <summary>Forces an unsafe measured duration to prove local rejection.</summary>
+        public double? OverrideMeasuredSeconds { get; set; }
+
+        public Task<MeetingAudioProcessingResult> ProcessAsync(
+            MeetingAudioProcessingRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException(
+                "Long audio must use bounded chunk extraction.");
+
+        public Task<MeetingAudioChunkExtractionResult> ExtractChunkAsync(
+            MeetingAudioChunkExtractionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(request.DestinationFolder);
+            var path = Path.Combine(
+                request.DestinationFolder,
+                request.DestinationBaseName + ".m4a");
+            File.WriteAllText(path, $"synthetic-part-{request.StartSeconds:F3}");
+
+            var measured = OverrideMeasuredSeconds ??
+                Math.Min(
+                    request.EndSeconds - request.StartSeconds,
+                    request.MaximumDurationSeconds);
+            Extractions.Add(new Extraction(request, measured));
+            return Task.FromResult(new MeetingAudioChunkExtractionResult(
+                path,
+                measured,
+                new FileInfo(path).Length));
+        }
+    }
+
     private sealed class CapturingTranscriptionProvider : ITranscriptionProvider
     {
         private readonly Dictionary<Guid, string> _latestTranscripts = new();
@@ -3588,12 +3976,23 @@ internal static class Program
         public List<string> Hashes { get; } = new();
         public Action? BeforeTranscribe { get; set; }
 
+        /// <summary>
+        /// Injects a provider failure for a chosen request index, so a
+        /// mid-job failure can be exercised deterministically.
+        /// </summary>
+        public Func<int, TranscriptionProviderRequest, Exception?>? FailOnRequest { get; set; }
+
         public Task<TranscriptionProviderResponse> TranscribeAsync(
             TranscriptionProviderRequest request,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             BeforeTranscribe?.Invoke();
+            if (FailOnRequest?.Invoke(Requests.Count, request) is Exception failure)
+            {
+                throw failure;
+            }
+
             Requests.Add(request);
             var hash = ComputeFileSha256(request.AudioPath);
             Hashes.Add(hash);
@@ -4099,6 +4498,11 @@ internal static class Program
     {
         public Task<MeetingAudioProcessingResult> ProcessAsync(
             MeetingAudioProcessingRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("Not used by recording lifecycle tests.");
+
+        public Task<MeetingAudioChunkExtractionResult> ExtractChunkAsync(
+            MeetingAudioChunkExtractionRequest request,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("Not used by recording lifecycle tests.");
     }

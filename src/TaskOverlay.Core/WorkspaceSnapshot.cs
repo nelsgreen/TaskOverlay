@@ -270,7 +270,10 @@ public sealed record WorkspaceMeetingOperationSnapshot(
     string? RecordingId,
     string? TranscriptId,
     DateTimeOffset StartedAtUtc,
-    bool CancellationRequested);
+    bool CancellationRequested,
+    // 1-based part number and total for multi-part stages; both 0 otherwise.
+    int StageIndex = 0,
+    int StageTotal = 0);
 
 public sealed record WorkspaceMeetingSourceReferenceSnapshot(
     double? StartSeconds,

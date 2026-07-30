@@ -34,6 +34,10 @@ import { cn } from "@/lib/utils"
 import { deriveMeetingRecordingControlState } from "@/lib/meeting-recording-controls"
 import { resolveMeetingRecordingSelection } from "@/lib/meeting-recording-selection"
 import { proposedActionLabel } from "@/lib/meeting-proposed-action"
+import {
+  describeMeetingOperationShortStage,
+  describeMeetingOperationStage,
+} from "@/lib/meeting-operation-progress"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
@@ -671,7 +675,7 @@ function RecordingCard({
           <>
             <ActionButton
               label={operation?.kind === "Transcription"
-                ? operation.stage === "PreparingAudio" ? "Preparing audio..." : "Transcribing..."
+                ? describeMeetingOperationShortStage(operation)
                 : recording.hasTranscript ? "Retry transcription" : "Transcribe now"}
               icon={FileAudio}
               primary
@@ -691,7 +695,7 @@ function RecordingCard({
             />
             <ActionButton
               label={operation?.kind === "Analysis"
-                ? operation.stage === "StartingAnalysis" ? "Starting analysis..." : "Analyzing..."
+                ? describeMeetingOperationShortStage(operation)
                 : recording.hasAnalysis ? "Retry analysis" : "Analyze"}
               icon={Sparkles}
               disabled={readOnly || !canAnalyze}
@@ -1032,12 +1036,7 @@ function RecordingOperationStatus({ operation }: { operation: MeetingOperationSn
     return () => window.clearInterval(timer)
   }, [operation.id])
   const elapsed = formatElapsed(operation.startedAtUtc, now)
-  const label = operation.stage === "StartingTranscription" ? "Starting transcription..."
-    : operation.stage === "PreparingAudio" ? "Preparing audio..."
-    : operation.stage === "Transcribing" ? "Transcribing..."
-    : operation.stage === "StartingAnalysis" ? "Starting analysis..."
-    : operation.stage === "Cancelling" ? "Cancelling..."
-    : "Analyzing transcript..."
+  const label = describeMeetingOperationStage(operation)
   return (
     <div
       role="status"

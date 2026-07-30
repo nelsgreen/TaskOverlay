@@ -48,6 +48,7 @@ import type {
   WorkspaceMeetingAssistantCommand,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { describeMeetingOperationStage } from "@/lib/meeting-operation-progress"
 import { Button } from "@/components/ui/button"
 import {
   selectActiveMeetingTranscript,
@@ -1533,12 +1534,7 @@ function OperationStatus({
     return () => window.clearInterval(timer)
   }, [operation.id])
   const seconds = Math.max(0, Math.floor((elapsed - Date.parse(operation.startedAtUtc)) / 1_000))
-  const status = operation.stage === "StartingAnalysis" ? "Starting analysis..."
-    : operation.stage === "StartingTranscription" ? "Starting transcription..."
-    : operation.stage === "PreparingAudio" ? "Preparing audio..."
-    : operation.stage === "Transcribing" ? "Transcribing..."
-    : operation.stage === "Cancelling" ? "Cancelling..."
-    : "Analyzing transcript..."
+  const status = describeMeetingOperationStage(operation)
   return (
     <div
       className="space-y-1.5 rounded-md border border-primary/30 bg-primary/10 p-3 text-[11px]"

@@ -44,6 +44,206 @@ public sealed class MeetingAudioProcessor : IMeetingAudioProcessor
             cancellationToken);
     }
 
+    /// <summary>
+    /// Extracts one bounded interval into its own M4A artifact and measures
+    /// the result.
+    ///
+    /// The measurement is the point of this method. Planned timestamps are not
+    /// trusted: AAC encoders emit whole frames and pad the tail, and seeking
+    /// lands on a frame boundary, so the real duration drifts off the plan.
+    /// If a generated file still exceeds the safe limit it is re-extracted
+    /// shorter, and if that still fails it is rejected here - the provider is
+    /// never asked to enforce the limit.
+    /// </summary>
+    public async Task<MeetingAudioChunkExtractionResult> ExtractChunkAsync(
+        MeetingAudioChunkExtractionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (request.MaximumDurationSeconds <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request.MaximumDurationSeconds));
+        }
+
+        if (request.EndSeconds <= request.StartSeconds || request.StartSeconds < 0)
+        {
+            throw new InvalidDataException("The transcription chunk interval is invalid.");
+        }
+
+        var sourcePath = Path.GetFullPath(request.SourceAudioPath);
+        EnsureFinalizedAudioPath(sourcePath);
+        Directory.CreateDirectory(request.DestinationFolder);
+
+        var requestedDuration = Math.Min(
+            request.EndSeconds - request.StartSeconds,
+            request.MaximumDurationSeconds);
+        var tolerance = MeetingTranscriptionChunkPolicy.MeasurementToleranceSeconds;
+
+        string? lastPath = null;
+        var lastMeasured = 0d;
+        var lastBytes = 0L;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var path = await EncodeIntervalAsync(
+                sourcePath,
+                request.DestinationFolder,
+                request.DestinationBaseName,
+                TimeSpan.FromSeconds(request.StartSeconds),
+                TimeSpan.FromSeconds(requestedDuration),
+                request.Bitrate,
+                cancellationToken);
+            lastPath = path;
+            lastBytes = new FileInfo(path).Length;
+            lastMeasured = ReadDuration(path).TotalSeconds;
+
+            var withinDuration =
+                lastMeasured <= request.MaximumDurationSeconds + tolerance;
+            var withinBytes = request.MaximumBytes <= 0 || lastBytes <= request.MaximumBytes;
+            if (withinDuration && withinBytes)
+            {
+                return new MeetingAudioChunkExtractionResult(path, lastMeasured, lastBytes);
+            }
+
+            // Correct rather than reject on the first overshoot: shorten by the
+            // measured excess plus a margin, and by the byte overshoot ratio.
+            var corrected = requestedDuration;
+            if (!withinDuration)
+            {
+                corrected = Math.Min(
+                    corrected,
+                    requestedDuration - (lastMeasured - request.MaximumDurationSeconds) - 1.0);
+            }
+
+            if (!withinBytes)
+            {
+                corrected = Math.Min(
+                    corrected,
+                    requestedDuration * request.MaximumBytes / Math.Max(1, lastBytes) * 0.98);
+            }
+
+            TryDeleteFile(path);
+            lastPath = null;
+            if (corrected <= 0 || corrected >= requestedDuration)
+            {
+                break;
+            }
+
+            requestedDuration = corrected;
+        }
+
+        if (lastPath is not null)
+        {
+            TryDeleteFile(lastPath);
+        }
+
+        throw new InvalidDataException(
+            "A transcription part could not be extracted within the safe audio limit.");
+    }
+
+    /// <summary>
+    /// Encodes exactly one interval of the source into a fresh M4A file. The
+    /// source is opened read-only and never modified.
+    /// </summary>
+    private static async Task<string> EncodeIntervalAsync(
+        string sourcePath,
+        string destinationFolder,
+        string destinationBaseName,
+        TimeSpan start,
+        TimeSpan duration,
+        int bitrate,
+        CancellationToken cancellationToken)
+    {
+        using var reader = new AudioFileReader(sourcePath);
+        if (start >= reader.TotalTime)
+        {
+            throw new InvalidDataException(
+                "The transcription chunk starts past the end of the source audio.");
+        }
+
+        reader.CurrentTime = start;
+        ISampleProvider source = new OffsetSampleProvider(ToMono(reader))
+        {
+            Take = duration
+        };
+
+        await using var writer = new MediaFoundationAacTrackWriter();
+        await writer.StartAsync(
+            new RecordingTrackWriterStartRequest(
+                MeetingRecordingTrackKind.Mixed,
+                destinationFolder,
+                destinationBaseName,
+                PreferredChannels: 1,
+                PreferredBitrate: Math.Max(1, bitrate)),
+            cancellationToken);
+
+        if (source.WaveFormat.SampleRate != writer.InputFormat.SampleRate)
+        {
+            source = new WdlResamplingSampleProvider(source, writer.InputFormat.SampleRate);
+        }
+
+        // Frame budget is derived from the requested duration, so the encoder
+        // stops on time even when the source has more audio available.
+        var maximumFrames = (long)Math.Round(
+            duration.TotalSeconds * writer.InputFormat.SampleRate);
+        var buffer = new float[EncodingBufferSamples];
+        long framesWritten = 0;
+        while (framesWritten < maximumFrames)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var requested = (int)Math.Min(buffer.Length, maximumFrames - framesWritten);
+            var read = source.Read(buffer, 0, requested);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            var pcm = ConvertToPcm16(buffer, read);
+            await writer.WriteAsync(
+                new PcmAudioFrame(
+                    pcm,
+                    FramesToMediaTime(framesWritten, writer.InputFormat.SampleRate),
+                    FramesToMediaTime(read, writer.InputFormat.SampleRate)),
+                cancellationToken);
+            framesWritten += read;
+        }
+
+        var artifact = await writer.CompleteAsync(cancellationToken);
+        if (framesWritten == 0)
+        {
+            throw new InvalidDataException(
+                "The transcription chunk interval contains no decodable audio frames.");
+        }
+
+        if (artifact.ValidationState != MeetingRecordingValidationState.Valid ||
+            string.IsNullOrWhiteSpace(artifact.FileName))
+        {
+            throw new InvalidDataException(
+                artifact.Error.Length == 0
+                    ? "A transcription part could not be finalized."
+                    : artifact.Error);
+        }
+
+        return Path.Combine(destinationFolder, artifact.FileName);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An abandoned extraction artifact must never fail the job; the
+            // job-folder sweep removes it later.
+        }
+    }
+
     private static async Task<MeetingAudioProcessingResult> ProcessFinalizedMixedAsync(
         MeetingAudioProcessingRequest request,
         CancellationToken cancellationToken)

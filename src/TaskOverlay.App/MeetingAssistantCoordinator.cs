@@ -48,6 +48,16 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
     private readonly IMeetingAudioProcessor _audioProcessor;
     private readonly ITranscriptionProvider _transcriptionProvider;
     private readonly IMeetingAnalysisProvider _analysisProvider;
+    /// <summary>Managed subfolder holding a job's partial chunk results.</summary>
+    private const string TranscriptionJobFolderName = "transcription-job";
+
+    /// <summary>
+    /// Byte ceiling for one submitted part. Duration is the primary bound
+    /// (see <see cref="MeetingTranscriptionChunkPolicy"/>); this only keeps a
+    /// part inside the provider's upload size limit as well.
+    /// </summary>
+    private const long TranscriptionChunkMaximumBytes = 20L * 1024L * 1024L;
+
     private readonly SemaphoreSlim _recordingGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, ProcessingOperation> _processing = new();
     private readonly ConcurrentDictionary<Guid, byte> _transcriptRevisionSaves = new();
@@ -489,6 +499,27 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
                 sourceDuration,
                 recording.ProcessFromSeconds,
                 recording.ProcessUntilSeconds);
+
+            // A resolvable single mixed source is what makes bounded chunked
+            // extraction possible. Legacy multi-track WAV recordings have no
+            // mixed file yet and keep the historical path, where the 16 kHz
+            // mono byte budget is already well inside the duration limit.
+            if (mixedPath is not null)
+            {
+                var chunkedResult = await TryRunChunkedTranscriptionAsync(
+                    recording,
+                    service,
+                    folder,
+                    mixedPath,
+                    mixedBitrate,
+                    appliedRange,
+                    token);
+                if (chunkedResult is not null)
+                {
+                    return chunkedResult;
+                }
+            }
+
             var processing = await _audioProcessor.ProcessAsync(
                 new MeetingAudioProcessingRequest(
                     recording.Id,
@@ -653,6 +684,9 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // Cancellation is neutral: completed chunks stay persisted and
+            // reusable, and the original audio and any existing final
+            // transcript are untouched.
             service.MarkReadyAfterCancellation(recordingId);
             Persist(recording);
             return MeetingAssistantOperationResult.Cancel(
@@ -667,7 +701,10 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             HttpRequestException or
             OpenAiProviderException)
         {
-            service.MarkFailed(recordingId, SafeMessage(ex));
+            // Only a sanitized description is persisted or shown; the raw
+            // provider text stays in diagnostics through Report below.
+            var sanitized = DescribeTranscriptionFailure(recordingId, ex);
+            service.MarkFailed(recordingId, sanitized);
             Persist(recording);
             Report("MEET transcription failed.", ex);
             return MeetingAssistantOperationResult.Fail(recording.LastError);
@@ -1638,6 +1675,500 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         return _storage.ResolveFile(recording, validMixedTracks[0].FileName);
     }
 
+    /// <summary>
+    /// Runs the resumable chunked transcription path.
+    ///
+    /// Returns <c>null</c> when the selected range fits in a single safe
+    /// request, so short recordings and short ranges keep the existing
+    /// single-request behaviour untouched.
+    /// </summary>
+    private async Task<MeetingAssistantOperationResult?> TryRunChunkedTranscriptionAsync(
+        MeetingRecording recording,
+        MeetingRecordingService service,
+        string folder,
+        string mixedPath,
+        int mixedBitrate,
+        MeetingTranscriptAudioRange appliedRange,
+        CancellationToken token)
+    {
+        var recordingId = recording.Id;
+        var sourceFingerprint = await TranscriptionAudioDiagnostics.InspectAsync(
+            mixedPath,
+            token);
+        var measuredSourceSeconds = sourceFingerprint.Duration.TotalSeconds;
+        var rangeStart = recording.ProcessFromSeconds ?? 0;
+        var rangeEnd = recording.ProcessUntilSeconds ?? measuredSourceSeconds;
+        if (rangeEnd > measuredSourceSeconds)
+        {
+            rangeEnd = measuredSourceSeconds;
+        }
+
+        if (rangeEnd <= rangeStart)
+        {
+            throw new InvalidDataException("The selected audio processing range is invalid.");
+        }
+
+        var plan = MeetingTranscriptionChunkPlanner.Plan(rangeStart, rangeEnd);
+        if (plan.Count <= 1)
+        {
+            return null;
+        }
+
+        var jobService = new MeetingTranscriptionJobService(_state);
+        var fingerprint = MeetingTranscriptionJobFingerprint.Compute(
+            new MeetingTranscriptionJobInputs(
+                recordingId,
+                sourceFingerprint.FileName,
+                sourceFingerprint.Bytes,
+                sourceFingerprint.Sha256,
+                rangeStart,
+                rangeEnd,
+                _transcriptionProvider.Name,
+                _localSettings.MeetingAssistant.TranscriptionModel,
+                _localSettings.MeetingAssistant.Language.ToString(),
+                MeetingTranscriptionChunkPolicy.PolicyVersion,
+                MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                MeetingTranscriptionChunkPolicy.OverlapSeconds,
+                MeetingTranscriptionChunkPlanner.Describe(plan)));
+
+        var jobFolderRelative = Path.Combine(
+            recording.RecordingFolderRelativePath,
+            TranscriptionJobFolderName);
+        var job = jobService.Resolve(
+            recordingId,
+            recording.MeetId,
+            fingerprint,
+            rangeStart,
+            rangeEnd,
+            jobFolderRelative,
+            plan,
+            out var invalidated);
+        DeleteTranscriptionJobArtifacts(invalidated);
+
+        // Finalization is idempotent: a retry or restart after the final
+        // revision was persisted must never create a second revision.
+        if (job.IsFinalized &&
+            _state.MeetingTranscripts.Any(item => item.Id == job.FinalTranscriptId))
+        {
+            Report(
+                $"MEET transcription already finalized: recordingId={recordingId:N}; " +
+                $"transcriptId={job.FinalTranscriptId:N}.");
+            service.MarkTranscriptReadyIfProcessing(recordingId);
+            Persist(recording);
+            return new MeetingAssistantOperationResult(true, RecordingId: recordingId);
+        }
+
+        var jobFolder = _storage.ResolveFolder(jobFolderRelative);
+        Directory.CreateDirectory(jobFolder);
+        RemoveOrphanedExtractionArtifacts(job, jobFolder);
+        jobService.MarkRunning(job);
+
+        if (!service.MarkTranscribing(recordingId))
+        {
+            throw new InvalidOperationException(
+                "Recording could not enter transcription state.");
+        }
+
+        UpdateProcessingStage(recordingId, "PreparingParts", 0, plan.Count);
+        Report(
+            $"MEET chunked transcription planned: recordingId={recordingId:N}; " +
+            $"meetId={FormatOptionalId(recording.MeetId)}; parts={plan.Count}; " +
+            $"completed={job.CompletedChunkCount}; " +
+            $"rangeStartSeconds={rangeStart:F3}; rangeEndSeconds={rangeEnd:F3}; " +
+            $"sourceSha256={sourceFingerprint.Sha256}.");
+        Persist(recording);
+
+        while (jobService.NextIncompleteChunk(job) is { } chunk)
+        {
+            token.ThrowIfCancellationRequested();
+            UpdateProcessingStage(
+                recordingId,
+                "TranscribingPart",
+                chunk.Index + 1,
+                job.TotalChunkCount);
+
+            var extraction = await _audioProcessor.ExtractChunkAsync(
+                new MeetingAudioChunkExtractionRequest(
+                    mixedPath,
+                    jobFolder,
+                    string.Format(CultureInfo.InvariantCulture, "part-{0:D3}", chunk.Index),
+                    chunk.SourceStartSeconds,
+                    chunk.SourceEndSeconds,
+                    mixedBitrate,
+                    MeetingTranscriptionChunkPolicy.MaxChunkSeconds,
+                    TranscriptionChunkMaximumBytes),
+                token);
+
+            // Belt and braces: the extractor already validated and corrected,
+            // but nothing is submitted without a final measured check here.
+            if (extraction.MeasuredDurationSeconds >
+                MeetingTranscriptionChunkPolicy.MaxChunkSeconds +
+                MeetingTranscriptionChunkPolicy.MeasurementToleranceSeconds)
+            {
+                TryDeleteTranscriptionArtifact(extraction.ChunkPath);
+                throw new InvalidDataException(
+                    "A transcription part exceeded the safe audio limit and was not submitted.");
+            }
+
+            EnsureFileInsideFolder(extraction.ChunkPath, jobFolder);
+            Report(
+                $"MEET transcription part prepared: recordingId={recordingId:N}; " +
+                $"index={chunk.Index}; " +
+                $"plannedStartSeconds={chunk.SourceStartSeconds:F3}; " +
+                $"plannedEndSeconds={chunk.SourceEndSeconds:F3}; " +
+                $"measuredDurationSeconds={extraction.MeasuredDurationSeconds:F3}; " +
+                $"bytes={extraction.Bytes}.");
+
+            TranscriptionProviderResponse response;
+            try
+            {
+                response = await _transcriptionProvider.TranscribeAsync(
+                    new TranscriptionProviderRequest(
+                        extraction.ChunkPath,
+                        _localSettings.MeetingAssistant.TranscriptionModel,
+                        _localSettings.MeetingAssistant.Language,
+                        TimeSpan.FromSeconds(chunk.SourceStartSeconds),
+                        recordingId,
+                        recording.MeetId),
+                    token);
+            }
+            finally
+            {
+                // The extracted audio is disposable once submitted; the
+                // persisted partial result is what resume depends on.
+                TryDeleteTranscriptionArtifact(extraction.ChunkPath);
+            }
+
+            token.ThrowIfCancellationRequested();
+
+            // Timestamps are already on the original-recording timeline: the
+            // provider abstraction applies the request's ChunkOffset, which is
+            // this part's source start. They are only normalized and clamped
+            // here before being persisted, so a resumed job never has to
+            // re-derive offsets.
+            var payload = new MeetingTranscriptionChunkPayload
+            {
+                Index = chunk.Index,
+                SourceStartSeconds = chunk.SourceStartSeconds,
+                SourceEndSeconds = chunk.SourceEndSeconds,
+                MeasuredDurationSeconds = extraction.MeasuredDurationSeconds,
+                RawJson = response.RawJson,
+                Text = response.Text,
+                DetectedLanguage = response.DetectedLanguage,
+                Segments = response.Segments
+                    .Select(segment => new TranscriptSegment
+                    {
+                        Index = segment.Index,
+                        StartSeconds = Math.Max(chunk.SourceStartSeconds, segment.StartSeconds),
+                        EndSeconds = Math.Max(
+                            Math.Max(chunk.SourceStartSeconds, segment.StartSeconds),
+                            segment.EndSeconds),
+                        Text = segment.Text,
+                        SpeakerId = segment.SpeakerId,
+                        Speaker = segment.Speaker
+                    })
+                    .ToList()
+            };
+
+            var resultFileName = string.Format(
+                CultureInfo.InvariantCulture,
+                "part-{0:D3}.json",
+                chunk.Index);
+            _storage.WriteJsonAtomic(Path.Combine(jobFolder, resultFileName), payload);
+            jobService.MarkChunkCompleted(
+                job,
+                chunk.Index,
+                resultFileName,
+                extraction.MeasuredDurationSeconds,
+                payload.Segments.Count);
+
+            // Commit boundary per chunk: the partial result is durable before
+            // the next chunk starts, so a later failure cannot lose it.
+            Persist(recording);
+            Report(
+                $"MEET transcription part completed: recordingId={recordingId:N}; " +
+                $"index={chunk.Index}; segments={payload.Segments.Count}; " +
+                $"completed={job.CompletedChunkCount}/{job.TotalChunkCount}.");
+        }
+
+        token.ThrowIfCancellationRequested();
+        UpdateProcessingStage(recordingId, "MergingTranscript", job.TotalChunkCount, job.TotalChunkCount);
+        return FinalizeChunkedTranscription(
+            recording,
+            service,
+            jobService,
+            job,
+            jobFolder,
+            mixedPath,
+            appliedRange,
+            sourceFingerprint);
+    }
+
+    /// <summary>
+    /// Merges the persisted partial results into exactly one final transcript
+    /// revision. No AI request is involved: overlap removal, ordering, and
+    /// speaker stabilization are deterministic.
+    /// </summary>
+    private MeetingAssistantOperationResult FinalizeChunkedTranscription(
+        MeetingRecording recording,
+        MeetingRecordingService service,
+        MeetingTranscriptionJobService jobService,
+        MeetingTranscriptionJob job,
+        string jobFolder,
+        string mixedPath,
+        MeetingTranscriptAudioRange appliedRange,
+        TranscriptionAudioFingerprint sourceFingerprint)
+    {
+        var recordingId = recording.Id;
+        var payloads = new List<MeetingTranscriptionChunkPayload>();
+        foreach (var chunk in job.Chunks.OrderBy(item => item.Index))
+        {
+            var path = Path.Combine(jobFolder, chunk.ResultFileName);
+            var payload = ReadChunkPayload(path)
+                ?? throw new InvalidDataException(
+                    "A completed transcription part is missing and the job must be retried.");
+            payloads.Add(payload);
+        }
+
+        var merge = MeetingTranscriptChunkMerger.Merge(
+            payloads
+                .Select(payload => new MeetingTranscriptChunkInput(
+                    payload.Index,
+                    payload.SourceStartSeconds,
+                    payload.SourceEndSeconds,
+                    payload.Text,
+                    payload.DetectedLanguage,
+                    payload.Segments))
+                .ToList());
+
+        // Durable transcripts stay transcript-relative (C# adds
+        // SourceAudioStartSeconds back for playback and screenshot mapping),
+        // so a range that does not begin at zero is rebased here.
+        var segments = MeetingTranscriptChunkMerger.RebaseToTranscriptTimeline(
+            merge.Segments,
+            job.RangeStartSeconds);
+
+        var transcriptId = Guid.NewGuid();
+        var transcriptRevisionId = Guid.NewGuid();
+        var normalized = new NormalizedTranscript
+        {
+            TranscriptId = transcriptId,
+            RevisionId = transcriptRevisionId,
+            RecordingId = recordingId,
+            Provider = _transcriptionProvider.Name,
+            Model = _localSettings.MeetingAssistant.TranscriptionModel,
+            Language = merge.DetectedLanguage ?? string.Empty,
+            Text = merge.Text,
+            Segments = segments.ToList(),
+            HasTimestamps = segments.Count > 0,
+            GeneratedAtUtc = DateTimeOffset.UtcNow
+        };
+        TranscriptSpeakerMapping.EnsureStableSpeakers(normalized);
+
+        var layout = LayoutFor(recording);
+        var rawResponse = BuildRawJsonArray(payloads.Select(payload => payload.RawJson));
+        MeetingRecordingStorage.WriteTextAtomic(layout.TranscriptRawPath, rawResponse);
+        _storage.WriteJsonAtomic(layout.TranscriptPath, normalized);
+        MeetingRecordingStorage.WriteTextAtomic(
+            layout.TranscriptMarkdownPath,
+            BuildTranscriptMarkdown(normalized));
+        if (!service.MarkTranscriptReady(
+                recordingId,
+                Path.GetFileName(mixedPath),
+                Array.Empty<string>(),
+                Path.GetFileName(layout.TranscriptRawPath),
+                Path.GetFileName(layout.TranscriptPath),
+                Path.GetFileName(layout.TranscriptMarkdownPath)))
+        {
+            throw new InvalidOperationException(
+                "Transcript could not be associated with its recording.");
+        }
+
+        if (recording.MeetId is Guid transcriptMeetId)
+        {
+            var sourceLayout = _sourceStorage.CreateTranscriptLayout(
+                transcriptMeetId,
+                transcriptId,
+                ".json");
+            MeetingRecordingStorage.WriteTextAtomic(sourceLayout.OriginalPath, rawResponse);
+            _sourceStorage.WriteTranscript(sourceLayout, normalized);
+            _state.MeetingTranscripts.Add(new MeetingTranscript
+            {
+                Id = transcriptId,
+                MeetId = transcriptMeetId,
+                RecordingId = recordingId,
+                Origin = MeetingTranscriptOrigin.Generated,
+                Format = MeetingTranscriptFormat.NormalizedJson,
+                Provider = _transcriptionProvider.Name,
+                Model = _localSettings.MeetingAssistant.TranscriptionModel,
+                SourceLabel = "TaskOverlay",
+                StorageFolderRelativePath = sourceLayout.RelativeFolder,
+                OriginalArtifactFile = Path.GetFileName(sourceLayout.OriginalPath),
+                NormalizedArtifactFile = Path.GetFileName(sourceLayout.NormalizedPath),
+                MarkdownArtifactFile = Path.GetFileName(sourceLayout.MarkdownPath),
+                HasTimestamps = normalized.HasTimestamps,
+                HasSpeakerLabels = normalized.Speakers.Count > 0,
+                RevisionId = transcriptRevisionId,
+                SourceAudioStartSeconds = recording.ProcessFromSeconds is null
+                    ? null
+                    : appliedRange.SourceStartSeconds,
+                SourceAudioEndSeconds = recording.ProcessUntilSeconds is null
+                    ? null
+                    : appliedRange.SourceEndSeconds,
+                Speakers = normalized.Speakers.Select(CloneSpeaker).ToList(),
+                CreatedAtUtc = normalized.GeneratedAtUtc,
+                UpdatedAtUtc = normalized.GeneratedAtUtc
+            });
+            var owner = _state.Meetings.First(item => item.Id == transcriptMeetId);
+            owner.ActiveTranscriptId = transcriptId;
+            owner.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        // Bind the job to its final revision and persist. Only after that
+        // durable write are the partial results safe to discard - if this
+        // throws, the completed chunks remain reusable on the next attempt.
+        jobService.MarkFinalized(job, transcriptId, transcriptRevisionId);
+        Persist(recording);
+
+        DeleteTranscriptionJobArtifacts(new[]
+        {
+            new MeetingTranscriptionJobCleanup(recordingId, job.JobFolderRelativePath)
+        });
+        Report(
+            $"MEET chunked transcription completed: recordingId={recordingId:N}; " +
+            $"meetId={FormatOptionalId(recording.MeetId)}; parts={job.TotalChunkCount}; " +
+            $"segments={segments.Count}; " +
+            $"removedOverlapDuplicates={merge.RemovedOverlapDuplicateCount}; " +
+            $"mappedSpeakers={merge.MappedSpeakerCount}; " +
+            $"unresolvedSpeakers={merge.UnresolvedSpeakerCount}; " +
+            $"sourceSha256={sourceFingerprint.Sha256}; " +
+            $"transcriptId={transcriptId:N}.");
+        return new MeetingAssistantOperationResult(true, RecordingId: recordingId);
+    }
+
+    private MeetingTranscriptionChunkPayload? ReadChunkPayload(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<MeetingTranscriptionChunkPayload>(
+                File.ReadAllText(path),
+                _jsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string BuildRawJsonArray(IEnumerable<string> rawJsonDocuments)
+    {
+        var builder = new StringBuilder("[\n");
+        var first = true;
+        foreach (var raw in rawJsonDocuments)
+        {
+            if (!first)
+            {
+                builder.Append(",\n");
+            }
+
+            first = false;
+            try
+            {
+                using var document = JsonDocument.Parse(raw);
+                builder.Append(JsonSerializer.Serialize(document.RootElement));
+            }
+            catch (JsonException)
+            {
+                // A malformed provider payload must not break the merged
+                // artifact; record it as JSON null instead.
+                builder.Append("null");
+            }
+        }
+
+        builder.Append("\n]");
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Removes extracted audio left behind by an interrupted run. Persisted
+    /// partial results are deliberately not touched.
+    /// </summary>
+    private void RemoveOrphanedExtractionArtifacts(
+        MeetingTranscriptionJob job,
+        string jobFolder)
+    {
+        if (!Directory.Exists(jobFolder))
+        {
+            return;
+        }
+
+        var keep = job.Chunks
+            .Where(chunk => chunk.IsCompleted && !string.IsNullOrWhiteSpace(chunk.ResultFileName))
+            .Select(chunk => chunk.ResultFileName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.EnumerateFiles(
+                     jobFolder,
+                     "*",
+                     SearchOption.TopDirectoryOnly))
+        {
+            if (keep.Contains(Path.GetFileName(path)))
+            {
+                continue;
+            }
+
+            TryDeleteTranscriptionArtifact(path);
+        }
+    }
+
+    private void DeleteTranscriptionJobArtifacts(
+        IReadOnlyList<MeetingTranscriptionJobCleanup> cleanup)
+    {
+        foreach (var item in cleanup)
+        {
+            if (string.IsNullOrWhiteSpace(item.JobFolderRelativePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                var folder = _storage.ResolveFolder(item.JobFolderRelativePath);
+                if (Directory.Exists(folder))
+                {
+                    Directory.Delete(folder, recursive: true);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                       InvalidDataException)
+            {
+                Report(
+                    $"Transcription job artifacts could not be removed: " +
+                    $"recordingId={item.RecordingId:N}.",
+                    ex);
+            }
+        }
+    }
+
+    private void TryDeleteTranscriptionArtifact(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Report("A transcription artifact could not be removed.", ex);
+        }
+    }
+
     private static void ClearPreviousTranscriptionChunks(
         MeetingRecording recording,
         string folder)
@@ -1983,11 +2514,20 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         _storage.WriteJsonAtomic(LayoutFor(recording).AnalysisPath, new { analysis });
     }
 
-    private void UpdateProcessingStage(Guid operationId, string stage)
+    private void UpdateProcessingStage(Guid operationId, string stage) =>
+        UpdateProcessingStage(operationId, stage, 0, 0);
+
+    private void UpdateProcessingStage(
+        Guid operationId,
+        string stage,
+        int stageIndex,
+        int stageTotal)
     {
         if (_processing.TryGetValue(operationId, out var operation))
         {
             operation.Stage = stage;
+            operation.StageIndex = stageIndex;
+            operation.StageTotal = stageTotal;
             _stateChanged();
         }
     }
@@ -2025,6 +2565,13 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         public Guid Id { get; }
         public string Kind { get; }
         public string Stage { get; set; }
+
+        /// <summary>1-based part number for multi-part stages; 0 when not applicable.</summary>
+        public int StageIndex { get; set; }
+
+        /// <summary>Total part count for multi-part stages; 0 when not applicable.</summary>
+        public int StageTotal { get; set; }
+
         public Guid? MeetingId { get; }
         public Guid? RecordingId { get; }
         public Guid? TranscriptId { get; }
@@ -2062,7 +2609,9 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
             RecordingId?.ToString("N"),
             TranscriptId?.ToString("N"),
             StartedAtUtc,
-            CancellationRequested);
+            CancellationRequested,
+            StageIndex,
+            StageTotal);
     }
 
     private static NormalizedTranscript ComposeTranscript(
@@ -2160,6 +2709,27 @@ public sealed class MeetingAssistantCoordinator : IAsyncDisposable
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Produces the sanitized failure text and records it on the job so Retry
+    /// can resume. Completed chunks are intentionally preserved.
+    /// </summary>
+    private string DescribeTranscriptionFailure(Guid recordingId, Exception exception)
+    {
+        var jobService = new MeetingTranscriptionJobService(_state);
+        var job = jobService.Find(recordingId);
+        if (job is null || job.TotalChunkCount <= 1 || job.IsFinalized)
+        {
+            return SafeMessage(exception);
+        }
+
+        var failing = jobService.NextIncompleteChunk(job);
+        var message = MeetingTranscriptionFailureMessage.ForPart(
+            (failing?.Index ?? job.TotalChunkCount - 1) + 1,
+            job.TotalChunkCount);
+        jobService.MarkFailed(job, message);
+        return message;
     }
 
     private static string SafeMessage(Exception exception) =>
