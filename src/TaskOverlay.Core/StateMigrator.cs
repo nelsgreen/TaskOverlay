@@ -754,9 +754,11 @@ public static class StateMigrator
                 .Select(track => track.DurationSeconds)
                 .DefaultIfEmpty(0)
                 .Max();
-            if (recording.SourceKind != MeetingRecordingSourceKind.Imported &&
-                (recording.ProcessFromSeconds.HasValue || recording.ProcessUntilSeconds.HasValue) ||
-                recording.ProcessFromSeconds is < 0 ||
+            // Bounded transcription ranges are no longer imported-audio-only
+            // (any completed recording can be re-transcribed with a
+            // narrower range) - only the duration/ordering bounds below
+            // still make a persisted range invalid and eligible for repair.
+            if (recording.ProcessFromSeconds is < 0 ||
                 recording.ProcessUntilSeconds is <= 0 ||
                 recording.ProcessFromSeconds is double from &&
                 recording.ProcessUntilSeconds is double until && until <= from ||

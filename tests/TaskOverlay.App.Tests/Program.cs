@@ -54,6 +54,7 @@ internal static class Program
             ("compact transcription rejects missing mixed track", CompactTranscriptionRejectsMissingMixedTrack),
             ("oversized compact chunks derive from mixed track", OversizedCompactChunksDeriveFromMixedTrack),
             ("imported audio is managed and range bounded", ImportedAudioIsManagedAndRangeBounded),
+            ("recorded audio range recovers after failed transcription", RecordedAudioRangeRecoversAfterFailedTranscription),
             ("meeting source commands persist and refresh", MeetingSourceCommandsPersistAndRefresh),
             ("snapshot failure preserves successful meeting create result", SnapshotFailurePreservesSuccessfulMeetingCreateResult),
             ("transcript recording links persist and repair", TranscriptRecordingLinksPersistAndRepair),
@@ -1509,6 +1510,81 @@ internal static class Program
         {
             DeleteTemporaryDirectory(importDirectory);
         }
+    }
+
+    private static async Task RecordedAudioRangeRecoversAfterFailedTranscription()
+    {
+        // Regression: bounded transcription ranges were restricted to
+        // Imported audio only (SetImportedAudioRange + StateMigrator repair
+        // both rejected/stripped a range on any other SourceKind). A normal
+        // local recording whose full audio the provider rejects for
+        // exceeding its length limit had no way to retry with a shorter
+        // range. This test uses a ManualMeet-sourced recording (the same
+        // kind AddRecordedWav always creates) to prove the fix.
+        await using var fixture = new TranscriptionFixture();
+        var recording = fixture.AddRecordedWav("recorded-audio", 440);
+        Assert(recording.SourceKind == MeetingRecordingSourceKind.ManualMeet,
+            "This scenario is about a normal recorded MEET, not imported audio.");
+
+        // Simulate the provider rejecting the full-length audio (e.g. an
+        // OpenAiProviderException for exceeding the model's maximum
+        // duration) - the same terminal state MeetingAssistantCoordinator
+        // reaches via MeetingRecordingService.MarkFailed.
+        new MeetingRecordingService(fixture.State).MarkFailed(
+            recording.Id,
+            "Audio exceeds the model's maximum duration.");
+        fixture.Store.Save(fixture.State);
+        Assert(recording.State == MeetingRecordingState.Failed,
+            "The recording must be in the Failed state, mirroring the reported bug.");
+
+        var duration = recording.Tracks
+            .Single(track => track.Kind == MeetingRecordingTrackKind.Mixed)
+            .DurationSeconds;
+        Assert(duration > 0, "The fixture recording should have a real, positive duration.");
+
+        var invalidRange = await fixture.SendCommandAsync(
+            "setImportedAudioRange",
+            new
+            {
+                recordingId = recording.Id.ToString("N"),
+                fromSeconds = 0.0,
+                untilSeconds = duration + 5
+            });
+        Assert(!invalidRange.Success,
+            "A range exceeding the recording's real duration must still be rejected, imported or not.");
+
+        var range = await fixture.SendCommandAsync(
+            "setImportedAudioRange",
+            new
+            {
+                recordingId = recording.Id.ToString("N"),
+                fromSeconds = 0.0,
+                untilSeconds = duration / 2
+            });
+        Assert(range.Success &&
+               recording.ProcessFromSeconds == 0.0 &&
+               recording.ProcessUntilSeconds is double savedUntil &&
+               Math.Abs(savedUntil - duration / 2) < 0.001,
+            "A valid shorter range must now be accepted for a failed, non-imported recording, not just Imported.");
+
+        // RepairCurrentState returns whether it changed anything - a
+        // fully valid state (which this now is) legitimately returns
+        // false. The invariant under test is that the range survives,
+        // not that repair reports a change.
+        StateMigrator.RepairCurrentState(fixture.State);
+        Assert(recording.ProcessFromSeconds == 0.0 &&
+               recording.ProcessUntilSeconds is double repairedUntil &&
+               Math.Abs(repairedUntil - duration / 2) < 0.001,
+            "The saved range for non-imported audio must survive state repair, not be silently cleared back to null.");
+
+        var retry = await fixture.SendAsync(recording.Id);
+        Assert(retry.Success &&
+               recording.State is MeetingRecordingState.TranscriptReady or MeetingRecordingState.Ready &&
+               fixture.Processor.Requests.Count > 0 &&
+               fixture.Processor.Requests[^1].ProcessFromSeconds == 0.0 &&
+               fixture.Processor.Requests[^1].ProcessUntilSeconds is double retryUntil &&
+               Math.Abs(retryUntil - duration / 2) < 0.001,
+            "Retry (Transcribe now) must transcribe only the selected range, not the full rejected recording, and clear the Failed state.");
     }
 
     private static async Task MeetingSourceCommandsPersistAndRefresh()

@@ -415,9 +415,21 @@ function LinkedItemRow({
   )
 }
 
+/**
+ * Shared geometry for every small badge that can sit on the same context row
+ * (source type, item type, status) - height, radius, padding, font size/
+ * weight, and baseline all match exactly; only the semantic color (each
+ * caller's own bg/border/text) differs. Fixes badges that previously had
+ * their own slightly different radius/padding/font (including one that used
+ * font-mono at a smaller size), which read as unrelated controls rather than
+ * peers on the same row.
+ */
+const contextBadgeClass =
+  "mt-0.5 inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+
 function SourceBadge({ type }: { type: ContextSourceType }) {
   return (
-    <span className="mt-0.5 inline-flex shrink-0 items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+    <span className={cn(contextBadgeClass, "border-border bg-muted text-muted-foreground")}>
       {sourceTypeMeta[type].short}
     </span>
   )
@@ -426,12 +438,7 @@ function SourceBadge({ type }: { type: ContextSourceType }) {
 function ItemBadge({ type }: { type: ContextItemType }) {
   const meta = contextTypeMeta[type]
   return (
-    <span
-      className={cn(
-        "mt-0.5 inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
-        meta.bg, meta.border, meta.text,
-      )}
-    >
+    <span className={cn(contextBadgeClass, meta.bg, meta.border, meta.text)}>
       {meta.label}
     </span>
   )
@@ -442,7 +449,7 @@ function StatusLabel({ status }: { status: ContextItemStatus }) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded border px-1 py-0.5 font-mono text-[9px] font-medium",
+        contextBadgeClass,
         meta.bg, meta.border, meta.text,
         status === "deprecated" && "line-through",
       )}
